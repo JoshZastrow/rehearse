@@ -8,6 +8,8 @@ version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
     "anthropic>=0.40",
+    "chz>=0.3",
+    "pydantic>=2.0",
 ]
 
 [project.optional-dependencies]
