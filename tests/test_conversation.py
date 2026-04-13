@@ -249,7 +249,9 @@ def test_tool_executor_error_becomes_result():
 
     assert summary.iterations == 2
     assert summary.tool_calls[0].is_error is True
-    assert "parse error" in summary.tool_calls[0].output_text
+    # Exception type is exposed, but not the raw message (security: don't leak impl details to LLM)
+    assert "ValueError" in summary.tool_calls[0].output_text
+    assert "parse error" not in summary.tool_calls[0].output_text
 
 
 # ---------------------------------------------------------------------------
@@ -378,7 +380,7 @@ def test_format_tool_call_and_result():
 
     # Find the assistant message -- should have a tool_use block
     assistant_msgs = [m for m in api_msgs if m["role"] == "assistant"]
-    assert len(assistant_msgs) >= 1
+    assert len(assistant_msgs) == 1
     assistant_content = assistant_msgs[0]["content"]
     assert any(
         isinstance(b, dict) and b.get("type") == "tool_use"
