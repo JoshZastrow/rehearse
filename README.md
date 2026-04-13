@@ -102,12 +102,13 @@ pytest tests/test_api_litellm.py::test_litellm_client_init
 ```
 
 Tests cover:
-- **Layer 0 (session.py):** Event-sourced session model — 72 tests (49 pytest + 23 doctests)
-- **Layer 1 (storage.py):** Disk persistence, rotation, archival — 34 tests (16 pytest + 18 doctests)
-- **Layer 2 (config.py):** Layered configuration — 21 tests
-- **Layer 3 (api.py):** LLM provider integration — 28 tests
-- **Layer 4 (conversation.py):** Conversation engine, tool loop, message formatting — 17 tests
-- **Total:** 161 collected (155 passing, 6 skipped)
+- **Layer 0 (session.py):** Event-sourced session model — 71 tests
+- **Layer 1 (storage.py):** Disk persistence, rotation, archival — 16 tests
+- **Layer 2 (config.py):** Layered configuration — 14 tests
+- **Layer 3 (api.py):** LLM provider integration — 23 tests
+- **Layer 4 (conversation.py):** Conversation runtime and turn loop — 17 tests
+- **Layer 5 (hooks.py):** Pre/post tool hook runner — 27 tests
+- **Total:** 178 tests
 
 ### Type check
 
@@ -214,13 +215,14 @@ Built in layers — each layer depends only on the layer below it.
 | v1.0 | 0 | `realtalk/session.py` | ✓ Done — event-sourced model + JSONL serialization (71 tests) |
 | v1.1 | 1 | `realtalk/storage.py` | ✓ Done — disk persistence, rotation, archival (16 tests) |
 | v1.1 | 2 | `realtalk/config.py` | ✓ Done — layered config via `chz` + pydantic (14 tests) |
-| v1.3 | 3 | `realtalk/api.py` | ✓ Done — multi-provider LLM via litellm.ai (23 tests) |
-| v1.4 | 4 | `realtalk/conversation.py` | ✓ Done — conversation engine, tool loop, message formatting (17 tests) |
-| v0.5 | 5 | `realtalk/game.py` | Planned — scene, role, turn mechanics |
+| v1.3 | 3 | `realtalk/api.py` | ✓ Done — multi-provider LLM via litellm.ai (26 tests) |
+| v1.4 | 4 | `realtalk/conversation.py` | ✓ Done — conversation runtime, turn loop, tool execution (17 tests) |
+| v1.5 | 5 | `realtalk/hooks.py` | ✓ Done — pre/post tool hook runner (27 tests) |
+| — | 5 | `realtalk/tools.py` | Planned — tool registry, game tool handlers |
 | v0.6 | 6 | `realtalk/tui.py` | Planned — terminal UI |
 | v0.7 | 7 | `realtalk/cli.py` | Skeleton — entry point via `chz.nested_entrypoint` |
 
-**Current status:** Layers 0–4 complete (event sourcing, persistence, config, multi-provider LLM, conversation engine).
+**Current status:** Layers 0–5 complete (event sourcing, persistence, config, multi-provider LLM, conversation runtime, hook runner).
 
 See `docs/spec/` for detailed specs and acceptance criteria per layer.
 
@@ -232,5 +234,6 @@ See `docs/spec/` for detailed specs and acceptance criteria per layer.
 - [`docs/spec/v1.0.md`](docs/spec/v1.0.md) — Build spec: session data types (Layer 0)
 - [`docs/spec/v1.1.md`](docs/spec/v1.1.md) — Build spec: storage + configuration (Layers 1–2)
 - [`docs/spec/v1.3.md`](docs/spec/v1.3.md) — Build spec: multi-provider LLM integration (Layer 3)
-- [`docs/spec/v1.4.md`](docs/spec/v1.4.md) — Build spec: conversation engine (Layer 4)
+- [`docs/spec/v1.4.md`](docs/spec/v1.4.md) — Build spec: conversation runtime (Layer 4)
+- [`docs/spec/v1.5.md`](docs/spec/v1.5.md) — Build spec: hook runner (Layer 5)
 - [`docs/design/v1.2-design.md`](docs/design/v1.2-design.md) — Engineering review findings
