@@ -302,56 +302,6 @@ def test_api_client_protocol_litellm():
 
 
 # ---------------------------------------------------------------------------
-# FastAPI server tests (skeleton)
-# ---------------------------------------------------------------------------
-
-
-def test_api_server_imports():
-    """api_server.py imports without errors."""
-    try:
-        from realtalk import api_server  # noqa: F401
-    except ImportError as e:
-        if "fastapi" in str(e).lower():
-            # FastAPI optional for v1.3
-            pytest.skip("FastAPI not installed (optional for v1.3)")
-        else:
-            raise
-
-
-def test_api_server_health_endpoint():
-    """GET /health returns 200 with status 'ok'."""
-    pytest.importorskip("fastapi")
-    from fastapi.testclient import TestClient
-
-    from realtalk.api_server import app
-
-    client = TestClient(app)
-    response = client.get("/health")
-    assert response.status_code == 200
-    assert response.json()["status"] == "ok"
-
-
-def test_api_server_complete_endpoint_not_implemented():
-    """/api/complete endpoint raises NotImplementedError (skeleton)."""
-    pytest.importorskip("fastapi")
-    from fastapi.testclient import TestClient
-
-    from realtalk.api_server import app
-
-    client = TestClient(app)
-    request_body = {
-        "system_prompt": ["You are helpful."],
-        "messages": [{"role": "user", "content": "Hi"}],
-        "tools": [],
-        "model": "claude-3-5-sonnet-20241022",
-    }
-    response = client.post("/api/complete", json=request_body)
-    # Should return 500 with NotImplementedError message
-    assert response.status_code == 500
-    assert "NotImplementedError" in response.json()["detail"]
-
-
-# ---------------------------------------------------------------------------
 # Temperature and max_tokens parameter tests
 # ---------------------------------------------------------------------------
 

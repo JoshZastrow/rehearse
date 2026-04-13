@@ -99,8 +99,8 @@ Tests cover:
 - **Layer 0 (session.py):** Event-sourced session model — 71 tests
 - **Layer 1 (storage.py):** Disk persistence, rotation, archival — 16 tests
 - **Layer 2 (config.py):** Layered configuration — 14 tests
-- **Layer 3 (api.py):** LLM provider integration — 26 tests
-- **Total:** 105+ tests
+- **Layer 3 (api.py):** LLM provider integration — 23 tests
+- **Total:** 105 tests
 
 ### Type check
 
@@ -182,27 +182,6 @@ for event in client.stream(request):
     print(event)
 ```
 
-### FastAPI Server (Optional, v2.0+)
-
-The server skeleton is provided in `realtalk/api_server.py` for future distributed deployment:
-
-```bash
-# Install FastAPI (optional for v1.3)
-pip install fastapi uvicorn
-
-# Run server (skeleton only — endpoints not yet implemented)
-python -m realtalk.api_server
-# or
-uvicorn realtalk.api_server:app --reload
-```
-
-Current endpoints:
-- `GET /health` — Returns `{"status": "ok"}`
-- `POST /api/complete` — Raises NotImplementedError (deferred to v2.0)
-
-Full SSE streaming endpoint implementation planned for v2.0 with auth, rate limiting,
-and caching.
-
 ### Supported Providers
 
 litellm.ai auto-detects the provider from the model name:
@@ -229,7 +208,6 @@ Built in layers — each layer depends only on the layer below it.
 | v1.1 | 1 | `realtalk/storage.py` | ✓ Done — disk persistence, rotation, archival (16 tests) |
 | v1.1 | 2 | `realtalk/config.py` | ✓ Done — layered config via `chz` + pydantic (14 tests) |
 | v1.3 | 3 | `realtalk/api.py` | ✓ Done — multi-provider LLM via litellm.ai (26 tests) |
-| — | 3.5 | `realtalk/api_server.py` | Skeleton — FastAPI server for v2.0+ |
 | v0.4 | 4 | `realtalk/conversation.py` | Planned — game loop engine |
 | v0.5 | 5 | `realtalk/game.py` | Planned — scene, role, turn mechanics |
 | v0.6 | 6 | `realtalk/tui.py` | Planned — terminal UI |

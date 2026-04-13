@@ -135,14 +135,14 @@ class LiteLLMClient:
         api_key: Optional explicit API key (overrides env)
 
     Example:
-        >>> client = LiteLLMClient(model="claude-3-5-sonnet-20241022")
-        >>> request = ApiRequest(
+        >>> client = LiteLLMClient(model="claude-3-5-sonnet-20241022")  # doctest: +SKIP
+        >>> request = ApiRequest(  # doctest: +SKIP
         ...     system_prompt=["You are helpful."],
         ...     messages=[{"role": "user", "content": "Hello"}],
         ...     tools=[],
         ...     model="claude-3-5-sonnet-20241022"
         ... )
-        >>> events = list(client.stream(request))
+        >>> events = list(client.stream(request))  # doctest: +SKIP
     """
 
     def __init__(
