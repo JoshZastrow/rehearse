@@ -46,8 +46,8 @@ def main(config: RuntimeConfig) -> None:
     # Create LLM client
     client = LiteLLMClient(
         model=config.game.model,
-        temperature=getattr(config.game, "temperature", 1.0),
-        max_tokens=getattr(config.game, "max_tokens", 8096),
+        temperature=config.game.temperature,
+        max_tokens=config.game.max_tokens,
     )
 
     # Initialize game session (placeholder for Layer 4 game loop)

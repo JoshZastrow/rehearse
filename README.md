@@ -40,8 +40,15 @@ realtalk
 ### With options
 
 ```bash
+# Display and logging
 realtalk display.no_color=true       # no color output (accessibility)
 realtalk display.debug=true          # show LLM prompt structure for debugging
+
+# LLM tuning
+realtalk game.temperature=0.7        # lower = more deterministic (default 1.0)
+realtalk game.max_tokens=4096        # max output length (default 8096)
+
+# Data and providers
 realtalk contributor.enabled=true    # opt-in to RLHF data collection
 realtalk game.model=gpt-4            # use OpenAI GPT-4 instead of Claude
 realtalk game.model=ollama/llama2    # use local Ollama model
