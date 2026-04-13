@@ -107,7 +107,8 @@ Tests cover:
 - **Layer 1 (storage.py):** Disk persistence, rotation, archival — 16 tests
 - **Layer 2 (config.py):** Layered configuration — 14 tests
 - **Layer 3 (api.py):** LLM provider integration — 23 tests
-- **Total:** 105 tests
+- **Layer 5 (tools):** Permissions, hooks, game tools, registry — 38 tests
+- **Total:** 174 tests
 
 ### Type check
 
@@ -215,12 +216,12 @@ Built in layers — each layer depends only on the layer below it.
 | v1.1 | 1 | `realtalk/storage.py` | ✓ Done — disk persistence, rotation, archival (16 tests) |
 | v1.1 | 2 | `realtalk/config.py` | ✓ Done — layered config via `chz` + pydantic (14 tests) |
 | v1.3 | 3 | `realtalk/api.py` | ✓ Done — multi-provider LLM via litellm.ai (23 tests) |
-| v0.4 | 4 | `realtalk/conversation.py` | Planned — game loop engine |
-| v0.5 | 5 | `realtalk/game.py` | Planned — scene, role, turn mechanics |
-| v0.6 | 6 | `realtalk/tui.py` | Planned — terminal UI |
-| v0.7 | 7 | `realtalk/cli.py` | Skeleton — entry point via `chz.nested_entrypoint` |
+| v1.4 | 4 | `realtalk/conversation.py` | Specced — game loop engine |
+| v1.6 | 5 | `realtalk/permissions.py`, `hooks.py`, `game_tools.py`, `tools.py` | ✓ Done — tool system + game mechanics (38 tests) |
+| — | 6 | `realtalk/prompt.py`, `compact.py` | Planned — system prompt + compaction |
+| — | 8 | `realtalk/cli.py` | Skeleton — entry point via `chz.nested_entrypoint` |
 
-**Current status:** Layers 0–3 complete (event sourcing, persistence, config, multi-provider LLM).
+**Current status:** Layers 0–3 and 5 complete (event sourcing, persistence, config, LLM, tools).
 
 See `docs/spec/` for detailed specs and acceptance criteria per layer.
 
@@ -232,4 +233,6 @@ See `docs/spec/` for detailed specs and acceptance criteria per layer.
 - [`docs/spec/v1.0.md`](docs/spec/v1.0.md) — Build spec: session data types (Layer 0)
 - [`docs/spec/v1.1.md`](docs/spec/v1.1.md) — Build spec: storage + configuration (Layers 1–2)
 - [`docs/spec/v1.3.md`](docs/spec/v1.3.md) — Build spec: multi-provider LLM integration (Layer 3)
+- [`docs/spec/v1.4.md`](docs/spec/v1.4.md) — Build spec: conversation runtime (Layer 4)
+- [`docs/spec/v1.6.md`](docs/spec/v1.6.md) — Build spec: tool system + game mechanics (Layer 5)
 - [`docs/design/v1.2-design.md`](docs/design/v1.2-design.md) — Engineering review findings
