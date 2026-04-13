@@ -70,8 +70,9 @@ class ApiRequest:
     system_prompt: list[str]
     messages: list[dict[str, object]]  # Anthropic message dicts
     tools: list[dict[str, object]]     # Anthropic tool definition dicts
-    model: str = "claude-opus-4-6"
+    model: str = "claude-haiku-4-5-20251001"
     max_tokens: int = 8096
+    temperature: float = 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -118,7 +119,43 @@ class MockClient:
 
 
 # ---------------------------------------------------------------------------
-# AnthropicClient — production implementation
+# ScriptedClient — multi-turn test double
+# ---------------------------------------------------------------------------
+
+
+class ScriptedClient:
+    """Scripted event sequences for multi-turn tool loop tests.
+
+    One event sequence per stream() call. Each call yields a new sequence.
+    Use for testing iterative tool use (agent asks for a tool, gets result, asks again).
+
+    >>> client = ScriptedClient([
+    ...     [TextDelta("a"), ToolUse("t1", "tool1", "{}"), MessageStop()],
+    ...     [TextDelta("b"), MessageStop()],
+    ... ])
+    >>> request = ApiRequest(system_prompt=[], messages=[], tools=[])
+    >>> events1 = list(client.stream(request))
+    >>> len(events1)
+    3
+    >>> events2 = list(client.stream(request))
+    >>> len(events2)
+    2
+    """
+
+    def __init__(self, sequences: Sequence[Sequence[AssistantEvent]]) -> None:
+        self._sequences = [list(seq) for seq in sequences]
+        self._call_count = 0
+
+    def stream(self, request: ApiRequest) -> Iterator[AssistantEvent]:  # noqa: ARG002
+        if self._call_count < len(self._sequences):
+            events = self._sequences[self._call_count]
+            self._call_count += 1
+            yield from events
+        # If exhausted, yield nothing (empty stream)
+
+
+# ---------------------------------------------------------------------------
+# LiteLLMClient & AnthropicClient — production implementations
 # ---------------------------------------------------------------------------
 
 
