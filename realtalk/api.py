@@ -124,38 +124,46 @@ class MockClient:
 
 
 class ScriptedClient:
-    """Scripted event sequences for multi-turn tool loop tests.
+    """Serves different event sequences on successive stream() calls.
 
-    One event sequence per stream() call. Each call yields a new sequence.
-    Use for testing iterative tool use (agent asks for a tool, gets result, asks again).
+    Each stream() call pops the next sequence. Raises IndexError if called
+    more times than there are sequences. Records each ApiRequest for assertions.
 
     >>> client = ScriptedClient([
-    ...     [TextDelta("a"), ToolUse("t1", "tool1", "{}"), MessageStop()],
-    ...     [TextDelta("b"), MessageStop()],
+    ...     [TextDelta("hi"), MessageStop()],
+    ...     [TextDelta("bye"), MessageStop()],
     ... ])
-    >>> request = ApiRequest(system_prompt=[], messages=[], tools=[])
-    >>> events1 = list(client.stream(request))
-    >>> len(events1)
-    3
-    >>> events2 = list(client.stream(request))
-    >>> len(events2)
+    >>> list(client.stream(ApiRequest(system_prompt=[], messages=[], tools=[])))
+    [TextDelta(text='hi'), MessageStop(stop_reason='end_turn')]
+    >>> list(client.stream(ApiRequest(system_prompt=[], messages=[], tools=[])))
+    [TextDelta(text='bye'), MessageStop(stop_reason='end_turn')]
+    >>> client.call_count
     2
     """
 
-    def __init__(self, sequences: Sequence[Sequence[AssistantEvent]]) -> None:
-        self._sequences = [list(seq) for seq in sequences]
-        self._call_count = 0
+    def __init__(self, sequences: list[list[AssistantEvent]]) -> None:
+        self._sequences = list(sequences)
+        self._index = 0
+        self.requests: list[ApiRequest] = []
 
-    def stream(self, request: ApiRequest) -> Iterator[AssistantEvent]:  # noqa: ARG002
-        if self._call_count < len(self._sequences):
-            events = self._sequences[self._call_count]
-            self._call_count += 1
-            yield from events
-        # If exhausted, yield nothing (empty stream)
+    @property
+    def call_count(self) -> int:
+        return self._index
+
+    def stream(self, request: ApiRequest) -> Iterator[AssistantEvent]:
+        if self._index >= len(self._sequences):
+            raise IndexError(
+                f"ScriptedClient exhausted: {self._index} calls made, "
+                f"only {len(self._sequences)} sequences provided"
+            )
+        self.requests.append(request)
+        events = self._sequences[self._index]
+        self._index += 1
+        yield from events
 
 
 # ---------------------------------------------------------------------------
-# LiteLLMClient & AnthropicClient — production implementations
+# AnthropicClient — production implementation
 # ---------------------------------------------------------------------------
 
 
