@@ -485,7 +485,7 @@ def _extract_summary_highlights(summary: str) -> list[str]:
     lines: list[str] = []
     in_timeline = False
     for line in format_compact_summary(summary).splitlines():
-        trimmed = line.rstrip()
+        trimmed = line.strip()
         if not trimmed or trimmed in ("Summary:", "Conversation summary:"):
             continue
         if trimmed == "- Key timeline:":
@@ -501,7 +501,7 @@ def _extract_summary_timeline(summary: str) -> list[str]:
     lines: list[str] = []
     in_timeline = False
     for line in format_compact_summary(summary).splitlines():
-        trimmed = line.rstrip()
+        trimmed = line.strip()
         if trimmed == "- Key timeline:":
             in_timeline = True
             continue
