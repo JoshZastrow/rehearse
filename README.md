@@ -96,12 +96,12 @@ pytest tests/test_api_litellm.py::test_litellm_client_init
 ```
 
 Tests cover:
-- **Layer 0 (session.py):** Event-sourced session model — 71 tests
-- **Layer 1 (storage.py):** Disk persistence, rotation, archival — 16 tests
-- **Layer 2 (config.py):** Layered configuration — 17 tests
-- **Layer 3 (api.py):** LLM provider integration — 23 tests
+- **Layer 0 (session.py):** Event-sourced session model — 72 tests (49 pytest + 23 doctests)
+- **Layer 1 (storage.py):** Disk persistence, rotation, archival — 34 tests (16 pytest + 18 doctests)
+- **Layer 2 (config.py):** Layered configuration — 21 tests
+- **Layer 3 (api.py):** LLM provider integration — 28 tests
 - **Layer 4 (conversation.py):** Conversation engine, tool loop, message formatting — 17 tests
-- **Total:** 152 tests
+- **Total:** 161 collected (155 passing, 6 skipped)
 
 ### Type check
 
