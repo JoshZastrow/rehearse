@@ -12,7 +12,6 @@ import pytest
 
 from realtalk.config import ConfigLoader, _deep_merge
 
-
 # ---------------------------------------------------------------------------
 # From original spec (7 tests)
 # ---------------------------------------------------------------------------

@@ -26,7 +26,6 @@ from pathlib import Path
 import chz
 from pydantic import BaseModel, field_validator, model_validator
 
-
 # ---------------------------------------------------------------------------
 # Pydantic input models — validation boundary when loading JSON from disk
 # ---------------------------------------------------------------------------

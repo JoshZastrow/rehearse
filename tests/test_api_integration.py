@@ -16,8 +16,7 @@ import os
 
 import pytest
 
-from realtalk.api import ApiRequest, LiteLLMClient, TextDelta, MessageStop
-
+from realtalk.api import ApiRequest, LiteLLMClient, MessageStop, TextDelta
 
 # Skip all tests in this file unless PYTEST_INTEGRATION=1
 pytestmark = pytest.mark.skipif(
@@ -152,9 +151,10 @@ def test_streaming_accumulation():
 
 def test_config_integration_temperature():
     """Verify temperature config is passed to LiteLLMClient."""
-    from realtalk.config import ConfigLoader
-    from pathlib import Path
     import tempfile
+    from pathlib import Path
+
+    from realtalk.config import ConfigLoader
 
     with tempfile.TemporaryDirectory() as tmpdir:
         config_file = Path(tmpdir) / ".realtalk.json"
@@ -177,9 +177,10 @@ def test_config_integration_temperature():
 
 def test_config_integration_max_tokens():
     """Verify max_tokens config is passed to LiteLLMClient."""
-    from realtalk.config import ConfigLoader
-    from pathlib import Path
     import tempfile
+    from pathlib import Path
+
+    from realtalk.config import ConfigLoader
 
     with tempfile.TemporaryDirectory() as tmpdir:
         config_file = Path(tmpdir) / ".realtalk.json"

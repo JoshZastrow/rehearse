@@ -214,7 +214,7 @@ Built in layers — each layer depends only on the layer below it.
 | v1.0 | 0 | `realtalk/session.py` | ✓ Done — event-sourced model + JSONL serialization (71 tests) |
 | v1.1 | 1 | `realtalk/storage.py` | ✓ Done — disk persistence, rotation, archival (16 tests) |
 | v1.1 | 2 | `realtalk/config.py` | ✓ Done — layered config via `chz` + pydantic (14 tests) |
-| v1.3 | 3 | `realtalk/api.py` | ✓ Done — multi-provider LLM via litellm.ai (26 tests) |
+| v1.3 | 3 | `realtalk/api.py` | ✓ Done — multi-provider LLM via litellm.ai (23 tests) |
 | v0.4 | 4 | `realtalk/conversation.py` | Planned — game loop engine |
 | v0.5 | 5 | `realtalk/game.py` | Planned — scene, role, turn mechanics |
 | v0.6 | 6 | `realtalk/tui.py` | Planned — terminal UI |

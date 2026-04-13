@@ -16,8 +16,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import chz
-
 from realtalk.config import ConfigLoader, RuntimeConfig
 
 
@@ -38,10 +36,9 @@ def main(config: RuntimeConfig) -> None:
 
     # Import here to avoid circular imports
     from realtalk.api import ApiRequest, LiteLLMClient
-    from realtalk.storage import SessionStore
 
-    # Initialize storage
-    session_store = SessionStore(root=config.contributor.resolved_session_dir)
+    # TODO: Initialize storage (Layer 4: game loop will use SessionStore)
+    # session_store = SessionStore(root=config.contributor.resolved_session_dir)
 
     # Create LLM client
     client = LiteLLMClient(
