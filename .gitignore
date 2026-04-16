@@ -38,3 +38,4 @@ node_modules/
 
 # dependencies
 lib/
+.coverage
