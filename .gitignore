@@ -34,3 +34,7 @@ node_modules/
 
 # Dev choices
 .claude/settings.json
+.gstack/
+
+# dependencies
+lib/
