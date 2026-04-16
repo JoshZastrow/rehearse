@@ -84,20 +84,31 @@ class ReactionInput(Static):
         self.raw_value = ""
         self.direction: str | None = None
         self.intensity: int | None = None
-        super().__init__("")
+        super().__init__(self._render_text())
 
     def set_value(self, raw: str) -> None:
         self.raw_value = raw
         self.direction = None
         self.intensity = None
         if raw != raw.strip() or " " in raw or len(raw) != 2:
+            self.update(self._render_text())
             return
         direction = raw[0].lower()
         intensity = raw[1]
         if direction not in {"a", "r"} or intensity not in {"1", "2", "3"}:
+            self.update(self._render_text())
             return
         self.direction = direction
         self.intensity = int(intensity)
+        self.update(self._render_text())
+
+    def _render_text(self) -> str:
+        if not self.raw_value:
+            return "Reaction: type a/r + 1-3  (e.g. a2 = attract medium, r1 = repel light)"
+        if self.is_valid:
+            direction_label = "attract" if self.direction == "a" else "repel"
+            return f"Reaction: {self.raw_value}  ({direction_label}, intensity {self.intensity}) — press 1/2/3 to respond"
+        return f"Reaction: {self.raw_value}_  (a=attract, r=repel, then 1-3)"
 
     @property
     def is_valid(self) -> bool:
