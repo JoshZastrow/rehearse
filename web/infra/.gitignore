@@ -1,5 +1,0 @@
-terraform.tfvars
-.terraform/
-.terraform.lock.hcl
-*.tfplan
-LOCAL_NOTES.md

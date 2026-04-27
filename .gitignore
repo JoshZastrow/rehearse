@@ -1,41 +1,15 @@
-# Python
 __pycache__/
-*.pyc
+*.py[cod]
 *.egg-info/
-
-# Virtual envs
 .venv/
-venv/
-
-# Test / lint caches
-.hypothesis/
+.env
+.env.local
 .pytest_cache/
 .ruff_cache/
-coverage/
-
-# Build artifacts
-dist/
-build/
-
-# Environment / secrets
-.env
-
-# Editor / OS
-.idea/
+.pyright/
+uv.lock
 .DS_Store
-
-# Logs / output
-logs/
-output/
+sessions/
+evals/runs/
+*.wav
 *.log
-
-# JS (precautionary)
-node_modules/
-
-# Dev choices
-.claude/settings.json
-.gstack/
-
-# dependencies
-lib/
-.coverage

@@ -1,39 +1,42 @@
+[project]
+name = "rehearse"
+version = "0.1.0"
+description = "Voice agent inference engine for real-time conversation coaching. Prototype ML system for continual learning from live sessions."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.9",
+    "pipecat-ai[anthropic,hume,twilio,silero]>=0.0.50",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "anthropic>=0.39",
+    "python-dotenv>=1.0",
+    "structlog>=24.4",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.7",
+    "pyright>=1.1",
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-[project]
-name = "realtalk"
-version = "1.0.0"
-requires-python = ">=3.11"
-dependencies = [
-    "chz>=0.3,<1.0",
-    "pydantic>=2.0",
-    "litellm>=1.50",
-    "textual>=8,<9",
-]
-
-[project.optional-dependencies]
-dev = [
-    "pytest",
-    "pytest-cov",
-    "hypothesis",
-    "mypy",
-    "ruff",
-]
-
-[project.scripts]
-realtalk = "realtalk.cli:entrypoint"
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
 
 [tool.ruff]
-target-version = "py311"
 line-length = 100
-select = ["E", "F", "I"]
+target-version = "py311"
 
-[tool.mypy]
-python_version = "3.11"
-strict = true
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "B"]
 
-[tool.pytest.ini_options]
-addopts = "--doctest-modules"
-testpaths = ["tests", "realtalk"]
+[tool.pyright]
+pythonVersion = "3.11"
+typeCheckingMode = "standard"
