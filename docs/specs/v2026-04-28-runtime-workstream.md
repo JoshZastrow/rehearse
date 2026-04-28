@@ -49,6 +49,11 @@ Runtime-only:
 - live phase timing
 - audio capture and persistence during a real call
 
+Directory decision:
+- Do **not** add `rehearse/runtime/` yet.
+- Keep runtime code under `rehearse/audio/`, `rehearse/services/`, `rehearse/frames.py`, and `rehearse/bus.py`.
+- Reason: the runtime surface is still small; a second top-level namespace would only move files, not simplify the architecture.
+
 Eval-only:
 - benchmark registries
 - targets
