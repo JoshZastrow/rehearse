@@ -13,6 +13,7 @@ Outbound calls and SMS are placed via the Twilio REST client.
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 from typing import Protocol
 
 import structlog
@@ -29,8 +30,13 @@ from fastapi.responses import PlainTextResponse, Response
 from twilio.request_validator import RequestValidator
 from twilio.rest import Client as TwilioClient
 
+from rehearse.audio.twilio_stream import TwilioStream
+from rehearse.bus import FrameBus
 from rehearse.config import RuntimeConfig
+from rehearse.frames import AudioChunk
+from rehearse.services.hume_evi import HumeEVIClient
 from rehearse.session import SessionOrchestrator, TriggerEvent, utcnow
+from rehearse.types import Speaker
 
 log = structlog.get_logger(__name__)
 
@@ -122,19 +128,11 @@ def mount_twilio_routes(
             media_type="application/xml",
         )
 
-    HELLO_TWIML = (
-        '<?xml version="1.0" encoding="UTF-8"?>'
-        "<Response>"
-        "<Say>Hello. This is rehearse. The voice pipeline is not yet wired up. Goodbye.</Say>"
-        "<Hangup/>"
-        "</Response>"
-    )
-
     @app.post("/twilio/voice")
     async def twilio_voice(request: Request, session_id: str) -> Response:
         await _validate(request)
         log.info("twilio.voice", session_id=session_id)
-        return PlainTextResponse(HELLO_TWIML, media_type="application/xml")
+        return PlainTextResponse(_stream_twiml(config, session_id), media_type="application/xml")
 
     @app.post("/twilio/voice/inbound")
     async def twilio_voice_inbound(
@@ -148,7 +146,10 @@ def mount_twilio_routes(
         if CallSid:
             await orchestrator.attach_call(handle.session_id, CallSid)
         log.info("twilio.voice.inbound", session_id=handle.session_id, call_sid=CallSid)
-        return PlainTextResponse(HELLO_TWIML, media_type="application/xml")
+        return PlainTextResponse(
+            _stream_twiml(config, handle.session_id),
+            media_type="application/xml",
+        )
 
     @app.post("/twilio/status")
     async def twilio_status(
@@ -174,9 +175,53 @@ def mount_twilio_routes(
     async def media_stream(ws: WebSocket, session_id: str) -> None:
         await ws.accept()
         log.info("media.connect", session_id=session_id)
+        bus = FrameBus(session_id)
         try:
-            while True:
-                msg = await ws.receive_text()
-                log.debug("media.frame", session_id=session_id, size=len(msg))
+            async with TwilioStream(ws) as twilio, HumeEVIClient(
+                api_key=config.hume_api_key,
+                config_id=config.hume_config_id,
+                bus=bus,
+                session_id=session_id,
+            ) as hume:
+                assistant_task = asyncio.create_task(_pump_assistant_audio(twilio, bus))
+                hume_task = asyncio.create_task(hume.run_event_loop())
+                try:
+                    async for chunk in twilio.inbound():
+                        await hume.send_audio(chunk)
+                        await bus.publish(
+                            AudioChunk(
+                                session_id=session_id,
+                                speaker=Speaker.USER,
+                                pcm16_16k=chunk,
+                                ts=0.0,
+                            )
+                        )
+                finally:
+                    await bus.aclose()
+                    assistant_task.cancel()
+                    hume_task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await assistant_task
+                    with suppress(asyncio.CancelledError):
+                        await hume_task
         except WebSocketDisconnect:
             log.info("media.disconnect", session_id=session_id)
+
+
+def _stream_twiml(config: RuntimeConfig, session_id: str) -> str:
+    ws_base = config.public_base_url.replace("https://", "wss://").replace("http://", "ws://")
+    stream_url = f"{ws_base}/media/{session_id}"
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        "<Response>"
+        "<Connect>"
+        f'<Stream url="{stream_url}"/>'
+        "</Connect>"
+        "</Response>"
+    )
+
+
+async def _pump_assistant_audio(twilio: TwilioStream, bus: FrameBus) -> None:
+    async for frame in bus.subscribe():
+        if isinstance(frame, AudioChunk) and frame.speaker != Speaker.USER:
+            await twilio.send(frame.pcm16_16k)

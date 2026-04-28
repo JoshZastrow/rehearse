@@ -3,7 +3,10 @@ TwiML, status callback finalizes the manifest. No real Twilio calls."""
 
 from __future__ import annotations
 
+import asyncio
+import base64
 import json
+import struct
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -11,7 +14,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from rehearse.app import create_app
+from rehearse.audio.mulaw import encode_pcm16
 from rehearse.config import RuntimeConfig
+from rehearse.frames import AudioChunk
+from rehearse.types import Speaker
 
 
 class FakeTwilioClient:
@@ -35,6 +41,8 @@ def config(tmp_path: Path) -> RuntimeConfig:
         twilio_auth_token="test_token",
         twilio_from_number="+15555550100",
         public_base_url="https://example.test",
+        hume_api_key="hume_test_key",
+        hume_config_id="cfg_test",
         session_root=tmp_path,
         log_level="warning",
         validate_twilio_signature=False,
@@ -86,8 +94,8 @@ def test_voice_webhook_returns_hello_twiml(app_client) -> None:
     resp = client.post("/twilio/voice", params={"session_id": "deadbeef"})
     assert resp.status_code == 200
     body = resp.text
-    assert "<Say>" in body
-    assert "<Hangup" in body
+    assert "<Connect>" in body
+    assert "/media/deadbeef" in body
 
 
 def test_status_callback_finalizes_session(app_client) -> None:
@@ -148,8 +156,8 @@ def test_inbound_voice_mints_session_and_returns_twiml(app_client) -> None:
         data={"From": "+15551234567", "CallSid": "CA_inbound_1"},
     )
     assert resp.status_code == 200
-    assert "<Say>" in resp.text
-    assert "<Hangup" in resp.text
+    assert "<Connect>" in resp.text
+    assert "/media/" in resp.text
 
     sessions = list(config.session_root.iterdir())
     assert len(sessions) == 1
@@ -175,3 +183,64 @@ def test_inbound_voice_status_callback_finalizes_via_call_sid(app_client) -> Non
     assert resp.status_code == 204
     manifest = json.loads((config.session_root / session_id / "session.json").read_text())
     assert manifest["completion_status"] == "complete"
+
+
+def test_media_websocket_bridges_twilio_to_fake_hume(
+    app_client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, _, _config = app_client
+
+    class FakeHumeEVIClient:
+        seen_audio: list[bytes] = []
+
+        def __init__(self, *, api_key: str, config_id: str, bus, session_id: str) -> None:
+            self._bus = bus
+            self._session_id = session_id
+            assert api_key == "hume_test_key"
+            assert config_id == "cfg_test"
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def send_audio(self, pcm16_16k: bytes) -> None:
+            self.seen_audio.append(pcm16_16k)
+            await self._bus.publish(
+                AudioChunk(
+                    session_id=self._session_id,
+                    speaker=Speaker.COACH,
+                    pcm16_16k=struct.pack("<8h", 0, 50, 100, 150, 200, 150, 100, 50),
+                    ts=0.0,
+                )
+            )
+
+        async def run_event_loop(self) -> None:
+            await asyncio.Event().wait()
+
+    from rehearse import telephony as telephony_module
+
+    monkeypatch.setattr(telephony_module, "HumeEVIClient", FakeHumeEVIClient)
+
+    pcm8k = struct.pack("<4h", 0, 1000, -1000, 0)
+    payload = base64.b64encode(encode_pcm16(pcm8k)).decode("ascii")
+    with client.websocket_connect("/media/test-session") as ws:
+        ws.send_json({"event": "connected"})
+        ws.send_json(
+            {
+                "event": "start",
+                "start": {
+                    "streamSid": "MZ123",
+                    "callSid": "CA123",
+                    "customParameters": {"session_id": "test-session"},
+                },
+            }
+        )
+        ws.send_json({"event": "media", "media": {"payload": payload}})
+        outbound = ws.receive_json()
+        ws.send_json({"event": "stop"})
+
+    assert FakeHumeEVIClient.seen_audio
+    assert outbound["event"] == "media"
+    assert outbound["streamSid"] == "MZ123"
