@@ -5,8 +5,8 @@ and executors are each one Python `Protocol`. Adding a new benchmark or new
 target is implementing one class and registering it.
 
 The harness is **independent of the runtime** — it imports nothing from
-`rehearse/app.py`, `rehearse/pipeline.py`, or anything that touches Twilio
-or Pipecat I/O. You can run evaluations with no live phone path.
+`rehearse/app.py`, `rehearse/pipeline.py`, or anything that touches live
+Twilio/Hume call I/O. You can run evaluations with no live phone path.
 
 Design spec: [`docs/specs/v2026-04-27-eval-harness.md`](../../docs/specs/v2026-04-27-eval-harness.md)
 
