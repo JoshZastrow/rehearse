@@ -1,17 +1,19 @@
-"""Benchmark registry. Add a new benchmark by importing its class and
-registering its constructor here."""
+"""Compatibility benchmark registry.
+
+New code should import from `rehearse.eval.evals`.
+"""
 
 from __future__ import annotations
 
 from collections.abc import Callable
 
-from rehearse.eval.benchmarks.eq_bench import EQBenchBenchmark
+from rehearse.eval.benchmarks.mme_emotion import MMEEmotionBenchmark
 from rehearse.eval.benchmarks.noop import NoopBenchmark
 from rehearse.eval.protocols import Benchmark
 
 BENCHMARKS: dict[str, Callable[[], Benchmark]] = {
     "noop": NoopBenchmark,
-    "eq-bench": EQBenchBenchmark,
+    "mme-emotion": MMEEmotionBenchmark,
 }
 
 

@@ -1,9 +1,10 @@
 """rehearse-eval — eval harness CLI.
 
 Subcommands:
-  list-benchmarks    print registered benchmark names
-  list-targets       print registered target names
-  run                execute a benchmark against a target
+  list-evals          print registered eval names
+  list-datasets       print registered dataset names
+  list-environments   print registered environment names
+  run                 execute an eval against an environment
   show               print summary.md for a run_id
 """
 
@@ -14,9 +15,11 @@ import asyncio
 import sys
 from pathlib import Path
 
-from rehearse.eval.benchmarks import get_benchmark, list_benchmarks
+from rehearse.eval.datasets import list_datasets
+from rehearse.eval.environments import list_environments
+from rehearse.eval.evals import get_eval, list_evals
+from rehearse.eval.providers import list_providers
 from rehearse.eval.runner import RunConfig, execute_run
-from rehearse.eval.targets import list_targets
 
 
 def _parse_model_slot(s: str) -> tuple[str, str]:
@@ -30,12 +33,29 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="rehearse-eval")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    sub.add_parser("list-benchmarks", help="list registered benchmarks")
-    sub.add_parser("list-targets", help="list registered targets")
+    sub.add_parser("list-evals", help="list registered evals")
+    sub.add_parser("list-datasets", help="list registered datasets")
+    sub.add_parser("list-environments", help="list registered environments")
+    sub.add_parser("list-providers", help="list registered audio LLM providers")
+    sub.add_parser("list-benchmarks", help="deprecated alias for list-evals")
+    sub.add_parser("list-targets", help="deprecated alias for list-environments")
 
-    run = sub.add_parser("run", help="run a benchmark against a target")
-    run.add_argument("--benchmark", required=True)
-    run.add_argument("--target", default=None, help="defaults to benchmark.preferred_target")
+    run = sub.add_parser("run", help="run an eval against an environment")
+    eval_group = run.add_mutually_exclusive_group(required=True)
+    eval_group.add_argument("--eval", dest="eval_name")
+    eval_group.add_argument("--benchmark", dest="eval_name")
+    run.add_argument(
+        "--environment",
+        default=None,
+        help="defaults to eval.preferred_environment",
+    )
+    run.add_argument("--target", dest="environment", default=None)
+    run.add_argument(
+        "--provider",
+        choices=["gemini", "vllm"],
+        default=None,
+        help="shortcut for --model-slot provider=... when environment=multimodal-llm",
+    )
     run.add_argument("--limit", type=int, default=None)
     run.add_argument("--concurrency", type=int, default=4)
     run.add_argument("--seed", type=int, default=0)
@@ -60,13 +80,23 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
 
-    if args.cmd == "list-benchmarks":
-        for name in list_benchmarks():
+    if args.cmd in {"list-evals", "list-benchmarks"}:
+        for name in list_evals():
             print(name)
         return 0
 
-    if args.cmd == "list-targets":
-        for name in list_targets():
+    if args.cmd == "list-datasets":
+        for name in list_datasets():
+            print(name)
+        return 0
+
+    if args.cmd in {"list-environments", "list-targets"}:
+        for name in list_environments():
+            print(name)
+        return 0
+
+    if args.cmd == "list-providers":
+        for name in list_providers():
             print(name)
         return 0
 
@@ -79,24 +109,27 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.cmd == "run":
-        bench = get_benchmark(args.benchmark)
-        target = args.target or bench.preferred_target
+        eval_spec = get_eval(args.eval_name)
+        environment = args.environment or eval_spec.preferred_environment
         model_slots = dict(args.model_slot)
+        if args.provider:
+            model_slots["provider"] = args.provider
 
         if args.dry_run:
-            n_examples = len(list(bench.load()))
+            n_examples = len(list(eval_spec.load()))
             if args.limit is not None:
                 n_examples = min(n_examples, args.limit)
-            print(f"benchmark: {bench.name}@{bench.version}")
-            print(f"target: {target}")
+            print(f"eval: {eval_spec.name}@{eval_spec.version}")
+            print(f"dataset: {eval_spec.dataset.name}@{eval_spec.dataset.version}")
+            print(f"environment: {environment}")
             print(f"examples: {n_examples}")
             print(f"concurrency: {args.concurrency}")
             print(f"model_slots: {model_slots}")
             return 0
 
         config = RunConfig(
-            benchmark=args.benchmark,
-            target=target,
+            eval_name=args.eval_name,
+            environment=environment,
             limit=args.limit,
             concurrency=args.concurrency,
             seed=args.seed,

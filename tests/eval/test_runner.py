@@ -1,4 +1,4 @@
-"""End-to-end runner test on the noop benchmark + echo target.
+"""End-to-end runner test on the noop eval + echo environment.
 
 Exercises: example loading, subprocess executor, scoring, artifact writes
 (run.json, results.jsonl, summary.md).
@@ -14,8 +14,8 @@ from rehearse.eval.runner import RunConfig, execute_run
 
 async def test_noop_run_produces_full_artifact_bundle(tmp_path: Path):
     config = RunConfig(
-        benchmark="noop",
-        target="echo",
+        eval_name="noop",
+        environment="echo",
         concurrency=2,
         runs_root=tmp_path,
     )
@@ -44,9 +44,9 @@ async def test_noop_run_produces_full_artifact_bundle(tmp_path: Path):
     assert "noop_score" in summary
 
 
-async def test_unsupported_target_rejected(tmp_path: Path):
+async def test_unsupported_environment_rejected(tmp_path: Path):
     import pytest
 
-    config = RunConfig(benchmark="noop", target="raw-llm", runs_root=tmp_path)
-    with pytest.raises(ValueError, match="does not support target"):
+    config = RunConfig(eval_name="noop", environment="raw-llm", runs_root=tmp_path)
+    with pytest.raises(ValueError, match="does not support environment"):
         await execute_run(config)

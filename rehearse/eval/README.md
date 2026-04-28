@@ -1,222 +1,131 @@
 # rehearse-eval
 
-Eval harness for the rehearse system. Plugin-shaped: benchmarks, targets, scorers,
-and executors are each one Python `Protocol`. Adding a new benchmark or new
-target is implementing one class and registering it.
+Eval harness for the rehearse system. Plugin-shaped: evals, datasets, scorers,
+environments, providers, and executors are small Python `Protocol`-style units.
 
-The harness is **independent of the runtime** — it imports nothing from
-`rehearse/app.py`, `rehearse/pipeline.py`, or anything that touches live
-Twilio/Hume call I/O. You can run evaluations with no live phone path.
+The harness is independent of the runtime. You can run smoke evals with no live
+phone path, no media files, and no model API keys.
 
-Design spec: [`docs/specs/v2026-04-27-eval-harness.md`](../../docs/specs/v2026-04-27-eval-harness.md)
-
----
+Design specs:
+- [`docs/specs/v2026-04-27-eval-harness.md`](../../docs/specs/v2026-04-27-eval-harness.md)
+- [`docs/specs/v2026-04-28-mme-emotion-and-audio-targets.md`](../../docs/specs/v2026-04-28-mme-emotion-and-audio-targets.md)
 
 ## Install
 
 ```bash
 uv sync
-export ANTHROPIC_API_KEY=sk-ant-...   # only needed for targets that hit Claude
 ```
 
-The `rehearse-eval` console script lands on `PATH` after `uv sync`. Run it via
-`uv run rehearse-eval ...` or activate the venv directly.
+Optional env vars for live model runs:
 
-## What's there today
+```bash
+export GOOGLE_API_KEY=...        # --provider gemini
+export VLLM_BASE_URL=http://...  # --provider vllm
+export VLLM_API_KEY=dummy
+```
 
-| Benchmark | Examples | Supported targets | Notes |
-|---|---|---|---|
-| `noop` | 2 synthetic | `echo` | Smoke test. No model calls. |
-| `eq-bench` | 3 sample questions (vendored stub) | `raw-llm` | Drop the real upstream `questions.json` at `evals/benchmarks/eq-bench/{commit}/questions.json` to run against the public set. |
+## What's There Today
 
-| Target | What it does | Reads model slot |
+| Eval | Dataset | Environments | Scorers | Notes |
+|---|---|---|---|---|
+| `noop` | `noop` | `echo` | `noop_score` | Offline smoke test. |
+| `mme-emotion` | `mme-emotion` | `multimodal-llm` | `mme_recognition_accuracy` | 10-clip manifest scaffold. Real run needs media files + provider credentials. |
+
+| Environment | What it does | Reads model slots |
 |---|---|---|
-| `echo` | Returns the example payload unchanged. No model call. | — |
-| `raw-llm` | Single Claude call with `example.payload["prompt"]`. | `raw_llm` (default `claude-sonnet-4-6`) |
+| `echo` | Returns the example payload unchanged. | - |
+| `raw-llm` | Single Claude call with `example.payload["prompt"]`. Kept for text diagnostics. | `raw_llm` |
+| `multimodal-llm` | Loads an audio/video file and calls an audio LLM provider. | `provider`, `multimodal_hosted`, `multimodal_open` |
 
-## Five-minute tour
+| Provider | Used by | Required env |
+|---|---|---|
+| `gemini` | hosted frontier baseline | `GOOGLE_API_KEY` |
+| `vllm` | open-weights Gemma endpoint | `VLLM_BASE_URL`, `VLLM_API_KEY` |
+
+## Five-Minute Tour
 
 ```bash
 # 1. List what's registered
-uv run rehearse-eval list-benchmarks
-uv run rehearse-eval list-targets
+uv run rehearse-eval list-evals
+uv run rehearse-eval list-datasets
+uv run rehearse-eval list-environments
+uv run rehearse-eval list-providers
 
-# 2. Smoke test (no API key needed)
-uv run rehearse-eval run --benchmark noop --target echo
+# 2. Smoke test, no API key needed
+uv run rehearse-eval run --eval noop --environment echo
 
-# 3. Resolve a plan without running anything
-uv run rehearse-eval run --benchmark eq-bench --dry-run
+# 3. Resolve the MME-Emotion plan without running provider calls
+uv run rehearse-eval run --eval mme-emotion --dry-run
 
-# 4. Real EQ-Bench run (needs ANTHROPIC_API_KEY)
-uv run rehearse-eval run --benchmark eq-bench --limit 3 --concurrency 2
+# 4. Real MME-Emotion run, after media files and GOOGLE_API_KEY are present
+uv run rehearse-eval run --eval mme-emotion --environment multimodal-llm --provider gemini --limit 10
 
 # 5. View the summary for a previous run
 uv run rehearse-eval show <run_id>
 ```
 
-Each `run` prints the `run_id` and where artifacts live. Default: `evals/runs/{run_id}/`.
+Deprecated aliases still work during migration: `list-benchmarks`,
+`list-targets`, `--benchmark`, and `--target`.
 
-## CLI reference
+## CLI Reference
 
-```
-rehearse-eval list-benchmarks
-rehearse-eval list-targets
+```bash
+rehearse-eval list-evals
+rehearse-eval list-datasets
+rehearse-eval list-environments
+rehearse-eval list-providers
 rehearse-eval run \
-    --benchmark <name>           # required
-    --target <name>              # defaults to benchmark.preferred_target
+    --eval <name>                # required; --benchmark is a deprecated alias
+    --environment <name>         # defaults to eval.preferred_environment
+    --provider gemini|vllm       # shortcut for multimodal provider slot
     --limit N                    # cap number of examples
     --concurrency N              # parallel rollouts (default 4)
     --seed N                     # rollout RNG seed (default 0)
-    --model-slot KEY=VALUE       # repeatable; e.g. --model-slot raw_llm=claude-opus-4-7
+    --model-slot KEY=VALUE       # repeatable
     --tag LABEL                  # human label for the run
     --runs-root PATH             # where to write results (default evals/runs)
     --dry-run                    # resolve and print plan, don't execute
 rehearse-eval show <run_id> [--runs-root PATH]
 ```
 
-## Output layout
+## Output Layout
 
-```
+```text
 evals/runs/{run_id}/
-├ run.json          # EvalRun manifest: benchmark, target, versions, seed, model_slots, timing
-├ results.jsonl     # one RubricScore per (example × scorer)
-├ summary.md        # human-facing aggregate; paste into PR descriptions
-├ sessions/{ex}/    # per-example artifact dirs (used by full / synthesis targets)
+├ run.json          # EvalRun manifest: eval/environment versions, seed, model_slots
+├ results.jsonl     # one RubricScore per example x scorer
+├ summary.md        # human-facing aggregate
+├ sessions/{ex}/    # per-example artifact dirs
 └ failures/{ex}/    # error details for non-ok rollouts
 ```
 
-`run_id` format: `YYYYMMDDTHHMMSS-{8-hex}` (e.g. `20260427T150709-0bbb81eb`).
+## Adding Pieces
 
-## Concurrency and isolation
+Datasets live in `rehearse/eval/datasets/` and only load examples. Evals live
+in `rehearse/eval/evals/` and compose one dataset, a scoring plan, compatible
+environments, and a rollout timeout. Environments live in
+`rehearse/eval/environments/` and run the system under test. Scorers live in
+`rehearse/eval/scorers/`.
 
-Each rollout runs in its own subprocess (`python -m rehearse.eval.worker`) — crash
-isolation, clean memory between rollouts, and a hard timeout. The runner caps
-concurrency with an `asyncio.Semaphore`; `--concurrency` controls the cap.
+Register new pieces in the matching package `__init__.py`.
 
-The executor is a `Protocol`. The default `LocalSubprocessExecutor` can be
-swapped for a `ContainerExecutor` or a Modal-backed executor without touching
-benchmarks or targets.
+## MME-Emotion Data
 
-## Adding a benchmark
+The v0 manifest lives at:
 
-```python
-# rehearse/eval/benchmarks/my_bench.py
-from collections.abc import Iterable
-from rehearse.eval.protocols import BenchmarkExample, Scorer
-
-class MyBenchmark:
-    name = "my-bench"
-    version = "v1"
-    supported_targets = frozenset({"raw-llm"})
-    preferred_target = "raw-llm"
-
-    def load(self) -> Iterable[BenchmarkExample]:
-        yield BenchmarkExample(
-            id="ex1",
-            benchmark=self.name,
-            payload={"prompt": "..."},
-            expected={"answer": "..."},
-        )
-
-    def scoring_plan(self) -> list[Scorer]:
-        return [MyScorer()]
-
-    def rollout_timeout_s(self) -> int:
-        return 60
+```text
+evals/datasets/mme-emotion/v0-10clip/manifest.json
 ```
 
-Register it in `rehearse/eval/benchmarks/__init__.py`:
+This patch checks in the manifest scaffold only. Before a real run, place the
+referenced media files under `evals/datasets/mme-emotion/v0-10clip/clips/` or
+set `MME_EMOTION_MANIFEST_PATH` to another manifest with valid paths.
 
-```python
-from rehearse.eval.benchmarks.my_bench import MyBenchmark
-BENCHMARKS["my-bench"] = MyBenchmark
-```
-
-## Adding a target
-
-```python
-# rehearse/eval/targets/my_target.py
-from datetime import datetime
-from pathlib import Path
-from rehearse.eval.protocols import BenchmarkExample, RolloutResult
-
-class MyTarget:
-    name = "my-target"
-    version = "v0"
-
-    def __init__(self, model_slots: dict[str, str] | None = None) -> None:
-        self.model_slots = model_slots or {}
-
-    async def rollout(
-        self,
-        example: BenchmarkExample,
-        run_dir: Path,
-        rng_seed: int,
-    ) -> RolloutResult:
-        ...
-```
-
-Register it in `rehearse/eval/targets/__init__.py`:
-
-```python
-TARGETS["my-target"] = lambda slots: MyTarget(model_slots=slots)
-```
-
-## Adding a scorer
-
-A scorer is anything with `name`, `dimension`, and an `async def score(example, rollout, run_id) -> list[RubricScore]`. Return one `RubricScore` per dimension you measure. Dimensions can be benchmark-private strings (e.g. `"my_bench_score"`) or members of the `RubricDimension` enum in `rehearse/types.py`.
-
-## Vendoring real EQ-Bench data
-
-The default sample at `evals/benchmarks/eq-bench/sample/questions.json` is a
-3-question stub with the same shape as the upstream EQ-Bench format. To run
-against the real set:
-
-1. License-check the upstream repo: <https://github.com/EQ-bench/EQ-Bench>.
-2. Pin a commit. Place the questions JSON at `evals/benchmarks/eq-bench/{commit-sha}/questions.json`.
-3. Either edit `_DEFAULT_PATH` in `rehearse/eval/benchmarks/eq_bench.py` or set:
-   ```bash
-   export EQ_BENCH_DATA_PATH=evals/benchmarks/eq-bench/{commit-sha}/questions.json
-   ```
-4. Bump `EQBenchBenchmark.version` to the commit SHA so run manifests are reproducible.
-
-Expected JSON shape:
-
-```json
-{
-  "_meta": { "vendored_commit": "<sha>" },
-  "questions": [
-    {
-      "id": "...",
-      "dialogue": "...",
-      "character": "...",
-      "emotions": ["e1", "e2", "e3", "e4"],
-      "reference_ratings": { "e1": 5, "e2": 7, "e3": 2, "e4": 8 }
-    }
-  ]
-}
-```
-
-EQ-Bench scoring: per-question Pearson correlation between predicted and
-reference ratings, rescaled to 0–100 via `(corr + 1) * 50`. Aggregate score
-is the mean across questions.
-
-## Running tests
+## Running Tests
 
 ```bash
 uv run pytest tests/eval/
 ```
 
-Tests cover protocol conformance, runner end-to-end (no model calls), the
-EQ-Bench adapter (loading, prompt construction, parsing, correlation math),
-and the subprocess executor (timeout, crash isolation).
-
-## What's deliberately not built yet
-
-The eval spec phases this as 1–5; only Phases 1 and 2 ship today. Not yet:
-
-- **Phase 3** — `synthesis` target + 3 hand-authored `rehearse-seed` scenarios + LLM-judge scorers.
-- **Phase 4** — `full` target with mocked runtime (synthetic-user agent, Tier-1 prosody scripts).
-- **Phase 5** — `rehearse-eval diff <run_a> <run_b>` with regression-gate exit codes, plus a CI workflow that posts `summary.md` on PRs.
-
-See [`docs/specs/v2026-04-27-eval-harness.md`](../../docs/specs/v2026-04-27-eval-harness.md) §12 for the phasing.
+Tests cover protocol conformance, runner end-to-end, subprocess isolation, the
+MME-Emotion dataset/eval shape, and the deterministic recognition scorer.

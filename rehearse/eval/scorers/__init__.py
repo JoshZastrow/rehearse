@@ -1,3 +1,3 @@
-from rehearse.eval.scorers.deterministic import EQBenchCorrelationScorer
+from rehearse.eval.scorers.deterministic import MMERecognitionScorer
 
-__all__ = ["EQBenchCorrelationScorer"]
+__all__ = ["MMERecognitionScorer"]

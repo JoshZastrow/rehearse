@@ -1,38 +1,48 @@
-"""Every registered benchmark and target satisfies its Protocol."""
+"""Every registered eval, dataset, and environment satisfies its Protocol."""
 
 from __future__ import annotations
 
-from rehearse.eval.benchmarks import BENCHMARKS, get_benchmark
-from rehearse.eval.protocols import Benchmark, Target
-from rehearse.eval.targets import TARGETS, get_target
+from rehearse.eval.datasets import DATASETS, get_dataset
+from rehearse.eval.environments import ENVIRONMENTS, get_environment
+from rehearse.eval.evals import EVALS, get_eval
+from rehearse.eval.protocols import Dataset, Environment, Eval
 
 
-def test_every_benchmark_satisfies_protocol():
-    for name in BENCHMARKS:
-        bench = get_benchmark(name)
-        assert isinstance(bench, Benchmark), f"{name} is not a Benchmark"
-        assert bench.name == name
-        assert isinstance(bench.version, str) and bench.version
-        assert bench.preferred_target in bench.supported_targets
+def test_every_eval_satisfies_protocol():
+    for name in EVALS:
+        eval_spec = get_eval(name)
+        assert isinstance(eval_spec, Eval), f"{name} is not an Eval"
+        assert eval_spec.name == name
+        assert isinstance(eval_spec.version, str) and eval_spec.version
+        assert eval_spec.preferred_environment in eval_spec.supported_environments
+        assert isinstance(eval_spec.dataset, Dataset)
 
 
-def test_every_target_satisfies_protocol():
-    for name in TARGETS:
-        target = get_target(name, model_slots={})
-        assert isinstance(target, Target), f"{name} is not a Target"
-        assert target.name == name
-        assert isinstance(target.version, str) and target.version
+def test_every_dataset_satisfies_protocol():
+    for name in DATASETS:
+        dataset = get_dataset(name)
+        assert isinstance(dataset, Dataset), f"{name} is not a Dataset"
+        assert dataset.name == name
+        assert isinstance(dataset.version, str) and dataset.version
 
 
-def test_unknown_benchmark_raises():
+def test_every_environment_satisfies_protocol():
+    for name in ENVIRONMENTS:
+        environment = get_environment(name, model_slots={})
+        assert isinstance(environment, Environment), f"{name} is not an Environment"
+        assert environment.name == name
+        assert isinstance(environment.version, str) and environment.version
+
+
+def test_unknown_eval_raises():
     import pytest
 
     with pytest.raises(KeyError):
-        get_benchmark("does-not-exist")
+        get_eval("does-not-exist")
 
 
-def test_unknown_target_raises():
+def test_unknown_environment_raises():
     import pytest
 
     with pytest.raises(KeyError):
-        get_target("does-not-exist", {})
+        get_environment("does-not-exist", {})

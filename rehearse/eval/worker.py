@@ -1,6 +1,6 @@
 """Subprocess worker entry point.
 
-Reads one JSON request from stdin, runs one Target rollout, writes one
+Reads one JSON request from stdin, runs one Environment rollout, writes one
 RolloutResult JSON to stdout. Stderr is for human-readable logs.
 
 Request schema:
@@ -23,26 +23,26 @@ from datetime import datetime
 from pathlib import Path
 
 from rehearse.eval.protocols import BenchmarkExample, RolloutResult
-from rehearse.eval.targets import get_target
+from rehearse.eval.environments import get_environment
 
 
 async def _run() -> int:
     raw = sys.stdin.read()
     req = json.loads(raw)
     example = BenchmarkExample.model_validate(req["example"])
-    target = get_target(req["target_name"], req["model_slots"])
+    environment = get_environment(req["target_name"], req["model_slots"])
     run_dir = Path(req["run_dir"])
     seed = int(req["seed"])
 
     started = datetime.now()
     try:
-        result = await target.rollout(example, run_dir, seed)
+        result = await environment.rollout(example, run_dir, seed)
     except Exception as exc:
         completed = datetime.now()
         result = RolloutResult(
             example_id=example.id,
-            target_name=target.name,
-            target_version=target.version,
+            target_name=environment.name,
+            target_version=environment.version,
             status="error",
             started_at=started,
             completed_at=completed,

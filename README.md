@@ -7,22 +7,20 @@ A 5-minute phone call: 1 minute intake, 3 minutes live practice with an AI count
 The product is a coaching call. The architecture is an ML data-collection loop. Every session is simultaneously a unit of user value and a training record.
 
 See [SPEC.md](SPEC.md) for the foundational design.
-See [`docs/specs/MANIFEST.md`](docs/specs/MANIFEST.md) before committing to spec-driven work; it tracks which specs are active, WIP, done, or historical.
 
-Scaffold + eval harness (Phases 1–2). Runtime work is being built as a separate live-call workstream.
+Scaffold + eval harness. Runtime not implemented yet.
 
-- Eval harness: see [`rehearse/eval/README.md`](rehearse/eval/README.md). It is separate from the live Twilio/Hume runtime and can run with no phone call path.
-- Runtime: see [`docs/specs/v2026-04-28-runtime-workstream.md`](docs/specs/v2026-04-28-runtime-workstream.md) and [`docs/specs/v2026-04-28-drop-pipecat.md`](docs/specs/v2026-04-28-drop-pipecat.md).
+- Eval harness: see [`rehearse/eval/README.md`](rehearse/eval/README.md). Public shape is evals, datasets, scorers, and environments. Runs `noop` offline and has the MME-Emotion audio eval scaffold.
+- Runtime: see the spec at [`docs/specs/v2026-04-27-runtime.md`](docs/specs/v2026-04-27-runtime.md).
 
 ## Status (2026-04-28)
 
 | Workstream | Stage |
 |---|---|
 | Pydantic data contracts (`rehearse/types.py`) | ✅ frozen |
-| Eval harness skeleton (Phases 1–2) | ✅ shipped |
-| EQ-Bench adapter | 🗑 deprecated, scheduled for removal (text-only, stale) |
-| MME-Emotion adapter + audio targets | 📝 spec'd, build pending |
-| Runtime (Twilio + Hume + Claude Agent SDK) | 📝 spec'd, build pending |
+| Eval harness skeleton | ✅ shipped |
+| MME-Emotion eval + audio environment scaffold | ✅ shipped |
+| Runtime (Twilio + Pipecat + Hume + Claude Agent SDK) | 📝 spec'd, build pending |
 
 ## Strategic frame
 
@@ -38,20 +36,19 @@ Three workstreams advance in parallel. Each ships in numbered phases; each phase
 
 ### Eval harness (`rehearse-eval`) — `rehearse/eval/`
 
-Plugin-shaped: benchmarks, targets, scorers, executors are each a `Protocol`. Independent of the live Twilio/Hume runtime.
+Plugin-shaped: evals, datasets, scorers, environments, providers, and executors are each small protocol-style units. Independent of runtime.
 
 | Phase | Status | Scope |
 |---|---|---|
-| 1 — Skeleton | ✅ shipped | Protocols, registries, runner, CLI, `LocalSubprocessExecutor`, `noop` benchmark, `echo` target. 20 tests green. |
-| 2 — EQ-Bench end-to-end | ✅ shipped | EQ-Bench adapter, `raw-llm` target, Pearson correlation scorer. **Being removed** — see Phase A1. |
-| A1 — Strip EQ-Bench | 🚧 next | Delete EQ-Bench adapter, sample data, tests, README sections. |
-| A2 — Provider plugin layer + Gemini provider | 📝 spec'd | `AudioLLMProvider` protocol, Gemini 2.5 Pro via `google-genai`, `list-providers` CLI. |
-| A3 — `multimodal-llm` target + 10-clip MME-Emotion + recognition scorer | 📝 spec'd | First audio-native eval. Hand-curated 10 clips from `ER_Lab`. Deterministic accuracy scorer. |
+| 1 — Skeleton | ✅ shipped | Protocols, registries, runner, CLI, `LocalSubprocessExecutor`, `noop` eval, `echo` environment. |
+| A1 — MME-Emotion replacement | ✅ shipped | Removed text-only eval path, added MME-Emotion dataset/eval scaffold, deterministic recognition scorer. |
+| A2 — Provider plugin layer + Gemini provider | ✅ shipped | `AudioLLMProvider` protocol, Gemini provider wrapper, `list-providers` CLI. |
+| A3 — `multimodal-llm` environment | ✅ shipped | Audio-native environment, provider selection, vLLM provider wrapper. Real runs require media files + credentials. |
 | A4 — Reasoning scorer (Claude Opus judge) | 📝 spec'd | LLM-judge scorer. `MMEReasoningScorer` + reusable `LLMJudge` primitive. |
 | A5 — vLLM provider (Gemma 4 E4B) | 📝 spec'd | OpenAI-compatible client pointed at a self-hosted vLLM server. Gated on a live endpoint. |
 | A6 — Side-by-side comparison | 📝 spec'd | `rehearse-eval diff <run_a> <run_b>` per-dimension delta table. Gemini vs Gemma on the same clips. |
 | A7 — Scale to 100 clips | 🔮 future | Move past the v0 hand-curated subset; `scripts/fetch_mme_emotion.py` from HuggingFace. |
-| A8 — Rehearse-seed scenarios + `synthesis` / `full` targets | 🔮 future | First product-quality eval (not capability eval). Fault-recall, persona fidelity, holistic usefulness. |
+| A8 — Rehearse-seed scenarios + `synthesis` / `full` environments | 🔮 future | First product-quality eval (not capability eval). Fault-recall, persona fidelity, holistic usefulness. |
 | A9 — CI gating + regression workflow | 🔮 future | PR-blocking eval delta checks. |
 
 Spec: [`docs/specs/v2026-04-27-eval-harness.md`](docs/specs/v2026-04-27-eval-harness.md), [`docs/specs/v2026-04-28-mme-emotion-and-audio-targets.md`](docs/specs/v2026-04-28-mme-emotion-and-audio-targets.md). User-facing: [`rehearse/eval/README.md`](rehearse/eval/README.md).
@@ -109,7 +106,6 @@ rehearse/
 ├── README.md                     # this file
 ├── docs/
 │   └── specs/
-│       ├── MANIFEST.md
 │       ├── v2026-04-27-eval-harness.md
 │       ├── v2026-04-27-runtime.md
 │       ├── v2026-04-28-drop-pipecat.md
@@ -130,7 +126,7 @@ rehearse/
 │   └── writers/                  # artifact writers (spec'd)
 ├── tests/
 ├── evals/
-│   ├── benchmarks/               # vendored datasets
+│   ├── datasets/                 # vendored eval datasets
 │   └── runs/                     # eval run outputs (gitignored)
 ├── sessions/                     # runtime session store (gitignored)
 └── web/

@@ -1,13 +1,15 @@
 """Plugin contracts for the eval harness.
 
-Four protocols define the entire vocabulary:
+Four protocols define the public vocabulary:
 
-  Benchmark — loads examples + declares scoring plan
-  Target    — runs a rollout against one example
-  Scorer    — produces RubricScore rows from a rollout
-  Executor  — runs Targets, isolated and in parallel
+  Eval        — declares the dataset, compatible environments, and scoring plan
+  Dataset     — loads examples
+  Environment — runs a rollout against one example
+  Scorer      — produces RubricScore rows from a rollout
+  Executor    — runs Environments, isolated and in parallel
 
-Concrete implementations live under benchmarks/, targets/, scorers/, executors/.
+Concrete implementations live under evals/, datasets/, environments/, scorers/,
+and executors/.
 The runner imports only this module and the registries.
 """
 
@@ -28,11 +30,14 @@ class _Strict(BaseModel):
 
 
 class BenchmarkExample(_Strict):
-    """One row from a benchmark.
+    """One row from a dataset.
 
-    `payload` is benchmark-defined input handed to the Target. `expected` is
-    benchmark-defined ground truth handed to the Scorer. Targets never read
+    `payload` is dataset-defined input handed to the Environment. `expected` is
+    dataset-defined ground truth handed to the Scorer. Environments never read
     `expected`; Scorers never read raw runtime state.
+
+    The `benchmark` field name is retained for serialized compatibility with
+    existing run artifacts. New code should treat it as the eval/dataset name.
     """
 
     id: str
@@ -43,11 +48,14 @@ class BenchmarkExample(_Strict):
 
 
 class RolloutResult(_Strict):
-    """What a Target produced for one Example.
+    """What an Environment produced for one Example.
 
     `artifacts_dir` is set when the rollout produced a Session bundle on disk
-    (full / synthesis targets). `payload` carries inline outputs for targets
+    (full / synthesis environments). `payload` carries inline outputs for environments
     that don't emit a session (raw-llm). Both may be None on error.
+
+    The `target_*` field names are retained for serialized compatibility with
+    existing run artifacts. New code should treat them as environment metadata.
     """
 
     example_id: str
@@ -63,11 +71,20 @@ class RolloutResult(_Strict):
 
 
 @runtime_checkable
-class Benchmark(Protocol):
+class Dataset(Protocol):
     name: str
     version: str
-    supported_targets: frozenset[str]
-    preferred_target: str
+
+    def load(self) -> Iterable[BenchmarkExample]: ...
+
+
+@runtime_checkable
+class Eval(Protocol):
+    name: str
+    version: str
+    dataset: Dataset
+    supported_environments: frozenset[str]
+    preferred_environment: str
 
     def load(self) -> Iterable[BenchmarkExample]: ...
 
@@ -77,7 +94,7 @@ class Benchmark(Protocol):
 
 
 @runtime_checkable
-class Target(Protocol):
+class Environment(Protocol):
     name: str
     version: str
 
@@ -114,3 +131,8 @@ class Executor(Protocol):
         timeout_s: int,
         rng_seed: int,
     ) -> RolloutResult: ...
+
+
+# Backwards-compatible protocol names while callers migrate to the new shape.
+Benchmark = Eval
+Target = Environment

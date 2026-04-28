@@ -3,24 +3,24 @@
 **Status**: draft (build handoff)
 **Owner**: jz
 **Depends on**: `docs/specs/v2026-04-27-eval-harness.md` (Phases 1–2 shipped)
-**Supersedes**: text-only benchmark path and `raw-llm`-as-primary-target
+**Supersedes**: text-only eval path and `raw-llm`-as-primary-environment
 
 ---
 
 ## 0. One-line summary
 
-Make MME-Emotion the primary evaluation benchmark. Add an audio-native evaluation path: a `multimodal-llm` target that loads audio (or video with audio) and submits it to an `AudioLLMProvider`, with two providers in v0 — Gemini 2.5 Pro (hosted, frontier baseline) and Gemma 4 E4B served via vLLM (open-weights, the fine-tune target). MME-Emotion is scoped to a 10-clip subset for the tight build loop, with two scorers: recognition (deterministic accuracy) and reasoning (LLM judge, Claude Opus).
+Make MME-Emotion the primary eval. Add an audio-native evaluation path: a `multimodal-llm` environment that loads audio (or video with audio) and submits it to an `AudioLLMProvider`, with two providers in v0 — Gemini 2.5 Pro (hosted, frontier baseline) and Gemma 4 E4B served via vLLM (open-weights, the fine-tune candidate). MME-Emotion is scoped to a 10-clip subset for the tight build loop, with two scorers: recognition (deterministic accuracy) and reasoning (LLM judge, Claude Opus).
 
 ## 1. What this changes and why
 
-The product is prosody-aware coaching — the words matter less than the tone. A text benchmark cannot measure that. MME-Emotion is multimodal, has an active research community, and aligns with the rehearse strategy of building a purpose-built audio LLM rather than wrapping a frontier provider.
+The product is prosody-aware coaching — the words matter less than the tone. A text eval cannot measure that. MME-Emotion is multimodal, has an active research community, and aligns with the rehearse strategy of building a purpose-built audio LLM rather than wrapping a frontier provider.
 
-The strategic frame: **two model slots evaluated on the same benchmark**.
+The strategic frame: **two model slots evaluated on the same eval**.
 
 | Slot | Provider | Role |
 |---|---|---|
 | `multimodal_hosted` | Gemini 2.5 Pro | Frontier baseline. The number to beat. |
-| `multimodal_open` | Gemma 4 E4B via vLLM | The fine-tune target. What rehearse owns. |
+| `multimodal_open` | Gemma 4 E4B via vLLM | The fine-tune candidate. What rehearse owns. |
 
 Long-term, only the second slot matters — it's where DPO on collected session preference pairs lands. Gemini exists in eval to keep us honest about whether the open-weights candidate is competitive.
 
@@ -28,7 +28,7 @@ Long-term, only the second slot matters — it's where DPO on collected session 
 
 These were resolved before this spec; they are not open questions.
 
-1. **MME-Emotion is the benchmark of record** — benchmark adapter, sample data, README section, and CLI examples should point to `mme-emotion`. Keep `raw-llm` target itself for occasional text diagnostics; it's just no longer the primary path.
+1. **MME-Emotion is the eval of record** — dataset adapter, sample data, README section, and CLI examples should point to `mme-emotion`. Keep `raw-llm` environment itself for occasional text diagnostics; it's just no longer the primary path.
 2. **Hosted slot**: Gemini 2.5 Pro (audio-native via `google-genai` SDK).
 3. **Open-weights slot**: Gemma 4 E4B (4.5B effective params, Apache 2.0, audio up to 30s, served via vLLM behind an OpenAI-compatible endpoint).
 4. **Subset for v0**: 10 clips, hand-curated from `ER_Lab` for length-distribution reasons (lab-recorded, mostly under 30s).
@@ -51,13 +51,13 @@ These were resolved before this spec; they are not open questions.
                                         │
               ┌─────────────────────────┼──────────────────────────┐
               ▼                         ▼                          ▼
-       MMEEmotionBenchmark   LocalSubprocessExecutor      [Recognition +
-       loads .json +         (unchanged)                   Reasoning]
+       MMEEmotionEval        LocalSubprocessExecutor      [Recognition +
+       uses dataset +        (unchanged)                   Reasoning]
        resolves audio paths           │                    Scorers
               │                       ▼                          │
               │              ┌────────────────────┐               │
               │              │  multimodal-llm    │  NEW          │
-              │              │   target           │               │
+              │              │   environment      │               │
               │              └─────────┬──────────┘               │
               │                        │                          │
               │           ┌────────────┴───────────┐              │
@@ -82,18 +82,18 @@ What's new in this spec, file-by-file:
 | `rehearse/eval/providers/base.py` | new | `AudioLLMProvider` protocol |
 | `rehearse/eval/providers/gemini.py` | new | Google Gemini via `google-genai` |
 | `rehearse/eval/providers/vllm.py` | new | OpenAI-compatible client pointed at a vLLM server |
-| `rehearse/eval/targets/multimodal_llm.py` | new | Loads audio/video, calls provider, returns `RolloutResult` |
-| `rehearse/eval/benchmarks/mme_emotion.py` | new | MME-Emotion adapter |
+| `rehearse/eval/environments/multimodal_llm.py` | new | Loads audio/video, calls provider, returns `RolloutResult` |
+| `rehearse/eval/datasets/mme_emotion.py` | new | MME-Emotion adapter |
 | `rehearse/eval/scorers/llm_judge.py` | promoted from stub | Reasoning scorer (Claude Opus) + reusable judge primitive |
 | `rehearse/eval/scorers/deterministic.py` | extended | `MMERecognitionScorer` (label exact match) |
-| `evals/benchmarks/mme-emotion/v0-10clip/manifest.json` | new (vendored, small) | 10 hand-picked clip ids + ground truth |
-| `evals/benchmarks/mme-emotion/v0-10clip/clips/*.mp4` | new (vendored, ~50 MB) | The actual audio/video files for offline runs |
+| `evals/datasets/mme-emotion/v0-10clip/manifest.json` | new (vendored, small) | 10 hand-picked clip ids + ground truth |
+| `evals/datasets/mme-emotion/v0-10clip/clips/*.mp4` | new (vendored, ~50 MB) | The actual audio/video files for offline runs |
 | `scripts/fetch_mme_emotion.py` | new | Pulls full dataset from HF for larger runs (out of v0 scope) |
-| legacy text-only benchmark adapter | removed | Replaced by `MMEEmotionBenchmark` |
+| legacy text-only dataset adapter | removed | Replaced by `MMEEmotionDataset` + `MMEEmotionEval` |
 | legacy text-only sample data | removed | Replaced by MME-Emotion 10-clip manifest + clips |
-| legacy text-only benchmark tests | removed | Replaced by MME-Emotion adapter/scorer tests |
+| legacy text-only eval tests | removed | Replaced by MME-Emotion dataset/eval/scorer tests |
 
-What is unchanged: `protocols.py` (the four core protocols), `runner.py`, `worker.py`, `cli.py`, `executors/`, `targets/echo.py`, `targets/raw_llm.py`, `benchmarks/noop.py`, `types.py`. The provider plugin layer slots cleanly under the existing target abstraction.
+What is unchanged: the runner/executor isolation model and the serialized `BenchmarkExample` / `RolloutResult` field names. The public plugin shape is now evals, datasets, scorers, environments, providers, and executors.
 
 ## 4. Components
 
@@ -131,7 +131,7 @@ class ProviderResponse:
     provider_metadata: dict[str, Any] = field(default_factory=dict)
 ```
 
-The protocol is `runtime_checkable` (mirrors `Target` etc.). Provider construction takes a `dict[str, str]` of model slots, same as targets, so the CLI's `--model-slot` flag continues to work.
+The protocol is `runtime_checkable` (mirrors `Environment` etc.). Provider construction takes a `dict[str, str]` of model slots, same as environments, so the CLI's `--model-slot` flag continues to work.
 
 ### 4.2 Gemini provider — `rehearse/eval/providers/gemini.py`
 
@@ -139,7 +139,7 @@ The protocol is `runtime_checkable` (mirrors `Target` etc.). Provider constructi
 - Auth: `GOOGLE_API_KEY` env var. Validated at provider init.
 - Uploads: small files (<20 MB) inline base64; larger via the Files API. Threshold lives in a constant.
 - Default model: `gemini-2.5-pro`. Override via `--model-slot multimodal_hosted=gemini-2.5-flash` etc.
-- Failure handling: any 4xx/5xx → `ProviderResponse` is not produced; raises `ProviderError` which the target catches and converts to `RolloutResult(status="error")`.
+- Failure handling: any 4xx/5xx → `ProviderResponse` is not produced; raises `ProviderError` which the environment catches and converts to `RolloutResult(status="error")`.
 
 ### 4.3 vLLM provider — `rehearse/eval/providers/vllm.py`
 
@@ -151,10 +151,10 @@ The protocol is `runtime_checkable` (mirrors `Target` etc.). Provider constructi
 
 The vLLM provider does not start, manage, or health-check the vLLM server itself. That is the operator's job. The provider assumes a reachable, model-loaded endpoint at startup and surfaces a clear error if not.
 
-### 4.4 `multimodal-llm` target — `rehearse/eval/targets/multimodal_llm.py`
+### 4.4 `multimodal-llm` environment — `rehearse/eval/environments/multimodal_llm.py`
 
 ```python
-class MultimodalLLMTarget:
+class MultimodalLLMEnvironment:
     name = "multimodal-llm"
     version = "v0"
 
@@ -173,20 +173,20 @@ Behavior:
 4. Wrap into `RolloutResult` with `payload = {"output": text, "model": ..., "provider": provider.name, "audio_duration_s": ..., ...}`.
 5. On clip-too-long, status=`"error"` with a structured `error="audio_exceeds_provider_limit"` so the recognition scorer can distinguish "model got it wrong" from "we never asked the model."
 
-Provider selection at runtime: target reads model_slots `multimodal_hosted` and `multimodal_open`; the active one is chosen by `--provider gemini|vllm` (CLI flag added) or by a payload-level hint. If both are set, exactly one must be selected per run, never both.
+Provider selection at runtime: environment reads model_slots `multimodal_hosted` and `multimodal_open`; the active one is chosen by `--provider gemini|vllm` (CLI flag added) or by a payload-level hint. If both are set, exactly one must be selected per run, never both.
 
-### 4.5 MME-Emotion adapter — `rehearse/eval/benchmarks/mme_emotion.py`
+### 4.5 MME-Emotion adapter — `rehearse/eval/datasets/mme_emotion.py`
 
-- Loads `evals/benchmarks/mme-emotion/v0-10clip/manifest.json`.
+- Loads `evals/datasets/mme-emotion/v0-10clip/manifest.json`.
 - 10 hand-curated clips from `ER_Lab` (lab-recorded, mostly <30s, balanced across 9 emotion classes — at least 8 of 9 represented; 1 class may double up given the 10-clip cap).
-- One `BenchmarkExample` per clip:
+- One `BenchmarkExample` per clip. The serialized field is still named `benchmark` for compatibility, but it carries the eval/dataset name:
 
 ```python
 BenchmarkExample(
     id="mme-er-lab-001",
     benchmark="mme-emotion",
     payload={
-        "video_path": "evals/benchmarks/mme-emotion/v0-10clip/clips/Ses05M_script01_1_F034.mp4",
+        "video_path": "evals/datasets/mme-emotion/v0-10clip/clips/Ses05M_script01_1_F034.mp4",
         "audio_max_s": 30,
         "prompt": (
             "You are listening to a short clip of a person speaking. "
@@ -210,7 +210,7 @@ Scoring plan returns both scorers. Rollout timeout: 90 s (allows for slow Gemma 
 The 10-clip selection is hand-curated rather than randomly sampled because:
 - We need every emotion class represented.
 - Clip duration must be under both providers' limits (30s for Gemma, generous for Gemini).
-- We want 1–2 ambiguous-on-purpose clips (e.g. Frustration vs Anger boundary) to make the benchmark non-trivial at 10 examples.
+- We want 1–2 ambiguous-on-purpose clips (e.g. Frustration vs Anger boundary) to make the eval non-trivial at 10 examples.
 
 The 10-clip manifest is checked into git. The actual `.mp4` files are vendored (estimate ~50 MB total) — also in git, since the repo currently has no LFS setup and 50 MB is acceptable.
 
@@ -219,7 +219,7 @@ The 10-clip manifest is checked into git. The actual `.mp4` files are vendored (
 ```python
 class MMERecognitionScorer:
     name = "mme_recognition"
-    dimension = "mme_recognition_accuracy"   # benchmark-private string
+    dimension = "mme_recognition_accuracy"   # eval-private string
 ```
 
 - Parse `payload["output"]` for a JSON object with a `label` field. Use a tolerant helper, `parse_json_object_with_keys`, shared by future JSON-output scorers.
@@ -273,11 +273,11 @@ Cost: Opus on 10 short prompts is ~$0.50 per run. Acceptable.
 One new flag on `rehearse-eval run`:
 
 ```
---provider {gemini|vllm}   # required when target=multimodal-llm
-                           # raises if benchmark doesn't support multimodal-llm
+--provider {gemini|vllm}   # required when environment=multimodal-llm
+                           # raises if eval doesn't support multimodal-llm
 ```
 
-`list-providers` subcommand added for symmetry with `list-benchmarks` / `list-targets`.
+`list-providers` subcommand added for symmetry with `list-datasets` / `list-environments`.
 
 The existing `--model-slot` flag is reused: `--model-slot multimodal_hosted=gemini-2.5-pro` or `--model-slot multimodal_open=gemma-4-e4b`.
 
@@ -288,7 +288,7 @@ The existing `--model-slot` flag is reused: `--model-slot multimodal_hosted=gemi
 | `GOOGLE_API_KEY` | Gemini auth | `--provider gemini` |
 | `VLLM_BASE_URL` | vLLM endpoint, e.g. `http://gpu-host:8000/v1` | `--provider vllm` |
 | `VLLM_API_KEY` | bearer token for the vLLM endpoint (`dummy` in dev) | `--provider vllm` |
-| `ANTHROPIC_API_KEY` | Claude Opus for the reasoning scorer | always (with mme-emotion benchmark) |
+| `ANTHROPIC_API_KEY` | Claude Opus for the reasoning scorer | always (with mme-emotion eval + reasoning scorer) |
 
 Validated at provider/scorer construction. Missing → fail-fast at runner startup, not at first rollout.
 
@@ -296,7 +296,7 @@ Validated at provider/scorer construction. Missing → fail-fast at runner start
 
 ### 5.1 v0: 10 clips checked into git
 
-`evals/benchmarks/mme-emotion/v0-10clip/` contains:
+`evals/datasets/mme-emotion/v0-10clip/` contains:
 - `manifest.json` — 10 entries with id, label, video filename, duration, subset
 - `clips/*.mp4` — actual files, ~50 MB total
 
@@ -308,8 +308,8 @@ Acceptable in git for v0. Not LFS, not externally hosted.
 
 - Downloads from `Karl28/MME-Emotion` on Hugging Face.
 - Verifies SHA against pinned commit.
-- Writes to `evals/benchmarks/mme-emotion/{commit-sha}/`.
-- Updates `MMEEmotionBenchmark.version` to the SHA when invoked.
+- Writes to `evals/datasets/mme-emotion/{commit-sha}/`.
+- Updates `MMEEmotionDataset.version` / `MMEEmotionEval.version` to the SHA when invoked.
 
 Not built in v0, but the directory layout (`{commit-sha}/`) anticipates it. The 10-clip subset uses `v0-10clip/` as a logical "tag" alongside future SHA dirs.
 
@@ -317,16 +317,16 @@ Not built in v0, but the directory layout (`{commit-sha}/`) anticipates it. The 
 
 Audio bytes are large; we already pass `video_path` (a string) through the executor's stdin JSON, not bytes. The worker opens the file. No changes to `local_subprocess.py`.
 
-## 6. Replacement plan: MME-Emotion becomes the benchmark
+## 6. Replacement plan: MME-Emotion becomes the eval
 
 In one PR, separately reviewable:
 
-1. Add `rehearse/eval/benchmarks/mme_emotion.py` and register `mme-emotion` in `BENCHMARKS`.
-2. Add `evals/benchmarks/mme-emotion/v0-10clip/manifest.json` and the vendored 10-clip media set.
+1. Add `rehearse/eval/datasets/mme_emotion.py` and `rehearse/eval/evals/mme_emotion.py`; register `mme-emotion` in `DATASETS` and `EVALS`.
+2. Add `evals/datasets/mme-emotion/v0-10clip/manifest.json` and the vendored 10-clip media set.
 3. Add MME-Emotion adapter tests and recognition-scorer tests.
-4. Update `rehearse/eval/README.md` and the root `README.md` so benchmark examples use `mme-emotion`.
-5. Remove the legacy text-only benchmark adapter, sample data, tests, registry entry, and README examples.
-6. Replace benchmark-specific JSON parsing helpers with `parse_json_object_with_keys`; delete unused correlation helpers.
+4. Update `rehearse/eval/README.md` and the root `README.md` so eval examples use `mme-emotion`.
+5. Remove the legacy text-only dataset adapter, sample data, tests, registry entry, and README examples.
+6. Replace eval-specific JSON parsing helpers with `parse_json_object_with_keys`; delete unused correlation helpers.
 
 The legacy-removal portion can ship before the MME-Emotion adapter lands. The full replacement ships with Phase M3, when `mme-emotion` is registered and runnable. The harness still has `noop` + `echo` for skeleton smoke tests during the transition.
 
@@ -334,10 +334,10 @@ The legacy-removal portion can ship before the MME-Emotion adapter lands. The fu
 
 Each phase ends with green tests + a working manual demo. Phases are reviewable PRs.
 
-**Phase M1 — Benchmark replacement groundwork.**
-- Remove the legacy text-only benchmark registry entry, adapter, data, tests, and README examples.
+**Phase M1 — Eval replacement groundwork.**
+- Remove the legacy text-only eval registry entry, adapter, data, tests, and README examples.
 - Update `rehearse/eval/README.md` with a placeholder for the upcoming MME-Emotion section.
-- Tests: `noop` smoke run, benchmark registry no longer lists the removed benchmark.
+- Tests: `noop` smoke run, eval registry no longer lists the removed eval.
 
 **Phase M2 — Provider plugin layer + Gemini provider.**
 - `providers/base.py` (`AudioLLMProvider`, `AudioInput`, `ProviderResponse`, `ProviderError`).
@@ -346,13 +346,13 @@ Each phase ends with green tests + a working manual demo. Phases are reviewable 
 - Tests: protocol conformance, mocked Gemini response shaping, env-var validation, provider registry.
 - Demo: `rehearse-eval list-providers` lists `gemini`.
 
-**Phase M3 — `multimodal-llm` target + 10-clip MME-Emotion + recognition scorer.**
-- `targets/multimodal_llm.py`.
-- `benchmarks/mme_emotion.py`.
+**Phase M3 — `multimodal-llm` environment + 10-clip MME-Emotion + recognition scorer.**
+- `environments/multimodal_llm.py`.
+- `datasets/mme_emotion.py`.
 - `scorers/deterministic.py::MMERecognitionScorer`.
-- Hand-curate 10 clips into `evals/benchmarks/mme-emotion/v0-10clip/` (this is partly research work; see Open Question D1).
-- Tests: target + adapter + scorer in isolation; runner end-to-end against a stubbed provider that returns scripted JSON.
-- Demo: `rehearse-eval run --benchmark mme-emotion --target multimodal-llm --provider gemini --limit 10` produces real recognition scores against Gemini.
+- Hand-curate 10 clips into `evals/datasets/mme-emotion/v0-10clip/` (this is partly research work; see Open Question D1).
+- Tests: environment + adapter + scorer in isolation; runner end-to-end against a stubbed provider that returns scripted JSON.
+- Demo: `rehearse-eval run --eval mme-emotion --environment multimodal-llm --provider gemini --limit 10` produces real recognition scores against Gemini.
 
 **Phase M4 — Reasoning scorer (Claude Opus judge).**
 - Promote `scorers/llm_judge.py` from stub.
@@ -375,7 +375,7 @@ Phases M1–M4 are pure code, runnable today. Phase M5 needs ops setup. Phase M6
 
 ## 8. vLLM operational notes (out-of-band)
 
-Out of scope for this spec to implement, but documented so the eval engineer knows what they're targeting.
+Out of scope for this spec to implement, but documented so the eval engineer knows what endpoint the harness expects.
 
 Recommended bootstrap on a single GPU host (RunPod, Lambda, or local with an A100/H100):
 
@@ -419,13 +419,13 @@ Explicitly not in this spec:
 - LFS migration for the 10 clips. v0 ships them in regular git.
 - Fine-tuning Gemma 4 on rehearse-collected preference pairs. That's the v1 ML work the *eval result* feeds into; this spec ends at "eval is honest and runnable."
 - Replacing the runtime spec's persona compiler / synthesis prompts. Those are independent.
-- Adding video understanding beyond audio for emotion. MME-Emotion has video; v0 treats it as an audio benchmark and ignores the visual track. (Both Gemini 2.5 Pro and Gemma 4 can process the video too — added in a later phase if scoring deltas suggest visual signal matters for the task.)
+- Adding video understanding beyond audio for emotion. MME-Emotion has video; v0 treats it as an audio eval and ignores the visual track. (Both Gemini 2.5 Pro and Gemma 4 can process the video too — added in a later phase if scoring deltas suggest visual signal matters for the task.)
 
 ## 11. Why this is the right shape
 
 Three claims worth being explicit about, since they'll feel non-obvious during build:
 
-1. **The provider plugin layer is not over-engineering.** It exists because the eval question we actually want answered is "does our open-weights candidate match frontier?" That requires running the same target + benchmark + scorers against ≥2 providers. Without the plugin, we'd have a `gemini-target` and a `gemma-target` with 90% identical code, and the comparison logic would live in the wrong place.
+1. **The provider plugin layer is not over-engineering.** It exists because the eval question we actually want answered is "does our open-weights candidate match frontier?" That requires running the same eval + dataset + environment + scorers against ≥2 providers. Without the plugin, we'd have a `gemini-environment` and a `gemma-environment` with 90% identical code, and the comparison logic would live in the wrong place.
 
 2. **vLLM as a separate concern is intentional.** Coupling the eval harness to vLLM lifecycle (start/stop/health) makes the harness fragile and the comparison less honest. Operators run vLLM however they like; the harness just makes calls. This is the same discipline as the runtime spec's separation of `ArtifactStore` from concrete backends.
 

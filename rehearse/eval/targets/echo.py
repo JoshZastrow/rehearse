@@ -1,4 +1,4 @@
-"""Echo target — returns the example's payload unchanged.
+"""Echo environment — returns the example's payload unchanged.
 
 Phase 1 skeleton. Lets the harness run without any model API.
 """

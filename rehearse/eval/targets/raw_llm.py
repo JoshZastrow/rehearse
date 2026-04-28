@@ -1,6 +1,6 @@
-"""raw-llm target — single Anthropic SDK call with the example's prompt.
+"""raw-llm environment — single Anthropic SDK call with the example's prompt.
 
-Used by EQ-Bench-style benchmarks. The model slot key is `raw_llm`; default
+Kept for occasional text diagnostics. The model slot key is `raw_llm`; default
 is Claude Sonnet 4.6, matching the synthesis slot per SPEC §9.
 
 Reads the prompt and generation params from `example.payload`:

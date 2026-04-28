@@ -1,7 +1,7 @@
 """Eval orchestrator.
 
-Resolves a benchmark + target by name, schedules rollouts through the executor
-with bounded concurrency, runs the benchmark's scoring plan against each
+Resolves an eval + environment by name, schedules rollouts through the executor
+with bounded concurrency, runs the eval's scoring plan against each
 rollout, and writes:
 
   evals/runs/{run_id}/run.json          # EvalRun manifest
@@ -23,17 +23,41 @@ from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
-from rehearse.eval.benchmarks import get_benchmark
+from rehearse.eval.evals import get_eval
 from rehearse.eval.executors import LocalSubprocessExecutor
 from rehearse.eval.protocols import BenchmarkExample, Executor, RolloutResult
-from rehearse.eval.targets import get_target
+from rehearse.eval.environments import get_environment
 from rehearse.types import EvalRun, RubricScore
 
 
-@dataclass
 class RunConfig:
-    benchmark: str
-    target: str
+    def __init__(
+        self,
+        eval_name: str | None = None,
+        environment: str | None = None,
+        *,
+        benchmark: str | None = None,
+        target: str | None = None,
+        limit: int | None = None,
+        concurrency: int = 4,
+        seed: int = 0,
+        model_slots: dict[str, str] | None = None,
+        tag: str | None = None,
+        runs_root: Path = Path("evals/runs"),
+    ) -> None:
+        self.eval_name = eval_name or benchmark
+        self.environment = environment or target
+        self.limit = limit
+        self.concurrency = concurrency
+        self.seed = seed
+        self.model_slots = model_slots
+        self.tag = tag
+        self.runs_root = runs_root
+        if not self.eval_name:
+            raise ValueError("RunConfig requires eval_name (or deprecated benchmark)")
+
+    eval_name: str | None
+    environment: str | None
     limit: int | None = None
     concurrency: int = 4
     seed: int = 0
@@ -54,18 +78,19 @@ class RunOutcome:
 
 
 async def execute_run(config: RunConfig, executor: Executor | None = None) -> RunOutcome:
-    benchmark = get_benchmark(config.benchmark)
-    if config.target not in benchmark.supported_targets:
+    eval_spec = get_eval(config.eval_name or "")
+    environment_name = config.environment or eval_spec.preferred_environment
+    if environment_name not in eval_spec.supported_environments:
         raise ValueError(
-            f"benchmark {benchmark.name!r} does not support target {config.target!r}; "
-            f"supported: {sorted(benchmark.supported_targets)}"
+            f"eval {eval_spec.name!r} does not support environment {environment_name!r}; "
+            f"supported: {sorted(eval_spec.supported_environments)}"
         )
 
     model_slots = config.model_slots or {}
-    target = get_target(config.target, model_slots)
+    environment = get_environment(environment_name, model_slots)
     executor = executor or LocalSubprocessExecutor()
 
-    examples = list(benchmark.load())
+    examples = list(eval_spec.load())
     if config.limit is not None:
         examples = examples[: config.limit]
 
@@ -76,14 +101,14 @@ async def execute_run(config: RunConfig, executor: Executor | None = None) -> Ru
     (run_dir / "failures").mkdir(exist_ok=True)
 
     started_at = datetime.now()
-    timeout_s = benchmark.rollout_timeout_s()
+    timeout_s = eval_spec.rollout_timeout_s()
     semaphore = asyncio.Semaphore(config.concurrency)
 
     async def run_one(idx: int, ex: BenchmarkExample) -> RolloutResult:
         async with semaphore:
             return await executor.submit(
-                target_name=target.name,
-                target_version=target.version,
+                target_name=environment.name,
+                target_version=environment.version,
                 model_slots=model_slots,
                 example=ex,
                 run_dir=run_dir / "sessions" / ex.id,
@@ -95,7 +120,7 @@ async def execute_run(config: RunConfig, executor: Executor | None = None) -> Ru
         *(run_one(i, ex) for i, ex in enumerate(examples))
     )
 
-    scorers = benchmark.scoring_plan()
+    scorers = eval_spec.scoring_plan()
     all_scores: list[RubricScore] = []
     for ex, ro in zip(examples, rollouts):
         if ro.status != "ok":
@@ -130,7 +155,10 @@ async def execute_run(config: RunConfig, executor: Executor | None = None) -> Ru
         started_at=started_at,
         completed_at=completed_at,
         example_ids=[ex.id for ex in examples],
-        pipeline_version=f"{benchmark.name}@{benchmark.version}/{target.name}@{target.version}",
+        pipeline_version=(
+            f"{eval_spec.name}@{eval_spec.version}/"
+            f"{environment.name}@{environment.version}"
+        ),
         model_slots=model_slots,
         results_path=results_path,
         aggregate_scores=aggregates,  # type: ignore[arg-type]
@@ -138,8 +166,8 @@ async def execute_run(config: RunConfig, executor: Executor | None = None) -> Ru
     (run_dir / "run.json").write_text(eval_run.model_dump_json(indent=2))
 
     summary = _render_summary(
-        benchmark_name=benchmark.name,
-        target_name=target.name,
+        eval_name=eval_spec.name,
+        environment_name=environment.name,
         run_id=run_id,
         config=config,
         examples=examples,
@@ -176,8 +204,8 @@ def _aggregate(scores: list[RubricScore]) -> dict[str, float]:
 
 def _render_summary(
     *,
-    benchmark_name: str,
-    target_name: str,
+    eval_name: str,
+    environment_name: str,
     run_id: str,
     config: RunConfig,
     examples: list[BenchmarkExample],
@@ -193,8 +221,8 @@ def _render_summary(
     lines = [
         f"# Eval run `{run_id}`",
         "",
-        f"- Benchmark: **{benchmark_name}**",
-        f"- Target: **{target_name}**",
+        f"- Eval: **{eval_name}**",
+        f"- Environment: **{environment_name}**",
         f"- Examples: {len(examples)} (ok={n_ok}, error={n_err}, timeout={n_to})",
         f"- Concurrency: {config.concurrency}",
         f"- Seed: {config.seed}",

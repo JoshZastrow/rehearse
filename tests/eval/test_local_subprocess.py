@@ -1,6 +1,6 @@
 """LocalSubprocessExecutor: timeout enforcement and crash isolation.
 
-We don't have a target that hangs by design, so we test the timeout path by
+We don't have an environment that hangs by design, so we test the timeout path by
 calling submit() with timeout_s=0 (worker has no chance to finish before
 asyncio.wait_for raises). Crash isolation is exercised by the runner test
 plus the worker's exception handler.
@@ -14,7 +14,7 @@ from rehearse.eval.executors import LocalSubprocessExecutor
 from rehearse.eval.protocols import BenchmarkExample
 
 
-async def test_echo_target_via_subprocess(tmp_path: Path):
+async def test_echo_environment_via_subprocess(tmp_path: Path):
     executor = LocalSubprocessExecutor()
     example = BenchmarkExample(
         id="ex1", benchmark="noop", payload={"echo": "hi"}, expected={}
@@ -50,7 +50,7 @@ async def test_subprocess_timeout_marks_rollout_timeout(tmp_path: Path):
     assert "exceeded" in (result.error or "")
 
 
-async def test_unknown_target_in_worker_marks_error(tmp_path: Path):
+async def test_unknown_environment_in_worker_marks_error(tmp_path: Path):
     executor = LocalSubprocessExecutor()
     example = BenchmarkExample(
         id="ex1", benchmark="noop", payload={}, expected={}
