@@ -1,7 +1,8 @@
-"""Environment-backed settings.
+"""Load runtime settings from environment variables.
 
-Loads secrets and runtime configuration from environment variables (or a .env
-file in dev). Nothing in the rest of the package reads os.environ directly.
+This file defines the configuration object used by the live runtime. It reads
+Twilio, Hume, and local filesystem settings in one place so the rest of the
+runtime does not touch `os.environ` directly.
 """
 
 from __future__ import annotations
@@ -15,6 +16,8 @@ from dotenv import load_dotenv
 
 @dataclass(frozen=True)
 class RuntimeConfig:
+    """All settings needed to run the live Twilio and Hume call path."""
+
     twilio_account_sid: str
     twilio_auth_token: str
     twilio_from_number: str
@@ -27,6 +30,7 @@ class RuntimeConfig:
 
     @classmethod
     def from_env(cls, *, load_dotenv_file: bool = True) -> RuntimeConfig:
+        """Build a runtime config from environment variables and return it."""
         if load_dotenv_file:
             load_dotenv()
 

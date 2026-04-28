@@ -1,4 +1,9 @@
-"""Async fanout bus for runtime frames."""
+"""Fan runtime frames out to multiple live subscribers.
+
+This file provides the tiny in-process event bus used during a live call. It
+lets Twilio, Hume, writers, and later phase logic all observe the same runtime
+frames without depending on each other directly.
+"""
 
 from __future__ import annotations
 
@@ -14,6 +19,7 @@ class FrameBus:
     """Publish runtime frames to one or more independent subscribers."""
 
     def __init__(self, session_id: str, maxsize: int = 256) -> None:
+        """Create a new bus for one session id."""
         self.session_id = session_id
         self.maxsize = maxsize
         self._closed = False
@@ -21,7 +27,7 @@ class FrameBus:
         self._subscribers: list[asyncio.Queue[Frame | object]] = []
 
     async def publish(self, frame: Frame) -> None:
-        """Fan a frame out to every current subscriber."""
+        """Send one frame to every subscriber currently attached to the bus."""
 
         async with self._lock:
             if self._closed:
@@ -31,7 +37,7 @@ class FrameBus:
             await queue.put(frame)
 
     async def aclose(self) -> None:
-        """Stop the bus and terminate all subscribers."""
+        """Close the bus and signal all subscribers to stop iterating."""
 
         async with self._lock:
             if self._closed:
@@ -43,7 +49,7 @@ class FrameBus:
             await queue.put(_SENTINEL)
 
     async def subscribe(self) -> AsyncIterator[Frame]:
-        """Yield frames until the bus is closed."""
+        """Yield frames from a private queue until the bus is closed."""
 
         queue: asyncio.Queue[Frame | object] = asyncio.Queue(maxsize=self.maxsize)
         async with self._lock:

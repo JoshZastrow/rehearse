@@ -1,8 +1,8 @@
-"""SessionOrchestrator — lifecycle owner.
+"""Manage the lifecycle of one live runtime session.
 
-Mints a session, holds a handle through the call, finalizes on hangup,
-persists the manifest. Phase R1 only: pipeline attach and synthesis are
-no-ops, here as seams for later phases.
+This file creates session manifests, keeps lightweight in-memory handles for
+active calls, and marks sessions complete, partial, or failed when the call
+ends.
 """
 
 from __future__ import annotations
@@ -25,6 +25,8 @@ CompletionStatus = Literal["complete", "partial", "failed", "in_progress"]
 
 @dataclass
 class SessionHandle:
+    """Small in-memory record for one active call session."""
+
     session_id: str
     session_dir: Path
     started_at: datetime
@@ -35,18 +37,23 @@ class SessionHandle:
 
 @dataclass
 class TriggerEvent:
+    """Inbound trigger data used to start a new session."""
+
     from_number: str
     body: str
     received_at: datetime
 
 
 class SessionOrchestrator:
+    """Create, track, and finalize live runtime sessions."""
+
     def __init__(self, store: LocalFilesystemStore) -> None:
         self._store = store
         self._handles: dict[str, SessionHandle] = {}
         self._by_call_sid: dict[str, str] = {}
 
     async def start(self, trigger: TriggerEvent) -> SessionHandle:
+        """Create a new session manifest and return its active handle."""
         session = Session(
             created_at=trigger.received_at,
             phone_number_hash=_hash_number(trigger.from_number),
@@ -70,9 +77,11 @@ class SessionOrchestrator:
         return handle
 
     def get(self, session_id: str) -> SessionHandle | None:
+        """Return the active session handle for an id, if it exists."""
         return self._handles.get(session_id)
 
     async def attach_call(self, session_id: str, call_sid: str) -> None:
+        """Attach a Twilio call SID to an existing active session."""
         handle = self._handles.get(session_id)
         if handle is None:
             log.warning("session.attach_call.unknown", session_id=session_id)
@@ -83,9 +92,11 @@ class SessionOrchestrator:
         log.info("session.attach_call", session_id=session_id, call_sid=call_sid)
 
     def find_by_call_sid(self, call_sid: str) -> str | None:
+        """Look up a session id from a Twilio call SID."""
         return self._by_call_sid.get(call_sid)
 
     async def finalize(self, session_id: str, status: CompletionStatus) -> None:
+        """Mark a session finished and persist its final completion status."""
         handle = self._handles.pop(session_id, None)
         if handle and handle.call_sid:
             self._by_call_sid.pop(handle.call_sid, None)
@@ -108,8 +119,10 @@ class SessionOrchestrator:
 
 
 def _hash_number(number: str) -> str:
+    """Return a short stable hash of a phone number for storage."""
     return hashlib.sha256(number.encode("utf-8")).hexdigest()[:16]
 
 
 def utcnow() -> datetime:
+    """Return the current UTC timestamp."""
     return datetime.now(UTC)

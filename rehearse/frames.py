@@ -1,4 +1,8 @@
-"""Runtime frame types carried over the owned live-call bus."""
+"""Define the runtime events that move through the live call bus.
+
+These models are the small shared vocabulary for the owned runtime. Twilio and
+Hume adapters publish them, and writers or future phase logic consume them.
+"""
 
 from __future__ import annotations
 
@@ -8,7 +12,7 @@ from rehearse.types import Phase, ProsodyScores, Speaker, Strict
 
 
 class AudioChunk(Strict):
-    """One PCM16 mono audio chunk on the runtime bus."""
+    """Carry one chunk of mono PCM16 audio for one speaker."""
 
     session_id: str
     speaker: Speaker
@@ -17,7 +21,7 @@ class AudioChunk(Strict):
 
 
 class TranscriptDelta(Strict):
-    """One transcript update from Hume EVI."""
+    """Carry one transcript update produced during the live call."""
 
     session_id: str
     utterance_id: str
@@ -29,7 +33,7 @@ class TranscriptDelta(Strict):
 
 
 class ProsodyEvent(Strict):
-    """One prosody sample aligned to one utterance."""
+    """Carry one prosody sample aligned to one utterance."""
 
     session_id: str
     utterance_id: str
@@ -40,7 +44,7 @@ class ProsodyEvent(Strict):
 
 
 class PhaseSignal(Strict):
-    """One runtime phase transition event."""
+    """Carry one phase transition event on the runtime bus."""
 
     session_id: str
     from_phase: Phase | None = None
@@ -50,7 +54,7 @@ class PhaseSignal(Strict):
 
 
 class EndOfCall(Strict):
-    """A terminal event emitted by the live runtime."""
+    """Carry the final termination reason for a live call."""
 
     session_id: str
     reason: Literal["hangup", "error", "budget_exceeded"]
