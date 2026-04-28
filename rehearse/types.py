@@ -22,7 +22,6 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
-
 # ───────────────────────────────────────────────────────────────────────────────
 # Identity & enums
 # ───────────────────────────────────────────────────────────────────────────────
@@ -275,8 +274,8 @@ class ExampleScenario(Strict):
 class RubricScore(Strict):
     run_id: str
     example_id: str
-    session_id: str
-    dimension: RubricDimension
+    session_id: str | None = None
+    dimension: RubricDimension | str
     value: float
     scorer: Literal["deterministic", "llm_judge", "human"]
     rationale: str | None = None
@@ -290,7 +289,7 @@ class EvalRun(Strict):
     pipeline_version: str
     model_slots: dict[str, str]
     results_path: Path
-    aggregate_scores: dict[RubricDimension, float] = Field(default_factory=dict)
+    aggregate_scores: dict[RubricDimension | str, float] = Field(default_factory=dict)
 
 
 # ───────────────────────────────────────────────────────────────────────────────
