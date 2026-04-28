@@ -55,6 +55,34 @@ async def test_twilio_stream_handshake_falls_back_to_call_sid() -> None:
 
 
 @pytest.mark.asyncio
+async def test_twilio_stream_properties_require_handshake() -> None:
+    stream = TwilioStream(FakeWebSocket([]))
+
+    with pytest.raises(RuntimeError):
+        _ = stream.stream_sid
+    with pytest.raises(RuntimeError):
+        _ = stream.session_id
+
+
+@pytest.mark.asyncio
+async def test_twilio_stream_rejects_missing_start_payload() -> None:
+    ws = FakeWebSocket([{"event": "start", "start": None}])
+
+    with pytest.raises(ValueError, match="missing start payload"):
+        async with TwilioStream(ws):
+            pass
+
+
+@pytest.mark.asyncio
+async def test_twilio_stream_rejects_missing_stream_sid() -> None:
+    ws = FakeWebSocket([{"event": "start", "start": {"callSid": "CA123"}}])
+
+    with pytest.raises(ValueError, match="missing streamSid"):
+        async with TwilioStream(ws):
+            pass
+
+
+@pytest.mark.asyncio
 async def test_twilio_stream_inbound_decodes_media_and_stops() -> None:
     pcm8k = struct.pack("<4h", 0, 1000, -1000, 0)
     payload = base64.b64encode(encode_pcm16(pcm8k)).decode("ascii")
@@ -74,11 +102,48 @@ async def test_twilio_stream_inbound_decodes_media_and_stops() -> None:
 
 
 @pytest.mark.asyncio
+async def test_twilio_stream_inbound_skips_non_dict_and_non_media_events() -> None:
+    pcm8k = struct.pack("<2h", 0, 1000)
+    payload = base64.b64encode(encode_pcm16(pcm8k)).decode("ascii")
+    ws = FakeWebSocket(
+        [
+            {"event": "start", "start": {"streamSid": "MZ123", "callSid": "CA123"}},
+            "not-a-dict",
+            {"event": "mark"},
+            {"event": "media", "media": {"payload": payload}},
+            {"event": "stop"},
+        ]
+    )
+
+    async with TwilioStream(ws) as stream:
+        chunks = [chunk async for chunk in stream.inbound()]
+
+    assert len(chunks) == 1
+
+
+@pytest.mark.asyncio
 async def test_twilio_stream_inbound_skips_invalid_media_payload() -> None:
     ws = FakeWebSocket(
         [
             {"event": "start", "start": {"streamSid": "MZ123", "callSid": "CA123"}},
             {"event": "media", "media": {"payload": "%%%not-base64%%%"}} ,
+            {"event": "stop"},
+        ]
+    )
+
+    async with TwilioStream(ws) as stream:
+        chunks = [chunk async for chunk in stream.inbound()]
+
+    assert chunks == []
+
+
+@pytest.mark.asyncio
+async def test_twilio_stream_inbound_skips_missing_media_fields() -> None:
+    ws = FakeWebSocket(
+        [
+            {"event": "start", "start": {"streamSid": "MZ123", "callSid": "CA123"}},
+            {"event": "media", "media": None},
+            {"event": "media", "media": {"payload": None}},
             {"event": "stop"},
         ]
     )

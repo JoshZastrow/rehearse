@@ -83,6 +83,20 @@ async def test_hume_client_send_audio_uses_audio_input_message() -> None:
 
 
 @pytest.mark.asyncio
+async def test_hume_client_send_audio_requires_connection() -> None:
+    client = HumeEVIClient(
+        api_key="api",
+        config_id="cfg",
+        bus=FrameBus("s1"),
+        session_id="s1",
+        connect_fn=_connect_factory([FakeHumeSocket([])]),
+    )
+
+    with pytest.raises(RuntimeError, match="not connected"):
+        await client.send_audio(b"\x00\x00")
+
+
+@pytest.mark.asyncio
 async def test_hume_client_maps_user_assistant_and_audio_events() -> None:
     pcm48k = struct.pack("<6h", 0, 100, 200, 300, 400, 500)
     socket = FakeHumeSocket(
@@ -150,6 +164,20 @@ async def test_hume_client_maps_user_assistant_and_audio_events() -> None:
     assert frames[1].scores.emotions["joy"] == 0.8
     assert frames[2].text == "hi there"
     assert len(frames[3].pcm16_16k) > 0
+
+
+@pytest.mark.asyncio
+async def test_hume_client_swap_config_not_implemented() -> None:
+    client = HumeEVIClient(
+        api_key="api",
+        config_id="cfg",
+        bus=FrameBus("s1"),
+        session_id="s1",
+        connect_fn=_connect_factory([FakeHumeSocket([])]),
+    )
+
+    with pytest.raises(NotImplementedError):
+        await client.swap_config("cfg-2", "prompt")
 
 
 @pytest.mark.asyncio

@@ -17,6 +17,7 @@ from rehearse.app import create_app
 from rehearse.audio.mulaw import encode_pcm16
 from rehearse.config import RuntimeConfig
 from rehearse.frames import AudioChunk
+from rehearse.telephony import TwilioRestClient
 from rehearse.types import Speaker
 
 
@@ -244,3 +245,104 @@ def test_media_websocket_bridges_twilio_to_fake_hume(
     assert FakeHumeEVIClient.seen_audio
     assert outbound["event"] == "media"
     assert outbound["streamSid"] == "MZ123"
+
+
+def test_twilio_sms_signature_validation_failure(
+    config: RuntimeConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class RejectingValidator:
+        def __init__(self, _token: str) -> None:
+            pass
+
+        def validate(self, _url: str, _params: dict[str, str], _signature: str) -> bool:
+            return False
+
+    from rehearse import app as app_module
+    from rehearse import telephony as telephony_module
+
+    monkeypatch.setattr(app_module, "TwilioRestClient", lambda cfg: FakeTwilioClient())
+    monkeypatch.setattr(telephony_module, "RequestValidator", RejectingValidator)
+
+    signed_config = RuntimeConfig(
+        **{
+            **config.__dict__,
+            "validate_twilio_signature": True,
+        }
+    )
+    client = TestClient(create_app(signed_config))
+
+    resp = client.post("/twilio/sms", data={"From": "+15551234567", "Body": "hello"})
+    assert resp.status_code == 403
+
+
+def test_twilio_sms_failed_outbound_call_marks_session_failed(
+    config: RuntimeConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class FailingTwilioClient(FakeTwilioClient):
+        async def place_call(self, to: str, callback_url: str, status_callback: str) -> str:
+            raise RuntimeError("boom")
+
+    from rehearse import app as app_module
+
+    monkeypatch.setattr(app_module, "TwilioRestClient", lambda cfg: FailingTwilioClient())
+    client = TestClient(create_app(config))
+
+    resp = client.post("/twilio/sms", data={"From": "+15551234567", "Body": "hello"})
+    assert resp.status_code == 200
+
+    session_dir = next(config.session_root.iterdir())
+    manifest = json.loads((session_dir / "session.json").read_text())
+    assert manifest["completion_status"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_twilio_rest_client_wraps_underlying_sdk_calls() -> None:
+    class FakeCallsApi:
+        def __init__(self) -> None:
+            self.last_kwargs: dict[str, object] | None = None
+
+        def create(self, **kwargs):
+            self.last_kwargs = kwargs
+            return type("Call", (), {"sid": "CA_test"})()
+
+    class FakeMessagesApi:
+        def __init__(self) -> None:
+            self.last_kwargs: dict[str, object] | None = None
+
+        def create(self, **kwargs):
+            self.last_kwargs = kwargs
+            return type("Message", (), {"sid": "SM_test"})()
+
+    fake_calls = FakeCallsApi()
+    fake_messages = FakeMessagesApi()
+
+    class FakeSdkClient:
+        def __init__(self, sid: str, token: str) -> None:
+            assert sid == "AC_test"
+            assert token == "test_token"
+            self.calls = fake_calls
+            self.messages = fake_messages
+
+    from rehearse import telephony as telephony_module
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(telephony_module, "TwilioClient", FakeSdkClient)
+    client = TwilioRestClient(
+        RuntimeConfig(
+            twilio_account_sid="AC_test",
+            twilio_auth_token="test_token",
+            twilio_from_number="+15555550100",
+            public_base_url="https://example.test",
+            hume_api_key="hume_test_key",
+            hume_config_id="cfg_test",
+            session_root=Path("/tmp/rehearse-tests"),
+            log_level="warning",
+            validate_twilio_signature=False,
+        )
+    )
+
+    assert await client.place_call("+15551234567", "https://voice", "https://status") == "CA_test"
+    assert await client.send_sms("+15551234567", "hello") == "SM_test"
+    assert fake_calls.last_kwargs is not None
+    assert fake_messages.last_kwargs is not None
+    monkeypatch.undo()
