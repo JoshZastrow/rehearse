@@ -3,17 +3,17 @@
 **Status**: draft (build handoff)
 **Owner**: jz
 **Depends on**: `docs/specs/v2026-04-27-eval-harness.md` (Phases 1–2 shipped)
-**Supersedes**: EQ-Bench adapter and `raw-llm`-as-primary-target
+**Supersedes**: text-only benchmark path and `raw-llm`-as-primary-target
 
 ---
 
 ## 0. One-line summary
 
-Drop EQ-Bench. Add an audio-native evaluation path: a `multimodal-llm` target that loads audio (or video with audio) and submits it to an `AudioLLMProvider`, with two providers in v0 — Gemini 2.5 Pro (hosted, frontier baseline) and Gemma 4 E4B served via vLLM (open-weights, the fine-tune target). First benchmark on this path is MME-Emotion, scoped to a 10-clip subset for the tight build loop, with two scorers: recognition (deterministic accuracy) and reasoning (LLM judge, Claude Opus).
+Make MME-Emotion the primary evaluation benchmark. Add an audio-native evaluation path: a `multimodal-llm` target that loads audio (or video with audio) and submits it to an `AudioLLMProvider`, with two providers in v0 — Gemini 2.5 Pro (hosted, frontier baseline) and Gemma 4 E4B served via vLLM (open-weights, the fine-tune target). MME-Emotion is scoped to a 10-clip subset for the tight build loop, with two scorers: recognition (deterministic accuracy) and reasoning (LLM judge, Claude Opus).
 
 ## 1. What this changes and why
 
-EQ-Bench is text-only and stale (no commits in two years). The product is prosody-aware coaching — the words matter less than the tone. A text benchmark cannot measure that. MME-Emotion was published a month ago, is multimodal, has an active research community, and aligns with the rehearse strategy of building a purpose-built audio LLM rather than wrapping a frontier provider.
+The product is prosody-aware coaching — the words matter less than the tone. A text benchmark cannot measure that. MME-Emotion is multimodal, has an active research community, and aligns with the rehearse strategy of building a purpose-built audio LLM rather than wrapping a frontier provider.
 
 The strategic frame: **two model slots evaluated on the same benchmark**.
 
@@ -28,7 +28,7 @@ Long-term, only the second slot matters — it's where DPO on collected session 
 
 These were resolved before this spec; they are not open questions.
 
-1. **Drop EQ-Bench entirely** — adapter, sample data, README section. Keep `raw-llm` target itself for occasional text diagnostics; it's just no longer the primary path.
+1. **MME-Emotion is the benchmark of record** — benchmark adapter, sample data, README section, and CLI examples should point to `mme-emotion`. Keep `raw-llm` target itself for occasional text diagnostics; it's just no longer the primary path.
 2. **Hosted slot**: Gemini 2.5 Pro (audio-native via `google-genai` SDK).
 3. **Open-weights slot**: Gemma 4 E4B (4.5B effective params, Apache 2.0, audio up to 30s, served via vLLM behind an OpenAI-compatible endpoint).
 4. **Subset for v0**: 10 clips, hand-curated from `ER_Lab` for length-distribution reasons (lab-recorded, mostly under 30s).
@@ -89,9 +89,9 @@ What's new in this spec, file-by-file:
 | `evals/benchmarks/mme-emotion/v0-10clip/manifest.json` | new (vendored, small) | 10 hand-picked clip ids + ground truth |
 | `evals/benchmarks/mme-emotion/v0-10clip/clips/*.mp4` | new (vendored, ~50 MB) | The actual audio/video files for offline runs |
 | `scripts/fetch_mme_emotion.py` | new | Pulls full dataset from HF for larger runs (out of v0 scope) |
-| `rehearse/eval/benchmarks/eq_bench.py` | **deleted** | Strip EQ-Bench |
-| `evals/benchmarks/eq-bench/sample/questions.json` | **deleted** | Strip EQ-Bench data |
-| `tests/eval/test_eq_bench_adapter.py` | **deleted** | Strip EQ-Bench tests |
+| legacy text-only benchmark adapter | removed | Replaced by `MMEEmotionBenchmark` |
+| legacy text-only sample data | removed | Replaced by MME-Emotion 10-clip manifest + clips |
+| legacy text-only benchmark tests | removed | Replaced by MME-Emotion adapter/scorer tests |
 
 What is unchanged: `protocols.py` (the four core protocols), `runner.py`, `worker.py`, `cli.py`, `executors/`, `targets/echo.py`, `targets/raw_llm.py`, `benchmarks/noop.py`, `types.py`. The provider plugin layer slots cleanly under the existing target abstraction.
 
@@ -222,7 +222,7 @@ class MMERecognitionScorer:
     dimension = "mme_recognition_accuracy"   # benchmark-private string
 ```
 
-- Parse `payload["output"]` for a JSON object with a `label` field. Reuse the same tolerant `parse_eq_ratings` regex pattern, generalized.
+- Parse `payload["output"]` for a JSON object with a `label` field. Use a tolerant helper, `parse_json_object_with_keys`, shared by future JSON-output scorers.
 - Compare `predicted_label.lower().strip() == expected.label.lower().strip()`.
 - `RubricScore.value`: 1.0 on exact match, 0.0 otherwise.
 - Aggregate (mean across examples) → accuracy.
@@ -317,31 +317,27 @@ Not built in v0, but the directory layout (`{commit-sha}/`) anticipates it. The 
 
 Audio bytes are large; we already pass `video_path` (a string) through the executor's stdin JSON, not bytes. The worker opens the file. No changes to `local_subprocess.py`.
 
-## 6. Strip plan: removing EQ-Bench
+## 6. Replacement plan: MME-Emotion becomes the benchmark
 
 In one PR, separately reviewable:
 
-1. Delete `rehearse/eval/benchmarks/eq_bench.py`.
-2. Delete `evals/benchmarks/eq-bench/` (sample data + directory).
-3. Delete `tests/eval/test_eq_bench_adapter.py`.
-4. Remove EQ-Bench from `BENCHMARKS` registry in `rehearse/eval/benchmarks/__init__.py`.
-5. Remove EQ-Bench-specific helpers from `rehearse/eval/scorers/deterministic.py` (`EQBenchCorrelationScorer`, `parse_eq_ratings`, `_pearson` — generalize-or-delete).
-   - `parse_eq_ratings` → keep, rename to `parse_json_object_with_keys`, use in MMERecognitionScorer.
-   - `_pearson` → delete; no current scorer uses it.
-   - `EQBenchCorrelationScorer` → delete.
-6. Remove the EQ-Bench section from `rehearse/eval/README.md`.
-7. Remove EQ-Bench mention from the root `README.md`.
+1. Add `rehearse/eval/benchmarks/mme_emotion.py` and register `mme-emotion` in `BENCHMARKS`.
+2. Add `evals/benchmarks/mme-emotion/v0-10clip/manifest.json` and the vendored 10-clip media set.
+3. Add MME-Emotion adapter tests and recognition-scorer tests.
+4. Update `rehearse/eval/README.md` and the root `README.md` so benchmark examples use `mme-emotion`.
+5. Remove the legacy text-only benchmark adapter, sample data, tests, registry entry, and README examples.
+6. Replace benchmark-specific JSON parsing helpers with `parse_json_object_with_keys`; delete unused correlation helpers.
 
-This PR can ship before any new code lands. The harness still has `noop` + `echo` for skeleton smoke tests.
+The legacy-removal portion can ship before the MME-Emotion adapter lands. The full replacement ships with Phase M3, when `mme-emotion` is registered and runnable. The harness still has `noop` + `echo` for skeleton smoke tests during the transition.
 
 ## 7. Phasing
 
 Each phase ends with green tests + a working manual demo. Phases are reviewable PRs.
 
-**Phase M1 — Strip EQ-Bench, prep ground.**
-- Execute §6 strip plan.
-- Update `rehearse/eval/README.md` with placeholder for upcoming MME-Emotion section.
-- Tests: `noop` smoke run, registry no longer lists `eq-bench`.
+**Phase M1 — Benchmark replacement groundwork.**
+- Remove the legacy text-only benchmark registry entry, adapter, data, tests, and README examples.
+- Update `rehearse/eval/README.md` with a placeholder for the upcoming MME-Emotion section.
+- Tests: `noop` smoke run, benchmark registry no longer lists the removed benchmark.
 
 **Phase M2 — Provider plugin layer + Gemini provider.**
 - `providers/base.py` (`AudioLLMProvider`, `AudioInput`, `ProviderResponse`, `ProviderError`).
