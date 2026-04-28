@@ -7,6 +7,7 @@ A 5-minute phone call: 1 minute intake, 3 minutes live practice with an AI count
 The product is a coaching call. The architecture is an ML data-collection loop. Every session is simultaneously a unit of user value and a training record.
 
 See [SPEC.md](SPEC.md) for the foundational design.
+See [`docs/specs/MANIFEST.md`](docs/specs/MANIFEST.md) before committing to spec-driven work; it tracks which specs are active, WIP, done, or historical.
 
 Scaffold + eval harness (Phases 1–2). Runtime not implemented yet.
 
@@ -108,6 +109,7 @@ rehearse/
 ├── README.md                     # this file
 ├── docs/
 │   └── specs/
+│       ├── MANIFEST.md
 │       ├── v2026-04-27-eval-harness.md
 │       ├── v2026-04-27-runtime.md
 │       └── v2026-04-28-mme-emotion-and-audio-targets.md
