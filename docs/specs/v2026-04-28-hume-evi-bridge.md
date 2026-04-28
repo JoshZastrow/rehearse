@@ -1,9 +1,10 @@
 # rehearse — Spec: Hume EVI ↔ Pipecat bridge (decision)
 
-**Status**: draft (decision needed)
+**Status**: resolved — superseded by `docs/specs/v2026-04-28-drop-pipecat.md` (2026-04-28)
 **Owner**: jz
 **Depends on**: `docs/specs/v2026-04-27-runtime.md` (Phase R2)
 **Blocks**: Phase R2 implementation
+**Outcome**: A fifth option emerged after sizing the bridge — drop Pipecat entirely and own the audio runtime. That path is specified in `v2026-04-28-drop-pipecat.md`. This document is kept for historical context on the decision; do not implement from it.
 
 ---
 
@@ -154,8 +155,6 @@ R2.5 (the deferred bridge) then becomes a single-component PR matching §5.
 
 ## 7. Decision log
 
-(to fill in)
-
 | Date | Decision | Rationale |
 |---|---|---|
-| | | |
+| 2026-04-28 | Drop Pipecat (Option 5, not in original list) | After sizing Option 1, the framework's value reduced to ~100 LOC of Twilio-serializer plumbing once `HumeEVIService` was confirmed missing. Custom EVI integration code is identical either way. Decision and build plan recorded in `v2026-04-28-drop-pipecat.md`. |
