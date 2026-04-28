@@ -109,7 +109,11 @@ def mount_twilio_routes(
                 call_sid = await client.place_call(From, voice_url, status_url)
                 await orchestrator.attach_call(handle.session_id, call_sid)
             except Exception as exc:
-                log.exception("twilio.place_call.failed", session_id=handle.session_id, error=str(exc))
+                log.exception(
+                    "twilio.place_call.failed",
+                    session_id=handle.session_id,
+                    error=str(exc),
+                )
                 await orchestrator.finalize(handle.session_id, "failed")
 
         background.add_task(_place)

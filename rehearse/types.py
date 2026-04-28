@@ -15,7 +15,7 @@ Grouped by concern:
 from __future__ import annotations
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Literal
 from uuid import uuid4
@@ -27,39 +27,39 @@ from pydantic import BaseModel, ConfigDict, Field
 # ───────────────────────────────────────────────────────────────────────────────
 
 
-class Phase(str, Enum):
+class Phase(StrEnum):
     INTAKE = "intake"
     PRACTICE = "practice"
     FEEDBACK = "feedback"
 
 
-class Speaker(str, Enum):
+class Speaker(StrEnum):
     USER = "user"
     COACH = "coach"
     CHARACTER = "character"
 
 
-class ConsentState(str, Enum):
+class ConsentState(StrEnum):
     PENDING = "pending"
     GRANTED = "granted"
     DECLINED = "declined"
 
 
-class ModelProvider(str, Enum):
+class ModelProvider(StrEnum):
     ANTHROPIC = "anthropic"
     HUME = "hume"
     OPENAI = "openai"
     LOCAL = "local"
 
 
-class ProsodySource(str, Enum):
+class ProsodySource(StrEnum):
     HUME_LIVE = "hume_live"
     SCRIPTED = "scripted"
     TTS_HUME = "tts_hume"
     HUMAN_RECORDED = "human_recorded"
 
 
-class FaultLabel(str, Enum):
+class FaultLabel(StrEnum):
     # Pure transcript faults
     BURY_LEDE = "bury_lede"
     OVER_JUSTIFY = "over_justify"
@@ -83,7 +83,7 @@ class FaultLabel(str, Enum):
     HEDGING_SPIRAL = "hedging_spiral"
 
 
-class RubricDimension(str, Enum):
+class RubricDimension(StrEnum):
     INTAKE_FIDELITY = "intake_fidelity"
     CHARACTER_PERSONA_FIDELITY = "character_persona_fidelity"
     CHARACTER_BELIEVABILITY = "character_believability"
@@ -96,7 +96,7 @@ class RubricDimension(str, Enum):
     USEFULNESS_HOLISTIC = "usefulness_holistic"
 
 
-class ScenarioCategory(str, Enum):
+class ScenarioCategory(StrEnum):
     RELATIONSHIP_CONFLICT = "relationship_conflict"
     PROFESSIONAL_CONFLICT = "professional_conflict"
     CONNECTION_INFLUENCE = "connection_influence"
