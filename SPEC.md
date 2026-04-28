@@ -123,16 +123,16 @@ The pair of streams (transcript, prosody) on the same timeline is the core unit 
             audio duplex              ▼
                                 Twilio Media Streams WS
                                        │
-                             TwilioFrameSerializer
+                                  TwilioStream
                                        │
-                                  Pipecat pipeline
+                                  HumeEVIClient
                                        │
      ┌─────────────────────────────────┼────────────────────────────────┐
      │                                 │                                │
- HumeEVIService              PhaseProcessor               TranscriptWriter
- (voice in/out,              (owns phase state,           ProsodyWriter
-  prosody events,            swaps persona per phase,     AudioRecorder
-  transcript events)         emits control frames)       TelemetryLogger
+ FrameBus                    PhaseProcessor               TranscriptWriter
+ (runtime fanout to          (owns phase state,           ProsodyWriter
+  subscribers)               swaps persona per phase,     AudioRecorder
+                             emits control frames)        TelemetryLogger
      │                                 │                                │
      └────────────── frames ──────────┴────────── frames ──────────────┘
                                        │
@@ -147,15 +147,13 @@ The pair of streams (transcript, prosody) on the same timeline is the core unit 
 
 ### 6.2 Frame flow (what moves through the pipeline)
 
-- `AudioRawFrame` in — user speech bytes
-- `TranscriptionFrame` — Hume-emitted user utterance text + timing
-- `ProsodyFrame` — Hume-emitted emotion scores per utterance
-- `LLMTextFrame` out — model response text
-- `TTSAudioRawFrame` out — model response audio bytes
-- `PhaseTransitionFrame` — our custom control frame; marks phase boundary
-- `PersonaSwitchFrame` — our custom control frame; tells HumeEVIService to swap config
+- `AudioChunk` — user or assistant PCM16 audio on the runtime bus
+- `TranscriptDelta` — Hume-emitted utterance text + timing
+- `ProsodyEvent` — Hume-emitted emotion scores per utterance
+- `PhaseSignal` — phase boundary / control signal
+- `EndOfCall` — live-call termination signal
 
-The two custom frames are the only novel frame types we define. Everything else is Pipecat-stock.
+These are rehearse-owned runtime frames, not Pipecat frame types.
 
 ### 6.3 Phase state
 
@@ -163,7 +161,7 @@ A single `PhaseProcessor` owns phase state. It consumes wall-clock ticks and tra
 
 ### 6.4 Voice brain
 
-Hume EVI via `services/hume/` (Pipecat). Speech-to-speech with prosody as first-class event output. Two Hume configs: one for the coach voice, one for the character voice. The character config's system prompt is overridden per-session with the compiled `CounterpartyPersona`.
+Hume EVI via an owned `HumeEVIClient`. Speech-to-speech with prosody as first-class event output. Two Hume configs: one for the coach voice, one for the character voice. The character config's system prompt is overridden per-session with the compiled `CounterpartyPersona`.
 
 ## 7. Data model
 
@@ -365,7 +363,7 @@ rehearse/
 │   ├── app.py                     # FastAPI: Twilio webhooks + Media Streams WS
 │   ├── config.py                  # env-backed settings
 │   ├── session.py                 # Session artifact I/O (load/persist)
-│   ├── pipeline.py                # build_pipeline(transport, session) — Pipecat wiring
+│   ├── pipeline.py                # runtime wiring entrypoint
 │   ├── phases.py                  # PhaseProcessor — the one stateful custom processor
 │   ├── personas.py                # coach prompt (const) + compile_character(intake)
 │   ├── synthesis.py               # post-call Claude: story + feedback (pure, replayable)
