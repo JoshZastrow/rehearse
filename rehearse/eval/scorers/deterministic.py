@@ -9,7 +9,6 @@ from typing import Any
 from rehearse.eval.protocols import BenchmarkExample, RolloutResult
 from rehearse.types import RubricScore
 
-
 _JSON_BLOCK = re.compile(r"\{[^{}]*\}", re.DOTALL)
 
 

@@ -23,10 +23,10 @@ from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
+from rehearse.eval.environments import get_environment
 from rehearse.eval.evals import get_eval
 from rehearse.eval.executors import LocalSubprocessExecutor
 from rehearse.eval.protocols import BenchmarkExample, Executor, RolloutResult
-from rehearse.eval.environments import get_environment
 from rehearse.types import EvalRun, RubricScore
 
 
@@ -122,7 +122,7 @@ async def execute_run(config: RunConfig, executor: Executor | None = None) -> Ru
 
     scorers = eval_spec.scoring_plan()
     all_scores: list[RubricScore] = []
-    for ex, ro in zip(examples, rollouts):
+    for ex, ro in zip(examples, rollouts, strict=True):
         if ro.status != "ok":
             (run_dir / "failures" / ex.id).mkdir(parents=True, exist_ok=True)
             (run_dir / "failures" / ex.id / "error.txt").write_text(ro.error or "")

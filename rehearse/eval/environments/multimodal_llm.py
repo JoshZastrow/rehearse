@@ -28,7 +28,13 @@ class MultimodalLLMEnvironment:
         prompt = example.payload.get("prompt")
         media = example.payload.get("audio_path") or example.payload.get("video_path")
         if not prompt:
-            return _error(example, self.name, self.version, started, "example.payload missing 'prompt'")
+            return _error(
+                example,
+                self.name,
+                self.version,
+                started,
+                "example.payload missing 'prompt'",
+            )
         if not media:
             return _error(
                 example,
@@ -58,7 +64,13 @@ class MultimodalLLMEnvironment:
                 "audio_exceeds_provider_limit",
             )
         if not media_path.exists():
-            return _error(example, self.name, self.version, started, f"media file not found: {media_path}")
+            return _error(
+                example,
+                self.name,
+                self.version,
+                started,
+                f"media file not found: {media_path}",
+            )
 
         provider = get_provider(self.provider_name, self.model_slots)
         try:

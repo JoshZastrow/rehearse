@@ -22,8 +22,8 @@ import traceback
 from datetime import datetime
 from pathlib import Path
 
-from rehearse.eval.protocols import BenchmarkExample, RolloutResult
 from rehearse.eval.environments import get_environment
+from rehearse.eval.protocols import BenchmarkExample, RolloutResult
 
 
 async def _run() -> int:

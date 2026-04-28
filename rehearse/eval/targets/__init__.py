@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from rehearse.eval.protocols import Target
 from rehearse.eval.environments.multimodal_llm import MultimodalLLMEnvironment
+from rehearse.eval.protocols import Target
 from rehearse.eval.targets.echo import EchoTarget
 from rehearse.eval.targets.raw_llm import RawLLMTarget
 
