@@ -1,15 +1,14 @@
-"""Pipecat pipeline construction.
+"""Runtime wiring entrypoint.
 
-`build_pipeline(transport, session)` returns a configured Pipecat Pipeline:
+This module names the live-call assembly point for the owned runtime:
 
-    Transport (in)
-      → HumeEVIService (speech-to-speech; emits transcript + prosody frames)
-      → PhaseProcessor (owns phase state, emits transition/persona frames)
-      → ArtifactWriters (transcript, prosody, audio, telemetry)
-      → HumeEVIService (persona config reconfigured on PersonaSwitchFrame)
-      → Transport (out)
+    TwilioStream
+      → HumeEVIClient
+      → FrameBus
+      → PhaseProcessor
+      → Artifact writers
 
-The same builder is used in production (Twilio transport) and in eval
-(SimulatedTransport that feeds synthetic frames). This is the load-bearing
-decoupling that makes eval validate the real system.
+Production and eval share artifact schemas, not transport infrastructure.
+The live runtime owns Twilio/Hume integration; eval uses separate mocked or
+provider-driven targets and does not depend on live call plumbing.
 """

@@ -9,10 +9,10 @@ The product is a coaching call. The architecture is an ML data-collection loop. 
 See [SPEC.md](SPEC.md) for the foundational design.
 See [`docs/specs/MANIFEST.md`](docs/specs/MANIFEST.md) before committing to spec-driven work; it tracks which specs are active, WIP, done, or historical.
 
-Scaffold + eval harness (Phases 1–2). Runtime not implemented yet.
+Scaffold + eval harness (Phases 1–2). Runtime work is being built as a separate live-call workstream.
 
-- Eval harness: see [`rehearse/eval/README.md`](rehearse/eval/README.md). Runs against `noop` and `eq-bench` today; `rehearse-seed` and `full` targets land in Phases 3–4.
-- Runtime: see the spec at [`docs/specs/v2026-04-27-runtime.md`](docs/specs/v2026-04-27-runtime.md).
+- Eval harness: see [`rehearse/eval/README.md`](rehearse/eval/README.md). It is separate from the live Twilio/Hume runtime and can run with no phone call path.
+- Runtime: see [`docs/specs/v2026-04-28-runtime-workstream.md`](docs/specs/v2026-04-28-runtime-workstream.md) and [`docs/specs/v2026-04-28-drop-pipecat.md`](docs/specs/v2026-04-28-drop-pipecat.md).
 
 ## Status (2026-04-28)
 
@@ -22,7 +22,7 @@ Scaffold + eval harness (Phases 1–2). Runtime not implemented yet.
 | Eval harness skeleton (Phases 1–2) | ✅ shipped |
 | EQ-Bench adapter | 🗑 deprecated, scheduled for removal (text-only, stale) |
 | MME-Emotion adapter + audio targets | 📝 spec'd, build pending |
-| Runtime (Twilio + Pipecat + Hume + Claude Agent SDK) | 📝 spec'd, build pending |
+| Runtime (Twilio + Hume + Claude Agent SDK) | 📝 spec'd, build pending |
 
 ## Strategic frame
 
@@ -38,7 +38,7 @@ Three workstreams advance in parallel. Each ships in numbered phases; each phase
 
 ### Eval harness (`rehearse-eval`) — `rehearse/eval/`
 
-Plugin-shaped: benchmarks, targets, scorers, executors are each a `Protocol`. Independent of runtime.
+Plugin-shaped: benchmarks, targets, scorers, executors are each a `Protocol`. Independent of the live Twilio/Hume runtime.
 
 | Phase | Status | Scope |
 |---|---|---|
@@ -56,21 +56,21 @@ Plugin-shaped: benchmarks, targets, scorers, executors are each a `Protocol`. In
 
 Spec: [`docs/specs/v2026-04-27-eval-harness.md`](docs/specs/v2026-04-27-eval-harness.md), [`docs/specs/v2026-04-28-mme-emotion-and-audio-targets.md`](docs/specs/v2026-04-28-mme-emotion-and-audio-targets.md). User-facing: [`rehearse/eval/README.md`](rehearse/eval/README.md).
 
-### Runtime (`rehearse-app`) — `rehearse/app.py`, `rehearse/agents/`, `rehearse/pipeline.py`, ...
+### Runtime (`rehearse-app`) — `rehearse/app.py`, `rehearse/agents/`, owned audio runtime modules
 
-Single FastAPI service: SMS triggers an outbound call, runs the 3-phase Pipecat pipeline with Hume EVI for voice and the Claude Agent SDK for the brain, persists every frame to disk, then synthesizes story + feedback post-call and SMSes a viewer link back.
+Single FastAPI service: SMS triggers an outbound call, runs an owned Twilio Media Streams to Hume EVI live-call loop with the Claude Agent SDK as the coach/character brain, persists every frame to disk, then synthesizes story + feedback post-call and SMSes a viewer link back.
 
 | Phase | Status | Scope |
 |---|---|---|
 | R1 — Skeleton + Telephony | 📝 spec'd | Twilio SMS/voice/Media Streams handlers; `SessionOrchestrator`; `LocalFilesystemStore`. Demo: SMS triggers a call that says hello and hangs up. |
-| R2 — Pipecat + Hume EVI scaffold | 📝 spec'd | Pipeline builder, single Hume coach config, no phases yet. Demo: real Hume voice on the call. |
+| R2 — Owned Twilio/Hume runtime scaffold | 📝 spec'd | `TwilioStream`, `HumeEVIClient`, `FrameBus`, single Hume coach config, no phases yet. Demo: real Hume voice on the call. |
 | R3 — Phase machine + writers | 📝 spec'd | `PhaseProcessor`, transcript/prosody/audio/telemetry writers. Demo: 3 phases, all 4 artifacts populated. |
 | R4 — Claude CLM + agents | 📝 spec'd | CLM endpoint, `CoachAgent` (intake), `CharacterAgent`, `compile_character` real. Demo: real intake → compiled character → live practice. |
 | R5 — Post-call synthesis + viewer | 📝 spec'd | `StoryAgent`, `FeedbackAgent` via Claude Agent SDK; viewer page; SMS notification. Demo: full SMS-to-SMS round-trip. |
 | R6 — Reliability + polish | 📝 spec'd | Soft-cue phase transitions, Hume reconnect, hardened consent gate, signature validation. |
 | R7 — Storage option B (S3 mirror) | 📝 spec'd | New `S3MirrorStore` backend. Migration trigger: first non-founder user invited. |
 
-Spec: [`docs/specs/v2026-04-27-runtime.md`](docs/specs/v2026-04-27-runtime.md).
+Spec: [`docs/specs/v2026-04-28-runtime-workstream.md`](docs/specs/v2026-04-28-runtime-workstream.md), [`docs/specs/v2026-04-28-drop-pipecat.md`](docs/specs/v2026-04-28-drop-pipecat.md), with historical detail in [`docs/specs/v2026-04-27-runtime.md`](docs/specs/v2026-04-27-runtime.md).
 
 ### ML data pipeline & training — future
 
@@ -93,7 +93,7 @@ Spec: not yet written. Contingent on the runtime producing a meaningful volume o
 | Practice character brain (per-turn) | Claude Sonnet 4.6 via Hume CLM | Fine-tuned Gemma 4 E4B via Hume CLM |
 | Intake + feedback synthesis | Claude Agent SDK (Sonnet for intake, Opus for feedback) | Same; lower priority to swap |
 | Telephony | Twilio (SMS + Voice + Media Streams) | unchanged |
-| Pipeline | Pipecat | unchanged |
+| Runtime audio loop | Owned `TwilioStream` + `HumeEVIClient` + `FrameBus` | unchanged |
 | Data contracts | Pydantic v2 (`rehearse/types.py`) | unchanged — single schema everywhere |
 | Service | FastAPI + Uvicorn | unchanged |
 | Storage | Local filesystem | S3 mirror, then Postgres+S3 (per runtime spec §5) |
@@ -112,6 +112,8 @@ rehearse/
 │       ├── MANIFEST.md
 │       ├── v2026-04-27-eval-harness.md
 │       ├── v2026-04-27-runtime.md
+│       ├── v2026-04-28-drop-pipecat.md
+│       ├── v2026-04-28-runtime-workstream.md
 │       └── v2026-04-28-mme-emotion-and-audio-targets.md
 ├── rehearse/                     # application package
 │   ├── types.py                  # all pydantic interfaces
@@ -119,10 +121,12 @@ rehearse/
 │   │   └── README.md
 │   ├── app.py                    # runtime FastAPI entry (spec'd)
 │   ├── agents/                   # Claude Agent SDK roles (spec'd)
-│   ├── pipeline.py               # Pipecat wiring (spec'd)
-│   ├── phases.py                 # PhaseProcessor (spec'd)
+│   ├── pipeline.py               # runtime wiring entrypoint (spec'd)
+│   ├── phases.py                 # phase timing / transitions (spec'd)
 │   ├── personas.py               # prompts + compile_character (spec'd)
 │   ├── synthesis.py              # post-call story + feedback (spec'd)
+│   ├── audio/                    # Twilio audio bridge (spec'd)
+│   ├── services/                 # Hume EVI client (spec'd)
 │   └── writers/                  # artifact writers (spec'd)
 ├── tests/
 ├── evals/

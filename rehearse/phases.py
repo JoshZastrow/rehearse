@@ -1,4 +1,4 @@
-"""PhaseProcessor — the one stateful custom Pipecat processor.
+"""PhaseProcessor — the one stateful runtime phase controller.
 
 Owns the three-phase state machine (INTAKE → PRACTICE → FEEDBACK). Consumes:
   - wall-clock tick frames
