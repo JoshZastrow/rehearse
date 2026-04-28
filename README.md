@@ -8,7 +8,10 @@ See [SPEC.md](SPEC.md) for the full design.
 
 ## Status
 
-Scaffold only. No application logic yet.
+Scaffold + eval harness (Phases 1–2). Runtime not implemented yet.
+
+- Eval harness: see [`rehearse/eval/README.md`](rehearse/eval/README.md). Runs against `noop` and `eq-bench` today; `rehearse-seed` and `full` targets land in Phases 3–4.
+- Runtime: see the spec at [`docs/specs/v2026-04-27-runtime.md`](docs/specs/v2026-04-27-runtime.md).
 
 ## Stack
 
