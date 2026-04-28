@@ -1,4 +1,8 @@
-"""Pure-Python G.711 mu-law codec helpers."""
+"""Encode and decode G.711 mu-law audio in pure Python.
+
+This file handles the audio format Twilio Media Streams uses on the wire. It
+lets the runtime convert between Twilio mu-law bytes and normal PCM16 samples.
+"""
 
 from __future__ import annotations
 
@@ -10,7 +14,7 @@ _SEGMENT_END = (0xFF, 0x1FF, 0x3FF, 0x7FF, 0xFFF, 0x1FFF, 0x3FFF, 0x7FFF)
 
 
 def encode_pcm16(pcm16: bytes) -> bytes:
-    """Encode little-endian PCM16 mono audio to mu-law bytes."""
+    """Convert PCM16 mono audio bytes into mu-law bytes."""
 
     if len(pcm16) % 2 != 0:
         raise ValueError("pcm16 input must contain an even number of bytes")
@@ -19,13 +23,14 @@ def encode_pcm16(pcm16: bytes) -> bytes:
 
 
 def decode_mulaw(mulaw: bytes) -> bytes:
-    """Decode mu-law bytes to little-endian PCM16 mono audio."""
+    """Convert mu-law bytes into PCM16 mono audio bytes."""
 
     samples = [_decode_sample(byte) for byte in mulaw]
     return struct.pack(f"<{len(samples)}h", *samples)
 
 
 def _encode_sample(sample: int) -> int:
+    """Convert one PCM16 sample into one mu-law byte."""
     if sample < 0:
         sign = 0x80
         sample = -sample
@@ -44,6 +49,7 @@ def _encode_sample(sample: int) -> int:
 
 
 def _decode_sample(byte: int) -> int:
+    """Convert one mu-law byte into one PCM16 sample."""
     ulaw = (~byte) & 0xFF
     sign = ulaw & 0x80
     exponent = (ulaw >> 4) & 0x07

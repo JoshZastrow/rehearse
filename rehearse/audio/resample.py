@@ -1,4 +1,8 @@
-"""PCM16 mono resampling helpers."""
+"""Resample mono PCM16 audio between sample rates.
+
+This file keeps the runtime audio path simple by providing small helpers for
+the sample-rate conversions used between Twilio and Hume.
+"""
 
 from __future__ import annotations
 
@@ -6,7 +10,7 @@ import numpy as np
 
 
 def resample_pcm16(pcm16: bytes, *, src_rate: int, dst_rate: int) -> bytes:
-    """Resample little-endian PCM16 mono audio with linear interpolation."""
+    """Return the same PCM16 audio resampled from one rate to another."""
 
     if src_rate <= 0 or dst_rate <= 0:
         raise ValueError("sample rates must be positive")
@@ -25,12 +29,12 @@ def resample_pcm16(pcm16: bytes, *, src_rate: int, dst_rate: int) -> bytes:
 
 
 def upsample_8k_to_16k(pcm16_8k: bytes) -> bytes:
-    """Upsample PCM16 mono audio from 8kHz to 16kHz."""
+    """Return PCM16 mono audio converted from 8kHz to 16kHz."""
 
     return resample_pcm16(pcm16_8k, src_rate=8_000, dst_rate=16_000)
 
 
 def downsample_16k_to_8k(pcm16_16k: bytes) -> bytes:
-    """Downsample PCM16 mono audio from 16kHz to 8kHz."""
+    """Return PCM16 mono audio converted from 16kHz to 8kHz."""
 
     return resample_pcm16(pcm16_16k, src_rate=16_000, dst_rate=8_000)

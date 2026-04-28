@@ -1,4 +1,9 @@
-"""Twilio Media Streams protocol adapter."""
+"""Read and write Twilio Media Streams websocket messages.
+
+This file hides the Twilio-specific websocket event format from the rest of the
+runtime. It performs the handshake, decodes inbound audio, and encodes outbound
+assistant audio back into Twilio's expected media events.
+"""
 
 from __future__ import annotations
 
@@ -13,15 +18,17 @@ from rehearse.audio.resample import downsample_16k_to_8k, upsample_8k_to_16k
 
 
 class TwilioStream:
-    """Read and write Twilio Media Streams messages."""
+    """Wrap a Twilio Media Streams websocket connection."""
 
     def __init__(self, ws: WebSocket) -> None:
+        """Store the websocket used for one live Twilio stream."""
         self._ws = ws
         self._start: dict[str, Any] | None = None
         self._stream_sid: str | None = None
         self._session_id: str | None = None
 
     async def __aenter__(self) -> TwilioStream:
+        """Wait for the Twilio start event and return a ready stream wrapper."""
         while True:
             event = await self._ws.receive_json()
             if not isinstance(event, dict):
@@ -44,22 +51,25 @@ class TwilioStream:
             return self
 
     async def __aexit__(self, *_args: object) -> None:
+        """Exit the async context manager for the stream wrapper."""
         return None
 
     @property
     def session_id(self) -> str:
+        """Return the session id attached to this Twilio stream."""
         if self._session_id is None:
             raise RuntimeError("TwilioStream not connected")
         return self._session_id
 
     @property
     def stream_sid(self) -> str:
+        """Return Twilio's stream SID for this websocket session."""
         if self._stream_sid is None:
             raise RuntimeError("TwilioStream not connected")
         return self._stream_sid
 
     async def inbound(self) -> AsyncIterator[bytes]:
-        """Yield inbound audio as PCM16 mono 16kHz chunks."""
+        """Yield inbound user audio as PCM16 mono 16kHz chunks."""
 
         while True:
             event = await self._ws.receive_json()
@@ -84,7 +94,7 @@ class TwilioStream:
             yield upsample_8k_to_16k(pcm8k)
 
     async def send(self, pcm16_16k: bytes) -> None:
-        """Send assistant audio to Twilio as mu-law 8kHz media."""
+        """Send assistant PCM16 audio back to Twilio as a media event."""
 
         pcm8k = downsample_16k_to_8k(pcm16_16k)
         mulaw = encode_pcm16(pcm8k)
@@ -98,7 +108,7 @@ class TwilioStream:
         )
 
     async def send_mark(self, name: str) -> None:
-        """Send a Twilio mark event for playback tracking."""
+        """Send a Twilio mark event and return when it is queued."""
 
         await self._ws.send_json(
             {
@@ -110,6 +120,7 @@ class TwilioStream:
 
 
 def _require_str(data: dict[str, Any], key: str) -> str:
+    """Return one required string field from a Twilio start payload."""
     value = data.get(key)
     if not isinstance(value, str) or not value:
         raise ValueError(f"twilio start event missing {key}")
