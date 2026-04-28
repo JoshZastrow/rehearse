@@ -1,14 +1,7 @@
-"""FastAPI application.
+"""Build the FastAPI app for the live runtime.
 
-Phase R1 entry point. Wires:
-  - POST /twilio/sms     inbound SMS trigger
-  - POST /twilio/voice   outbound-call TwiML (hard-coded <Say> in R1)
-  - POST /twilio/status  call status callbacks
-  - WS   /media/{id}     Twilio Media Streams (no-op accept in R1)
-  - GET  /sessions/{id}/* static artifact files
-  - GET  /viewer/*       static viewer page
-
-No business logic here. Wires routes to handlers and pipelines.
+This file wires together config, storage, session orchestration, Twilio route
+handlers, and static artifact serving. It does not hold core business logic.
 """
 
 from __future__ import annotations
@@ -27,6 +20,7 @@ from rehearse.telephony import TwilioRestClient, mount_twilio_routes
 
 
 def _configure_logging(level: str) -> None:
+    """Configure structlog and stdlib logging for the runtime process."""
     logging.basicConfig(level=level.upper(), format="%(message)s")
     structlog.configure(
         processors=[
@@ -41,6 +35,7 @@ def _configure_logging(level: str) -> None:
 
 
 def create_app(config: RuntimeConfig | None = None) -> FastAPI:
+    """Create and return the fully wired FastAPI runtime app."""
     config = config or RuntimeConfig.from_env()
     _configure_logging(config.log_level)
 
@@ -62,6 +57,7 @@ def create_app(config: RuntimeConfig | None = None) -> FastAPI:
 
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:
+        """Return a simple health check payload for uptime probes."""
         return {"status": "ok"}
 
     return app

@@ -1,4 +1,9 @@
-"""Hume EVI adapter for the owned runtime."""
+"""Bridge Hume EVI websocket events into runtime frames.
+
+This file wraps the Hume realtime chat socket used during a live call. It sends
+user audio into Hume, converts Hume events into runtime frames, and handles a
+small reconnect policy for transient websocket failures.
+"""
 
 from __future__ import annotations
 
@@ -21,7 +26,7 @@ from rehearse.types import ProsodyScores, Speaker
 
 
 class HumeEVIClient:
-    """Bridge a Hume realtime chat socket into rehearse runtime frames."""
+    """Bridge a Hume realtime chat socket into runtime frames."""
 
     def __init__(
         self,
@@ -33,6 +38,7 @@ class HumeEVIClient:
         connect_fn: Callable[..., Any] | None = None,
         reconnect_backoff_s: float = 0.1,
     ) -> None:
+        """Store connection settings and test seams for one Hume session."""
         self._api_key = api_key
         self._config_id = config_id
         self._bus = bus
@@ -47,17 +53,19 @@ class HumeEVIClient:
         self._utterance_counter = 0
 
     async def __aenter__(self) -> HumeEVIClient:
+        """Open the Hume websocket connection and return the adapter."""
         await self._connect()
         return self
 
     async def __aexit__(self, *_args: object) -> None:
+        """Close any open Hume websocket resources."""
         if self._stack is not None:
             await self._stack.aclose()
         self._stack = None
         self._socket = None
 
     async def send_audio(self, pcm16_16k: bytes) -> None:
-        """Forward user PCM16 mono 16kHz audio to Hume."""
+        """Send one chunk of user PCM16 audio into Hume."""
 
         if self._socket is None:
             raise RuntimeError("HumeEVIClient not connected")
@@ -65,7 +73,7 @@ class HumeEVIClient:
         await self._socket.send_audio_input(AudioInput(data=payload))
 
     async def run_event_loop(self) -> None:
-        """Consume Hume events and publish rehearse runtime frames."""
+        """Read Hume events until the socket closes and publish runtime frames."""
 
         attempts = 0
         while True:
@@ -89,13 +97,14 @@ class HumeEVIClient:
                 await self._reconnect()
 
     async def swap_config(self, config_id: str, system_prompt: str | None = None) -> None:
-        """Placeholder for phase-boundary config swap support."""
+        """Swap the active Hume config during a call when that feature exists."""
 
         raise NotImplementedError(
             f"live config swap not implemented yet for {config_id} / {system_prompt!r}"
         )
 
     async def _connect(self) -> None:
+        """Open a fresh Hume chat websocket and store the socket object."""
         self._stack = AsyncExitStack()
         self._socket = await self._stack.enter_async_context(
             self._connect_fn(
@@ -113,11 +122,13 @@ class HumeEVIClient:
         )
 
     async def _reconnect(self) -> None:
+        """Close the old socket and open a new Hume websocket connection."""
         if self._stack is not None:
             await self._stack.aclose()
         await self._connect()
 
     async def _handle_event(self, event: Any) -> None:
+        """Dispatch one Hume event to the correct runtime-frame handler."""
         event_type = getattr(event, "type", None)
         if event_type == "audio_output":
             await self._publish_audio_output(event)
@@ -136,6 +147,7 @@ class HumeEVIClient:
             raise RuntimeError(getattr(event, "message", "hume websocket error"))
 
     async def _publish_audio_output(self, event: Any) -> None:
+        """Convert one Hume audio chunk into a runtime audio frame."""
         wav_bytes = base64.b64decode(event.data)
         pcm48k = _decode_wav_pcm16(wav_bytes)
         pcm16k = resample_pcm16(pcm48k, src_rate=48_000, dst_rate=16_000)
@@ -149,6 +161,7 @@ class HumeEVIClient:
         )
 
     async def _publish_user_message(self, event: Any) -> None:
+        """Publish transcript and prosody frames for one user utterance."""
         utterance_id = self._new_utterance_id("user")
         text = getattr(getattr(event, "message", None), "content", "") or ""
         begin_ms = float(getattr(getattr(event, "time", None), "begin", 0))
@@ -178,6 +191,7 @@ class HumeEVIClient:
         )
 
     async def _publish_assistant_message(self, event: Any) -> None:
+        """Publish one assistant transcript frame from a Hume message event."""
         text = getattr(getattr(event, "message", None), "content", "") or ""
         now = self._elapsed_s()
         await self._bus.publish(
@@ -193,19 +207,23 @@ class HumeEVIClient:
         )
 
     def _elapsed_s(self) -> float:
+        """Return seconds elapsed since this Hume session started."""
         return time.monotonic() - self._started_at
 
     def _new_utterance_id(self, prefix: str) -> str:
+        """Return a simple unique utterance id for the current session."""
         self._utterance_counter += 1
         return f"{prefix}-{self._utterance_counter}"
 
 
 def _decode_wav_pcm16(wav_bytes: bytes) -> bytes:
+    """Read PCM16 frame bytes out of a WAV payload."""
     with wave.open(io.BytesIO(wav_bytes), "rb") as wav_file:
         return wav_file.readframes(wav_file.getnframes())
 
 
 def _extract_scores(prosody: Any) -> ProsodyScores:
+    """Convert Hume prosody scores into the runtime `ProsodyScores` model."""
     scores_obj = getattr(prosody, "scores", None)
     if scores_obj is None:
         return ProsodyScores(arousal=0.0, valence=0.0, emotions={})
