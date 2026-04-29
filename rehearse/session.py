@@ -16,6 +16,7 @@ from typing import Literal
 import structlog
 
 from rehearse.storage import LocalFilesystemStore
+from rehearse.synthesis import SessionSynthesizer, persist_synthesis
 from rehearse.types import ConsentState, Session
 
 log = structlog.get_logger(__name__)
@@ -32,6 +33,7 @@ class SessionHandle:
     started_at: datetime
     consent: ConsentState
     from_number_hash: str | None
+    reply_to_number: str | None = None
     call_sid: str | None = None
 
 
@@ -47,8 +49,14 @@ class TriggerEvent:
 class SessionOrchestrator:
     """Create, track, and finalize live runtime sessions."""
 
-    def __init__(self, store: LocalFilesystemStore) -> None:
+    def __init__(
+        self,
+        store: LocalFilesystemStore,
+        synthesizer: SessionSynthesizer | None = None,
+    ) -> None:
+        """Store the session persistence layer and post-call synthesizer."""
         self._store = store
+        self._synthesizer = synthesizer or SessionSynthesizer()
         self._handles: dict[str, SessionHandle] = {}
         self._by_call_sid: dict[str, str] = {}
 
@@ -71,6 +79,7 @@ class SessionOrchestrator:
             started_at=session.created_at,
             consent=session.consent,
             from_number_hash=session.phone_number_hash,
+            reply_to_number=trigger.from_number,
         )
         self._handles[session.id] = handle
         log.info("session.start", session_id=session.id)
@@ -115,6 +124,7 @@ class SessionOrchestrator:
             log.warning("session.finalize.missing_manifest", session_id=session_id)
             return
         session.completion_status = status
+        session = await persist_synthesis(self._store, session, self._synthesizer)
         await self._store.write(
             session_id,
             "session.json",

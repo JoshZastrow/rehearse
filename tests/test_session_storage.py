@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -7,6 +8,7 @@ import pytest
 
 from rehearse.session import SessionOrchestrator, TriggerEvent
 from rehearse.storage import LocalFilesystemStore
+from rehearse.types import Phase, Speaker, TranscriptFrame
 
 
 @pytest.fixture
@@ -51,3 +53,39 @@ async def test_session_orchestrator_unknown_and_missing_manifest_paths(
     await orchestrator.finalize(handle.session_id, "complete")
 
     assert orchestrator.get(handle.session_id) is None
+
+
+@pytest.mark.asyncio
+async def test_session_orchestrator_finalize_writes_story_and_feedback(
+    store: LocalFilesystemStore,
+) -> None:
+    orchestrator = SessionOrchestrator(store=store)
+    now = datetime.now(UTC)
+    handle = await orchestrator.start(
+        TriggerEvent(from_number="+15551234567", body="help me negotiate", received_at=now)
+    )
+    frame = TranscriptFrame(
+        session_id=handle.session_id,
+        utterance_id="u1",
+        ts_start=0.0,
+        ts_end=0.5,
+        speaker=Speaker.USER,
+        phase=Phase.INTAKE,
+        text="I want to ask for more compensation.",
+    )
+    await store.write(handle.session_id, "transcript.jsonl", frame.model_dump_json() + "\n")
+    manifest = await store.read(handle.session_id, "session.json")
+    session = json.loads(manifest)
+    session["artifact_paths"]["transcript"] = "transcript.jsonl"
+    await store.write(handle.session_id, "session.json", json.dumps(session, indent=2))
+
+    await orchestrator.finalize(handle.session_id, "complete")
+
+    story = (await store.read(handle.session_id, "story.md")).decode("utf-8")
+    feedback = (await store.read(handle.session_id, "feedback.md")).decode("utf-8")
+    manifest_after = json.loads(await store.read(handle.session_id, "session.json"))
+    assert "# Story" in story
+    assert "# Feedback" in feedback
+    assert manifest_after["artifact_paths"]["story"] == "story.md"
+    assert manifest_after["artifact_paths"]["feedback"] == "feedback.md"
+    assert manifest_after["completion_status"] == "complete"
