@@ -9,7 +9,7 @@ import pytest
 
 from rehearse.frames import AudioChunk, ProsodyEvent, TranscriptDelta
 from rehearse.storage import LocalFilesystemStore
-from rehearse.types import ConsentState, ProsodyScores, Session, Speaker
+from rehearse.types import ConsentState, Phase, ProsodyScores, Session, Speaker
 from rehearse.writers import AudioRecorder, ProsodyWriter, TelemetryLogger, TranscriptWriter
 
 
@@ -36,7 +36,7 @@ async def test_transcript_writer_persists_transcript_and_manifest(
     writer_store: LocalFilesystemStore,
 ) -> None:
     session_id = writer_store._test_session_id  # type: ignore[attr-defined]
-    writer = TranscriptWriter(session_id, writer_store)
+    writer = TranscriptWriter(session_id, writer_store, phase_getter=lambda: Phase.PRACTICE)
     frame = TranscriptDelta(
         session_id=session_id,
         utterance_id="u1",
@@ -52,6 +52,7 @@ async def test_transcript_writer_persists_transcript_and_manifest(
     transcript = (writer_store.session_dir(session_id) / "transcript.jsonl").read_text().strip()
     payload = json.loads(transcript)
     assert payload["text"] == "hello"
+    assert payload["phase"] == "practice"
     manifest = json.loads((writer_store.session_dir(session_id) / "session.json").read_text())
     assert manifest["artifact_paths"]["transcript"] == "transcript.jsonl"
 
@@ -115,7 +116,12 @@ async def test_telemetry_logger_writes_assistant_events_only(
     writer_store: LocalFilesystemStore,
 ) -> None:
     session_id = writer_store._test_session_id  # type: ignore[attr-defined]
-    writer = TelemetryLogger(session_id, writer_store, model="cfg-test")
+    writer = TelemetryLogger(
+        session_id,
+        writer_store,
+        model="cfg-test",
+        phase_getter=lambda: Phase.FEEDBACK,
+    )
     frames = [
         TranscriptDelta(
             session_id=session_id,
@@ -149,5 +155,6 @@ async def test_telemetry_logger_writes_assistant_events_only(
     payload = json.loads(telemetry[0])
     assert payload["provider"] == "hume"
     assert payload["model"] == "cfg-test"
+    assert payload["phase"] == "feedback"
     manifest = json.loads((writer_store.session_dir(session_id) / "session.json").read_text())
     assert manifest["artifact_paths"]["telemetry"] == "telemetry.jsonl"

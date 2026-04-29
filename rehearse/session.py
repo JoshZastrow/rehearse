@@ -133,10 +133,9 @@ class SessionOrchestrator:
             return
         session.completion_status = status
         session = await persist_synthesis(self._store, session, self._synthesizer)
-        await self._store.write(
+        await self._store.update_session(
             session_id,
-            "session.json",
-            session.model_dump_json(indent=2),
+            lambda current: _apply_completion_status(current, status=status),
         )
         await self._send_viewer_sms(handle)
         log.info("session.finalize", session_id=session_id, status=status)
@@ -161,3 +160,9 @@ def _hash_number(number: str) -> str:
 def utcnow() -> datetime:
     """Return the current UTC timestamp."""
     return datetime.now(UTC)
+
+
+def _apply_completion_status(session: Session, *, status: CompletionStatus) -> Session:
+    """Set the final completion status on the session manifest."""
+    session.completion_status = status
+    return session

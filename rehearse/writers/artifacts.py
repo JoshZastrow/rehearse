@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import io
 import wave
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 
 from rehearse.frames import AudioChunk, Frame, ProsodyEvent, TranscriptDelta
 from rehearse.session import utcnow
@@ -28,10 +28,17 @@ from rehearse.types import (
 class TranscriptWriter:
     """Write transcript frames from the runtime bus into `transcript.jsonl`."""
 
-    def __init__(self, session_id: str, store: LocalFilesystemStore) -> None:
+    def __init__(
+        self,
+        session_id: str,
+        store: LocalFilesystemStore,
+        *,
+        phase_getter: Callable[[], Phase] | None = None,
+    ) -> None:
         """Store the session id and artifact store used for transcript writes."""
         self._session_id = session_id
         self._store = store
+        self._phase_getter = phase_getter or (lambda: Phase.INTAKE)
 
     async def run(self, frames: AsyncIterator[Frame]) -> None:
         """Consume frames and append transcript rows for transcript events."""
@@ -45,7 +52,7 @@ class TranscriptWriter:
                 ts_start=frame.ts_start,
                 ts_end=frame.ts_end or frame.ts_start,
                 speaker=frame.speaker,
-                phase=Phase.INTAKE,
+                phase=self._phase_getter(),
                 text=frame.text,
                 is_interim=not frame.is_final,
             )
@@ -108,11 +115,19 @@ class AudioRecorder:
 class TelemetryLogger:
     """Write minimal runtime telemetry rows into `telemetry.jsonl`."""
 
-    def __init__(self, session_id: str, store: LocalFilesystemStore, model: str) -> None:
+    def __init__(
+        self,
+        session_id: str,
+        store: LocalFilesystemStore,
+        model: str,
+        *,
+        phase_getter: Callable[[], Phase] | None = None,
+    ) -> None:
         """Store the session id, artifact store, and model label for telemetry."""
         self._session_id = session_id
         self._store = store
         self._model = model
+        self._phase_getter = phase_getter or (lambda: Phase.INTAKE)
 
     async def run(self, frames: AsyncIterator[Frame]) -> None:
         """Consume frames and append coarse telemetry for assistant responses."""
@@ -123,7 +138,7 @@ class TelemetryLogger:
             record = InferenceLogEntry(
                 session_id=self._session_id,
                 ts=utcnow(),
-                phase=Phase.INTAKE,
+                phase=self._phase_getter(),
                 provider=ModelProvider.HUME,
                 model=self._model,
                 latency_ms=0,
@@ -146,12 +161,17 @@ async def _register_artifact(
     path = store.session_dir(session_id) / file_name
     if not path.exists():
         await store.write(session_id, file_name, "")
-    payload = await store.read(session_id, "session.json")
-    session = Session.model_validate_json(payload)
-    if session.artifact_paths.get(key) == file_name:
-        return
-    session.artifact_paths[key] = file_name
-    await store.write(session_id, "session.json", session.model_dump_json(indent=2))
+    await store.update_session(
+        session_id,
+        lambda session: _add_artifact_path(session, key=key, file_name=file_name),
+    )
+
+
+def _add_artifact_path(session: Session, *, key: str, file_name: str) -> Session:
+    """Set one artifact path on the session manifest if it is missing."""
+    if session.artifact_paths.get(key) != file_name:
+        session.artifact_paths[key] = file_name
+    return session
 
 
 def _pcm16_to_wav(pcm16: bytes, *, sample_rate: int) -> bytes:

@@ -23,6 +23,7 @@ class ArtifactStore(Protocol):
     def list_sessions(self) -> AsyncIterator[str]: ...
     def public_url(self, session_id: str, name: str) -> str: ...
     def viewer_url(self, session_id: str) -> str: ...
+    async def update_session(self, session_id: str, mutate) -> object: ...
 
 
 class LocalFilesystemStore:
@@ -67,6 +68,23 @@ class LocalFilesystemStore:
         """Read one artifact file and return its raw bytes."""
         path = self.session_dir(session_id) / name
         return await asyncio.to_thread(path.read_bytes)
+
+    async def update_session(self, session_id: str, mutate):
+        """Load, mutate, and rewrite `session.json` while holding one file lock."""
+        from rehearse.types import Session
+
+        path = self.session_dir(session_id) / "session.json"
+        async with self._lock(f"{session_id}/session.json"):
+            payload = await asyncio.to_thread(path.read_text)
+            session = Session.model_validate_json(payload)
+            updated = mutate(session) or session
+            await asyncio.to_thread(
+                _write_file,
+                path,
+                updated.model_dump_json(indent=2),
+                "w",
+            )
+            return updated
 
     async def list_sessions(self) -> AsyncIterator[str]:
         """Yield known session directory names in sorted order."""

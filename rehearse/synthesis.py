@@ -86,9 +86,25 @@ async def persist_synthesis(
     story, feedback = await synthesizer.synthesize(store, session)
     await store.write(session.id, "story.md", story)
     await store.write(session.id, "feedback.md", feedback)
-    session.artifact_paths["story"] = "story.md"
-    session.artifact_paths["feedback"] = "feedback.md"
-    await store.write(session.id, "session.json", session.model_dump_json(indent=2))
+    return await store.update_session(
+        session.id,
+        lambda current: _attach_synthesis_artifacts(
+            current,
+            story_name="story.md",
+            feedback_name="feedback.md",
+        ),
+    )
+
+
+def _attach_synthesis_artifacts(
+    session: Session,
+    *,
+    story_name: str,
+    feedback_name: str,
+) -> Session:
+    """Record the synthesized artifact filenames on the session manifest."""
+    session.artifact_paths["story"] = story_name
+    session.artifact_paths["feedback"] = feedback_name
     return session
 
 
