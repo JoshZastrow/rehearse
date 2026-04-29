@@ -29,6 +29,7 @@ from rehearse.audio.twilio_stream import TwilioStream
 from rehearse.bus import FrameBus
 from rehearse.config import RuntimeConfig
 from rehearse.frames import AudioChunk
+from rehearse.phases import PhaseProcessor
 from rehearse.services.hume_evi import HumeEVIClient
 from rehearse.session import SessionOrchestrator, TriggerEvent, utcnow
 from rehearse.types import Speaker
@@ -187,6 +188,7 @@ def mount_twilio_routes(
         await ws.accept()
         log.info("media.connect", session_id=session_id)
         bus = FrameBus(session_id)
+        phase_processor = PhaseProcessor(session_id, orchestrator.store, bus)
         try:
             async with TwilioStream(ws) as twilio, HumeEVIClient(
                 api_key=config.hume_api_key,
@@ -194,8 +196,14 @@ def mount_twilio_routes(
                 bus=bus,
                 session_id=session_id,
             ) as hume:
+                await phase_processor.bootstrap()
+                phase_task = asyncio.create_task(phase_processor.run(bus.subscribe()))
                 transcript_task = asyncio.create_task(
-                    TranscriptWriter(session_id, orchestrator.store).run(bus.subscribe())
+                    TranscriptWriter(
+                        session_id,
+                        orchestrator.store,
+                        phase_getter=lambda: phase_processor.current_phase,
+                    ).run(bus.subscribe())
                 )
                 prosody_task = asyncio.create_task(
                     ProsodyWriter(session_id, orchestrator.store).run(bus.subscribe())
@@ -208,6 +216,7 @@ def mount_twilio_routes(
                         session_id,
                         orchestrator.store,
                         model=config.hume_config_id,
+                        phase_getter=lambda: phase_processor.current_phase,
                     ).run(bus.subscribe())
                 )
                 assistant_task = asyncio.create_task(_pump_assistant_audio(twilio, bus))
@@ -231,6 +240,7 @@ def mount_twilio_routes(
                         await assistant_task
                     with suppress(asyncio.CancelledError):
                         await hume_task
+                    await phase_task
                     await transcript_task
                     await prosody_task
                     await audio_task

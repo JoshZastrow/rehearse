@@ -295,6 +295,8 @@ def test_media_websocket_bridges_twilio_to_fake_hume(
     assert (session_dir / "prosody.jsonl").exists()
     assert (session_dir / "audio.wav").exists()
     assert (session_dir / "telemetry.jsonl").exists()
+    manifest = json.loads((session_dir / "session.json").read_text())
+    assert manifest["phase_timings"][0]["phase"] == "intake"
 
 
 def test_twilio_sms_signature_validation_failure(
