@@ -287,3 +287,38 @@ def test_create_app_mounts_the_scripted_clm_route(tmp_path: Path) -> None:
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("text/event-stream")
     assert "data: [DONE]" in resp.text
+
+
+def test_create_app_infers_character_role_from_practice_phase(tmp_path: Path) -> None:
+    """The real app should infer character behavior from a practice-phase manifest."""
+    session = Session(
+        id="session-live-practice",
+        created_at=_NOW,
+        consent=ConsentState.PENDING,
+        phase_timings=[
+            PhaseTiming(
+                phase=Phase.PRACTICE,
+                started_at=_NOW,
+                budget_seconds=180,
+            )
+        ],
+    )
+    session_dir = tmp_path / session.id
+    session_dir.mkdir()
+    (session_dir / "session.json").write_text(session.model_dump_json(indent=2))
+
+    client = TestClient(create_app(_config(tmp_path)))
+    resp = client.post(
+        "/chat/completions",
+        params={"custom_session_id": session.id},
+        json={
+            "messages": [
+                {"role": "user", "content": "Can we start the negotiation now?"},
+            ],
+            "stream": False,
+        },
+    )
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert "circling the point" in payload["choices"][0]["message"]["content"]
