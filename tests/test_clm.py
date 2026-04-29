@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 from rehearse.agents.clm import CLMChatRequest, CLMResponder, mount_clm_routes
 from rehearse.app import create_app
 from rehearse.config import RuntimeConfig
-from rehearse.types import ConsentState, Phase, PhaseTiming, Session
+from rehearse.types import ConsentState, CounterpartyPersona, Phase, PhaseTiming, Session
 
 _NOW = datetime(2026, 4, 28, 12, 0, tzinfo=UTC)
 
@@ -295,6 +295,15 @@ def test_create_app_infers_character_role_from_practice_phase(tmp_path: Path) ->
         id="session-live-practice",
         created_at=_NOW,
         consent=ConsentState.PENDING,
+        persona=CounterpartyPersona(
+            session_id="session-live-practice",
+            name=None,
+            relationship="recruiter",
+            personality_prompt="You are a recruiter negotiating an offer.",
+            hot_buttons=["vague asks"],
+            likely_reactions=["asks for specifics"],
+            compiled_at=_NOW,
+        ),
         phase_timings=[
             PhaseTiming(
                 phase=Phase.PRACTICE,
@@ -321,4 +330,4 @@ def test_create_app_infers_character_role_from_practice_phase(tmp_path: Path) ->
 
     assert resp.status_code == 200
     payload = resp.json()
-    assert "circling the point" in payload["choices"][0]["message"]["content"]
+    assert "As recruiter" in payload["choices"][0]["message"]["content"]

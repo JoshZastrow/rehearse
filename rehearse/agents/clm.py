@@ -22,11 +22,6 @@ from rehearse.personas import character_system_prompt, coach_system_prompt
 from rehearse.storage import LocalFilesystemStore
 from rehearse.types import Phase, Session
 
-_DEFAULT_CHARACTER_CONTEXT = (
-    "You are the other person in the conversation. Push back realistically, "
-    "but stay grounded and concise."
-)
-
 
 class CLMMessage(BaseModel):
     """One message from Hume's CLM payload."""
@@ -66,6 +61,10 @@ class CLMResponder(Protocol):
 class ScriptedCLMResponder:
     """Fallback responder used when no upstream LLM key is configured."""
 
+    def __init__(self, store: LocalFilesystemStore) -> None:
+        """Store the session store used to resolve persona context."""
+        self._store = store
+
     async def stream_reply(
         self,
         *,
@@ -74,9 +73,9 @@ class ScriptedCLMResponder:
         request: CLMChatRequest,
     ) -> AsyncIterator[str]:
         """Yield a short deterministic coaching reply for local testing."""
-        del session_id
+        session = await _load_session(session_id, self._store)
         last_user_text = _last_user_text(request.messages) or "Tell me what happened."
-        reply = _scripted_reply(role=role, last_user_text=last_user_text)
+        reply = _scripted_reply(role=role, last_user_text=last_user_text, session=session)
         for chunk in _chunk_text(reply):
             yield chunk
 
@@ -84,10 +83,11 @@ class ScriptedCLMResponder:
 class AnthropicCLMResponder:
     """Wrap Claude so Hume can use it as the live conversation brain."""
 
-    def __init__(self, api_key: str, model: str) -> None:
+    def __init__(self, api_key: str, model: str, store: LocalFilesystemStore) -> None:
         """Store Anthropic credentials and create the async client lazily."""
         self._client = AsyncAnthropic(api_key=api_key)
         self._model = model
+        self._store = store
 
     async def stream_reply(
         self,
@@ -97,7 +97,8 @@ class AnthropicCLMResponder:
         request: CLMChatRequest,
     ) -> AsyncIterator[str]:
         """Yield text chunks from Anthropic's streaming messages API."""
-        system = _system_prompt_for_role(role)
+        session = await _load_session(session_id, self._store)
+        system = _system_prompt_for_role(role, session)
         messages = _anthropic_messages(request.messages)
         if not messages:
             messages = [{"role": "user", "content": "Greet the caller and start the coaching."}]
@@ -117,12 +118,14 @@ class AnthropicCLMResponder:
 
 def build_clm_responder(config: RuntimeConfig) -> CLMResponder:
     """Return the live CLM responder chosen from the runtime config."""
+    store = LocalFilesystemStore(root=config.session_root, public_base_url=config.public_base_url)
     if config.anthropic_api_key:
         return AnthropicCLMResponder(
             api_key=config.anthropic_api_key,
             model=config.anthropic_model,
+            store=store,
         )
-    return ScriptedCLMResponder()
+    return ScriptedCLMResponder(store=store)
 
 
 def mount_clm_routes(app: FastAPI, responder: CLMResponder, config: RuntimeConfig) -> None:
@@ -323,12 +326,15 @@ def _last_user_text(messages: Iterable[CLMMessage]) -> str | None:
     return None
 
 
-def _scripted_reply(*, role: str, last_user_text: str) -> str:
+def _scripted_reply(*, role: str, last_user_text: str, session: Session | None) -> str:
     """Return a short fallback reply when no upstream model is configured."""
     if role == "character":
+        relationship = (
+            session.persona.relationship if session and session.persona else "the other person"
+        )
         return (
-            "I hear you. Say that again more directly, because right now it still sounds "
-            "like you're circling the point."
+            f"As {relationship}, I need you to say that more directly, because right now "
+            "it still sounds like you're circling the point."
         )
     return (
         "Let's make this concrete. In one sentence, what do you most want to achieve, "
@@ -350,11 +356,24 @@ def _chunk_text(text: str, *, words_per_chunk: int = 8) -> list[str]:
     return chunks
 
 
-def _system_prompt_for_role(role: str) -> str:
+def _system_prompt_for_role(role: str, session: Session | None) -> str:
     """Return the correct system prompt for the requested CLM role."""
     if role == "character":
-        return character_system_prompt(_DEFAULT_CHARACTER_CONTEXT)
+        if session and session.persona is not None:
+            return character_system_prompt(session.persona)
+        return character_system_prompt("Be the other person in the conversation.")
     return coach_system_prompt()
+
+
+async def _load_session(session_id: str | None, store: LocalFilesystemStore) -> Session | None:
+    """Load the stored session manifest when a session id is available."""
+    if not session_id:
+        return None
+    try:
+        payload = await store.read(session_id, "session.json")
+    except FileNotFoundError:
+        return None
+    return Session.model_validate_json(payload)
 
 
 async def _resolve_role(
@@ -366,13 +385,9 @@ async def _resolve_role(
     """Return an explicit role override or infer one from the live session phase."""
     if role in {"coach", "character"}:
         return role
-    if not session_id:
+    session = await _load_session(session_id, store)
+    if session is None:
         return "coach"
-    try:
-        payload = await store.read(session_id, "session.json")
-    except FileNotFoundError:
-        return "coach"
-    session = Session.model_validate_json(payload)
     phase = _current_phase(session)
     if phase == Phase.PRACTICE:
         return "character"
