@@ -22,6 +22,7 @@ class ArtifactStore(Protocol):
     async def read(self, session_id: str, name: str) -> bytes: ...
     def list_sessions(self) -> AsyncIterator[str]: ...
     def public_url(self, session_id: str, name: str) -> str: ...
+    def viewer_url(self, session_id: str) -> str: ...
 
 
 class LocalFilesystemStore:
@@ -76,6 +77,10 @@ class LocalFilesystemStore:
     def public_url(self, session_id: str, name: str) -> str:
         """Return the public URL that serves one artifact file."""
         return f"{self._public_base_url}/sessions/{session_id}/{name}"
+
+    def viewer_url(self, session_id: str) -> str:
+        """Return the public viewer URL for one session."""
+        return f"{self._public_base_url}/viewer?session_id={session_id}"
 
 
 def _write_file(path: Path, data: bytes | str, mode: str) -> None:

@@ -11,6 +11,19 @@ from rehearse.storage import LocalFilesystemStore
 from rehearse.types import Phase, Speaker, TranscriptFrame
 
 
+class FakeNotifier:
+    """Record viewer-link SMS notifications sent during finalize."""
+
+    def __init__(self) -> None:
+        """Start with an empty list of sent messages."""
+        self.messages: list[tuple[str, str]] = []
+
+    async def send_sms(self, to: str, body: str) -> str:
+        """Store the outbound SMS and return a fake message id."""
+        self.messages.append((to, body))
+        return "SM_test"
+
+
 @pytest.fixture
 def store(tmp_path: Path) -> LocalFilesystemStore:
     return LocalFilesystemStore(root=tmp_path, public_base_url="https://example.test")
@@ -59,7 +72,8 @@ async def test_session_orchestrator_unknown_and_missing_manifest_paths(
 async def test_session_orchestrator_finalize_writes_story_and_feedback(
     store: LocalFilesystemStore,
 ) -> None:
-    orchestrator = SessionOrchestrator(store=store)
+    notifier = FakeNotifier()
+    orchestrator = SessionOrchestrator(store=store, notifier=notifier)
     now = datetime.now(UTC)
     handle = await orchestrator.start(
         TriggerEvent(from_number="+15551234567", body="help me negotiate", received_at=now)
@@ -89,3 +103,10 @@ async def test_session_orchestrator_finalize_writes_story_and_feedback(
     assert manifest_after["artifact_paths"]["story"] == "story.md"
     assert manifest_after["artifact_paths"]["feedback"] == "feedback.md"
     assert manifest_after["completion_status"] == "complete"
+    assert notifier.messages == [
+        (
+            "+15551234567",
+            f"Your Rehearse session is ready. View your artifacts here: "
+            f"https://example.test/viewer?session_id={handle.session_id}",
+        )
+    ]

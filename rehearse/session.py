@@ -11,7 +11,7 @@ import hashlib
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Protocol
 
 import structlog
 
@@ -22,6 +22,12 @@ from rehearse.types import ConsentState, Session
 log = structlog.get_logger(__name__)
 
 CompletionStatus = Literal["complete", "partial", "failed", "in_progress"]
+
+
+class SMSNotifier(Protocol):
+    """Small interface for sending one SMS notification to the caller."""
+
+    async def send_sms(self, to: str, body: str) -> str: ...
 
 
 @dataclass
@@ -53,10 +59,12 @@ class SessionOrchestrator:
         self,
         store: LocalFilesystemStore,
         synthesizer: SessionSynthesizer | None = None,
+        notifier: SMSNotifier | None = None,
     ) -> None:
         """Store the session persistence layer and post-call synthesizer."""
         self._store = store
         self._synthesizer = synthesizer or SessionSynthesizer()
+        self._notifier = notifier
         self._handles: dict[str, SessionHandle] = {}
         self._by_call_sid: dict[str, str] = {}
 
@@ -130,7 +138,19 @@ class SessionOrchestrator:
             "session.json",
             session.model_dump_json(indent=2),
         )
+        await self._send_viewer_sms(handle)
         log.info("session.finalize", session_id=session_id, status=status)
+
+    async def _send_viewer_sms(self, handle: SessionHandle | None) -> None:
+        """Send the viewer URL to the caller when a notifier is configured."""
+        if self._notifier is None or handle is None or not handle.reply_to_number:
+            return
+        viewer_url = self._store.viewer_url(handle.session_id)
+        body = (
+            "Your Rehearse session is ready. "
+            f"View your artifacts here: {viewer_url}"
+        )
+        await self._notifier.send_sms(handle.reply_to_number, body)
 
 
 def _hash_number(number: str) -> str:

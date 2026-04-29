@@ -42,8 +42,8 @@ def create_app(config: RuntimeConfig | None = None) -> FastAPI:
 
     app = FastAPI(title="rehearse")
     store = LocalFilesystemStore(root=config.session_root, public_base_url=config.public_base_url)
-    orchestrator = SessionOrchestrator(store=store)
     twilio_client = TwilioRestClient(config)
+    orchestrator = SessionOrchestrator(store=store, notifier=twilio_client)
     clm_responder = build_clm_responder(config)
 
     mount_clm_routes(app, clm_responder, config)

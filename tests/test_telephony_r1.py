@@ -100,7 +100,7 @@ def test_voice_webhook_returns_hello_twiml(app_client) -> None:
 
 
 def test_status_callback_finalizes_session(app_client) -> None:
-    client, _, config = app_client
+    client, fake, config = app_client
 
     sms = client.post("/twilio/sms", data={"From": "+15551234567", "Body": "hi"})
     assert sms.status_code == 200
@@ -115,6 +115,15 @@ def test_status_callback_finalizes_session(app_client) -> None:
 
     manifest = json.loads((config.session_root / session_id / "session.json").read_text())
     assert manifest["completion_status"] == "complete"
+    assert manifest["artifact_paths"]["story"] == "story.md"
+    assert manifest["artifact_paths"]["feedback"] == "feedback.md"
+    assert fake.messages == [
+        (
+            "+15551234567",
+            f"Your Rehearse session is ready. View your artifacts here: "
+            f"https://example.test/viewer?session_id={session_id}",
+        )
+    ]
 
 
 def test_status_callback_failed_marks_failed(app_client) -> None:
