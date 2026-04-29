@@ -29,6 +29,7 @@ the phase you are building.
 | [`../../SPEC.md`](../../SPEC.md) | `done` | `foundation` | Whole product | Foundational design, treated as frozen unless a new amendment says otherwise. |
 | [`v2026-04-27-eval-harness.md`](v2026-04-27-eval-harness.md) | `wip` | `implementation` | Eval harness | Phases 1-2 have shipped. Later eval phases remain open. |
 | [`v2026-04-28-mme-emotion-and-audio-targets.md`](v2026-04-28-mme-emotion-and-audio-targets.md) | `acknowledged` | `implementation` | Eval phases A1-A6 | Next active eval direction. Supersedes EQ-Bench as the primary eval path. |
+| [`v2026-04-29-mme-seeded-rl-sandbox-eval.md`](v2026-04-29-mme-seeded-rl-sandbox-eval.md) | `acknowledged` | `implementation` | RL-style eval phases RLE1-RLE4 | Uses MME clips as emotional seeds for sandbox conversation rollouts and RLAIF-style judging. |
 | [`v2026-04-27-runtime.md`](v2026-04-27-runtime.md) | `acknowledged` | `implementation` | Runtime phases R1-R7 | Read with the Drop Pipecat amendment. Sections C3, C5, and C7 are no longer authoritative. |
 | [`v2026-04-28-drop-pipecat.md`](v2026-04-28-drop-pipecat.md) | `acknowledged` | `amendment` | Runtime phases R2-R7, eval simulated transport | Authoritative replacement for Pipecat-shaped runtime pieces. |
 | [`v2026-04-28-hume-evi-bridge.md`](v2026-04-28-hume-evi-bridge.md) | `superseded` | `historical` | Runtime R2 decision history | Kept only to explain the bridge decision. Do not implement from it. |
@@ -39,6 +40,7 @@ the phase you are building.
 |---|---|---|
 | Eval harness maintenance | `v2026-04-27-eval-harness.md` | `v2026-04-28-hume-evi-bridge.md` |
 | Audio-native eval work | `v2026-04-27-eval-harness.md`, `v2026-04-28-mme-emotion-and-audio-targets.md` | `v2026-04-28-hume-evi-bridge.md` |
+| RL-style sandbox eval work | `v2026-04-27-eval-harness.md`, `v2026-04-29-mme-seeded-rl-sandbox-eval.md` | `v2026-04-28-hume-evi-bridge.md` |
 | Runtime R1 | `v2026-04-27-runtime.md` | `v2026-04-28-hume-evi-bridge.md` |
 | Runtime R2-R7 | `v2026-04-27-runtime.md`, `v2026-04-28-drop-pipecat.md` | `v2026-04-28-hume-evi-bridge.md`; superseded runtime sections C3, C5, C7 |
 | ML data pipeline | `../../SPEC.md` | No dedicated spec yet. Write one before implementation. |
@@ -51,4 +53,3 @@ the phase you are building.
 4. Move a spec to `done` only when its acceptance criteria are delivered and verified.
 5. Mark older specs `superseded` instead of deleting them when a decision record is useful.
 6. When a spec amends another spec, name the superseded sections in both files and in this manifest.
-
