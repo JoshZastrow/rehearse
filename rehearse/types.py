@@ -28,24 +28,32 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class Phase(StrEnum):
+    """Name the three phases of one live rehearsal call."""
+
     INTAKE = "intake"
     PRACTICE = "practice"
     FEEDBACK = "feedback"
 
 
 class Speaker(StrEnum):
+    """Name the speaker attached to one runtime utterance or audio chunk."""
+
     USER = "user"
     COACH = "coach"
     CHARACTER = "character"
 
 
 class ConsentState(StrEnum):
+    """Track whether the caller has granted consent for the session."""
+
     PENDING = "pending"
     GRANTED = "granted"
     DECLINED = "declined"
 
 
 class ModelProvider(StrEnum):
+    """Name the upstream model provider that produced one inference."""
+
     ANTHROPIC = "anthropic"
     HUME = "hume"
     OPENAI = "openai"
@@ -53,6 +61,8 @@ class ModelProvider(StrEnum):
 
 
 class ProsodySource(StrEnum):
+    """Describe where a prosody measurement came from."""
+
     HUME_LIVE = "hume_live"
     SCRIPTED = "scripted"
     TTS_HUME = "tts_hume"
@@ -60,6 +70,8 @@ class ProsodySource(StrEnum):
 
 
 class FaultLabel(StrEnum):
+    """List the coaching faults the product and evals care about."""
+
     # Pure transcript faults
     BURY_LEDE = "bury_lede"
     OVER_JUSTIFY = "over_justify"
@@ -84,6 +96,8 @@ class FaultLabel(StrEnum):
 
 
 class RubricDimension(StrEnum):
+    """Name the rubric dimensions used when scoring sessions and runs."""
+
     INTAKE_FIDELITY = "intake_fidelity"
     CHARACTER_PERSONA_FIDELITY = "character_persona_fidelity"
     CHARACTER_BELIEVABILITY = "character_believability"
@@ -97,6 +111,8 @@ class RubricDimension(StrEnum):
 
 
 class ScenarioCategory(StrEnum):
+    """Group scenarios into broad conversation categories."""
+
     RELATIONSHIP_CONFLICT = "relationship_conflict"
     PROFESSIONAL_CONFLICT = "professional_conflict"
     CONNECTION_INFLUENCE = "connection_influence"
@@ -121,6 +137,7 @@ class Strict(BaseModel):
 
 
 def _new_id() -> str:
+    """Return a new opaque identifier for a stored object."""
     return uuid4().hex
 
 
@@ -192,6 +209,8 @@ class TranscriptFrame(Strict):
 
 
 class PhaseTiming(Strict):
+    """Store timing and budget data for one call phase."""
+
     phase: Phase
     started_at: datetime
     ended_at: datetime | None = None
@@ -272,6 +291,8 @@ class ExampleScenario(Strict):
 
 
 class RubricScore(Strict):
+    """Store one scored rubric dimension for one run/example pair."""
+
     run_id: str
     example_id: str
     session_id: str | None = None
@@ -282,6 +303,8 @@ class RubricScore(Strict):
 
 
 class EvalRun(Strict):
+    """Describe one eval run and where its output artifacts were written."""
+
     id: str = Field(default_factory=_new_id)
     started_at: datetime
     completed_at: datetime | None = None

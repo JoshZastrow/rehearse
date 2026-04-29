@@ -43,7 +43,8 @@ class RuntimeConfig:
             "TWILIO_PHONE_NUMBER": os.environ.get("TWILIO_PHONE_NUMBER"),
             "BASE_URL": os.environ.get("BASE_URL"),
             "HUME_API_KEY": os.environ.get("HUME_API_KEY"),
-            "HUME_CONFIG_ID": os.environ.get("HUME_CONFIG_ID"),
+            "HUME_CONFIG_ID": os.environ.get("HUME_CONFIG_ID")
+            or os.environ.get("HUME_CONFIG_ID_COACH"),
         }
         missing = [k for k, v in required.items() if not v]
         if missing:
