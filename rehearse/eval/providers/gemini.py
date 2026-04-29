@@ -22,9 +22,9 @@ class GeminiAudioProvider:
     def __init__(self, model_slots: dict[str, str] | None = None) -> None:
         self.model_slots = model_slots or {}
         self.model = self.model_slots.get("multimodal_hosted", _DEFAULT_MODEL)
-        self.api_key = os.environ.get("GOOGLE_API_KEY")
+        self.api_key = os.environ.get("GEMINI_API_KEY")
         if not self.api_key:
-            raise ProviderError("GOOGLE_API_KEY not set")
+            raise ProviderError("GEMINI_API_KEY not set")
 
     async def complete(
         self,

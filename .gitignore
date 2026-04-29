@@ -13,6 +13,8 @@ sessions/
 evals/runs/
 evals/datasets/mme-emotion/v0-10clip/clips/*
 !evals/datasets/mme-emotion/v0-10clip/clips/.gitkeep
+evals/fixtures/founder-recorded/clips/*
+!evals/fixtures/founder-recorded/clips/.gitkeep
 .cache/
 *.wav
 *.log

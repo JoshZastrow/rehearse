@@ -1,0 +1,49 @@
+{
+  "_meta": {
+    "name": "founder-recorded",
+    "version": "v0-3clip",
+    "source": "self-recorded by jz on phone",
+    "purpose": "smoke fixture for the audio-native eval path. Replace with MME-Emotion clips when vendoring real data.",
+    "created": "2026-04-28"
+  },
+  "subset": "founder-recorded",
+  "audio_max_s": 30,
+  "label_set": [
+    "Anger",
+    "Sadness",
+    "Surprise",
+    "Happiness",
+    "Excited",
+    "Fear",
+    "Frustration",
+    "Neutral",
+    "Hopeful",
+    "Other"
+  ],
+  "clips": [
+    {
+      "id": "founder-001",
+      "file": "clips/clip-001-frustration.m4a",
+      "label": "Frustration",
+      "duration_s": 12,
+      "speaker_id": "jz",
+      "source_id": "self-recorded-001"
+    },
+    {
+      "id": "founder-002",
+      "file": "clips/clip-002-sadness.m4a",
+      "label": "Sadness",
+      "duration_s": 14,
+      "speaker_id": "jz",
+      "source_id": "self-recorded-002"
+    },
+    {
+      "id": "founder-003",
+      "file": "clips/clip-003-hopeful.m4a",
+      "label": "Hopeful",
+      "duration_s": 10,
+      "speaker_id": "jz",
+      "source_id": "self-recorded-003"
+    }
+  ]
+}
