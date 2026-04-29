@@ -1,7 +1,9 @@
-"""LLM-judge scorers (Claude Opus, structured rubric).
+"""LLM-based scorers for subjective eval dimensions.
 
-Stub for Phase 3. The seed-scenario rubric dimensions that need LLM judging
-(persona fidelity, character believability, holistic usefulness) land here.
+This file is the future home for rubric scorers that need a model judge instead
+of simple exact-match logic. It is intentionally a stub right now; later phases
+will add Claude-based scoring for things like reasoning quality and holistic
+usefulness.
 """
 
 from __future__ import annotations

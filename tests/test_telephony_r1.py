@@ -16,9 +16,9 @@ from fastapi.testclient import TestClient
 from rehearse.app import create_app
 from rehearse.audio.mulaw import encode_pcm16
 from rehearse.config import RuntimeConfig
-from rehearse.frames import AudioChunk
+from rehearse.frames import AudioChunk, ProsodyEvent, TranscriptDelta
 from rehearse.telephony import TwilioRestClient
-from rehearse.types import Speaker
+from rehearse.types import ProsodyScores, Session, Speaker
 
 
 class FakeTwilioClient:
@@ -190,6 +190,11 @@ def test_media_websocket_bridges_twilio_to_fake_hume(
     app_client, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     client, _, _config = app_client
+    session_dir = _config.session_root / "test-session"
+    session_dir.mkdir()
+    (session_dir / "session.json").write_text(
+        Session(id="test-session", created_at=datetime.now(UTC)).model_dump_json(indent=2)
+    )
 
     class FakeHumeEVIClient:
         seen_audio: list[bytes] = []
@@ -208,6 +213,38 @@ def test_media_websocket_bridges_twilio_to_fake_hume(
 
         async def send_audio(self, pcm16_16k: bytes) -> None:
             self.seen_audio.append(pcm16_16k)
+            await self._bus.publish(
+                TranscriptDelta(
+                    session_id=self._session_id,
+                    utterance_id="user-1",
+                    speaker=Speaker.USER,
+                    text="user said hello",
+                    is_final=True,
+                    ts_start=0.0,
+                    ts_end=0.1,
+                )
+            )
+            await self._bus.publish(
+                ProsodyEvent(
+                    session_id=self._session_id,
+                    utterance_id="user-1",
+                    speaker=Speaker.USER,
+                    scores=ProsodyScores(arousal=0.3, valence=0.1, emotions={"joy": 0.2}),
+                    ts_start=0.0,
+                    ts_end=0.1,
+                )
+            )
+            await self._bus.publish(
+                TranscriptDelta(
+                    session_id=self._session_id,
+                    utterance_id="coach-1",
+                    speaker=Speaker.COACH,
+                    text="coach reply",
+                    is_final=True,
+                    ts_start=0.2,
+                    ts_end=0.3,
+                )
+            )
             await self._bus.publish(
                 AudioChunk(
                     session_id=self._session_id,
@@ -245,6 +282,10 @@ def test_media_websocket_bridges_twilio_to_fake_hume(
     assert FakeHumeEVIClient.seen_audio
     assert outbound["event"] == "media"
     assert outbound["streamSid"] == "MZ123"
+    assert (session_dir / "transcript.jsonl").exists()
+    assert (session_dir / "prosody.jsonl").exists()
+    assert (session_dir / "audio.wav").exists()
+    assert (session_dir / "telemetry.jsonl").exists()
 
 
 def test_twilio_sms_signature_validation_failure(

@@ -13,3 +13,5 @@ sessions/
 evals/runs/
 *.wav
 *.log
+.coverage
+coverage.json

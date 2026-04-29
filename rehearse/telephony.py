@@ -32,6 +32,7 @@ from rehearse.frames import AudioChunk
 from rehearse.services.hume_evi import HumeEVIClient
 from rehearse.session import SessionOrchestrator, TriggerEvent, utcnow
 from rehearse.types import Speaker
+from rehearse.writers import AudioRecorder, ProsodyWriter, TelemetryLogger, TranscriptWriter
 
 log = structlog.get_logger(__name__)
 
@@ -193,6 +194,22 @@ def mount_twilio_routes(
                 bus=bus,
                 session_id=session_id,
             ) as hume:
+                transcript_task = asyncio.create_task(
+                    TranscriptWriter(session_id, orchestrator.store).run(bus.subscribe())
+                )
+                prosody_task = asyncio.create_task(
+                    ProsodyWriter(session_id, orchestrator.store).run(bus.subscribe())
+                )
+                audio_task = asyncio.create_task(
+                    AudioRecorder(session_id, orchestrator.store).run(bus.subscribe())
+                )
+                telemetry_task = asyncio.create_task(
+                    TelemetryLogger(
+                        session_id,
+                        orchestrator.store,
+                        model=config.hume_config_id,
+                    ).run(bus.subscribe())
+                )
                 assistant_task = asyncio.create_task(_pump_assistant_audio(twilio, bus))
                 hume_task = asyncio.create_task(hume.run_event_loop())
                 try:
@@ -214,6 +231,10 @@ def mount_twilio_routes(
                         await assistant_task
                     with suppress(asyncio.CancelledError):
                         await hume_task
+                    await transcript_task
+                    await prosody_task
+                    await audio_task
+                    await telemetry_task
         except WebSocketDisconnect:
             log.info("media.disconnect", session_id=session_id)
 

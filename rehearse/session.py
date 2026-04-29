@@ -80,6 +80,11 @@ class SessionOrchestrator:
         """Return the active session handle for an id, if it exists."""
         return self._handles.get(session_id)
 
+    @property
+    def store(self) -> LocalFilesystemStore:
+        """Return the artifact store used for session persistence."""
+        return self._store
+
     async def attach_call(self, session_id: str, call_sid: str) -> None:
         """Attach a Twilio call SID to an existing active session."""
         handle = self._handles.get(session_id)
