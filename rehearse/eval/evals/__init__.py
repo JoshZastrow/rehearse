@@ -10,11 +10,13 @@ from collections.abc import Callable
 
 from rehearse.eval.evals.mme_emotion import MMEEmotionEval
 from rehearse.eval.evals.noop import NoopEval
+from rehearse.eval.evals.voice_agent_smoke import VoiceAgentSmokeEval
 from rehearse.eval.protocols import Eval
 
 EVALS: dict[str, Callable[[], Eval]] = {
     "noop": NoopEval,
     "mme-emotion": MMEEmotionEval,
+    "voice-agent-smoke": VoiceAgentSmokeEval,
 }
 
 

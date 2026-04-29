@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from rehearse.eval.environments.multimodal_llm import MultimodalLLMEnvironment
+from rehearse.eval.environments.voice_agent_sandbox import VoiceAgentSandboxEnvironment
 from rehearse.eval.protocols import Environment
 from rehearse.eval.targets.echo import EchoTarget
 from rehearse.eval.targets.raw_llm import RawLLMTarget
@@ -19,6 +20,7 @@ ENVIRONMENTS: dict[str, EnvironmentFactory] = {
     "echo": lambda slots: EchoTarget(model_slots=slots),
     "raw-llm": lambda slots: RawLLMTarget(model_slots=slots),
     "multimodal-llm": lambda slots: MultimodalLLMEnvironment(model_slots=slots),
+    "voice-agent-sandbox": lambda slots: VoiceAgentSandboxEnvironment(model_slots=slots),
 }
 
 

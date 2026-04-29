@@ -10,11 +10,13 @@ from collections.abc import Callable
 
 from rehearse.eval.datasets.mme_emotion import MMEEmotionDataset
 from rehearse.eval.datasets.noop import NoopDataset
+from rehearse.eval.datasets.voice_agent_smoke import VoiceAgentSmokeDataset
 from rehearse.eval.protocols import Dataset
 
 DATASETS: dict[str, Callable[[], Dataset]] = {
     "noop": NoopDataset,
     "mme-emotion": MMEEmotionDataset,
+    "voice-agent-smoke": VoiceAgentSmokeDataset,
 }
 
 

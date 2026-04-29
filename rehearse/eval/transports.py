@@ -88,6 +88,7 @@ class InMemoryTransportEndpoint:
             payload=dict(payload or {}),
             data=data,
         )
+        self._owner.record(event)
         await self._peer_inbox.put(event)
         return event
 
@@ -105,6 +106,7 @@ class InMemoryDuplexTransport:
 
     def __init__(self) -> None:
         self.status: TransportStatus = "open"
+        self.events: list[TransportEvent] = []
         customer_inbox: asyncio.Queue[TransportEvent] = asyncio.Queue()
         runtime_inbox: asyncio.Queue[TransportEvent] = asyncio.Queue()
         self.customer = InMemoryTransportEndpoint(
@@ -122,3 +124,6 @@ class InMemoryDuplexTransport:
 
     async def close(self) -> None:
         self.status = "closed"
+
+    def record(self, event: TransportEvent) -> None:
+        self.events.append(event)
