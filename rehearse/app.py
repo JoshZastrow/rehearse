@@ -7,7 +7,6 @@ handlers, and static artifact serving. It does not hold core business logic.
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
 import structlog
 from fastapi import FastAPI
@@ -18,6 +17,7 @@ from rehearse.config import RuntimeConfig
 from rehearse.session import SessionOrchestrator
 from rehearse.storage import LocalFilesystemStore
 from rehearse.telephony import TwilioRestClient, mount_twilio_routes
+from rehearse.viewer import mount_viewer_routes
 
 
 def _configure_logging(level: str) -> None:
@@ -48,15 +48,13 @@ def create_app(config: RuntimeConfig | None = None) -> FastAPI:
 
     mount_clm_routes(app, clm_responder, config)
     mount_twilio_routes(app, orchestrator, twilio_client, config)
+    mount_viewer_routes(app, store)
 
     app.mount(
         "/sessions",
         StaticFiles(directory=str(config.session_root)),
         name="sessions",
     )
-    web_dir = Path(__file__).resolve().parent.parent / "web"
-    if web_dir.is_dir():
-        app.mount("/viewer", StaticFiles(directory=str(web_dir), html=True), name="viewer")
 
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:

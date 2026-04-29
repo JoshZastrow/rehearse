@@ -18,7 +18,18 @@ from rehearse.audio.mulaw import encode_pcm16
 from rehearse.config import RuntimeConfig
 from rehearse.frames import AudioChunk, ProsodyEvent, TranscriptDelta
 from rehearse.telephony import TwilioRestClient
-from rehearse.types import ProsodyScores, Session, Speaker
+from rehearse.types import (
+    CounterpartyPersona,
+    IntakeRecord,
+    Phase,
+    PhaseTiming,
+    ProsodyFrame,
+    ProsodyScores,
+    ProsodySource,
+    Session,
+    Speaker,
+    TranscriptFrame,
+)
 
 
 class FakeTwilioClient:
@@ -193,6 +204,98 @@ def test_inbound_voice_status_callback_finalizes_via_call_sid(app_client) -> Non
     assert resp.status_code == 204
     manifest = json.loads((config.session_root / session_id / "session.json").read_text())
     assert manifest["completion_status"] == "complete"
+
+
+def test_viewer_renders_runtime_artifacts(app_client) -> None:
+    client, _, config = app_client
+    session = Session(id="viewer-session", created_at=datetime.now(UTC))
+    session.intake = IntakeRecord(
+        session_id=session.id,
+        situation="Comp negotiation",
+        counterparty_name="Dana",
+        counterparty_relationship="Hiring manager",
+        counterparty_description="Direct and budget-conscious",
+        stakes="Offer decision this week",
+        user_goal="Increase base pay",
+        desired_tone="Calm and direct",
+        captured_at=datetime.now(UTC),
+    )
+    session.persona = CounterpartyPersona(
+        session_id=session.id,
+        name="Dana",
+        relationship="Hiring manager",
+        personality_prompt="Pushes back on budget and timing.",
+        hot_buttons=["Internal band limits"],
+        likely_reactions=["Deflects to equity"],
+        compiled_at=datetime.now(UTC),
+    )
+    session.phase_timings = [
+        PhaseTiming(
+            phase=Phase.INTAKE,
+            started_at=datetime.now(UTC),
+            ended_at=datetime.now(UTC),
+            budget_seconds=60,
+            overran=False,
+        )
+    ]
+    session.artifact_paths = {
+        "transcript": "transcript.jsonl",
+        "prosody": "prosody.jsonl",
+        "audio": "audio.wav",
+        "story": "story.md",
+        "feedback": "feedback.md",
+    }
+    (config.session_root / session.id).mkdir()
+    (config.session_root / session.id / "session.json").write_text(
+        session.model_dump_json(indent=2)
+    )
+    (config.session_root / session.id / "transcript.jsonl").write_text(
+        TranscriptFrame(
+            session_id=session.id,
+            utterance_id="u1",
+            speaker=Speaker.USER,
+            phase=Phase.INTAKE,
+            text="I want to negotiate the offer.",
+            ts_start=0.0,
+            ts_end=0.5,
+            is_interim=False,
+        ).model_dump_json()
+        + "\n"
+    )
+    (config.session_root / session.id / "prosody.jsonl").write_text(
+        ProsodyFrame(
+            session_id=session.id,
+            utterance_id="u1",
+            speaker=Speaker.USER,
+            source=ProsodySource.HUME_LIVE,
+            scores=ProsodyScores(arousal=0.7, valence=0.1, emotions={"nervousness": 0.8}),
+            ts_start=0.0,
+            ts_end=0.5,
+        )
+        .model_dump_json()
+        + "\n"
+    )
+    (config.session_root / session.id / "audio.wav").write_bytes(b"RIFFfake")
+    (config.session_root / session.id / "story.md").write_text("# Story\n\nA negotiation run.")
+    (config.session_root / session.id / "feedback.md").write_text("# Feedback\n\nBe more direct.")
+
+    resp = client.get("/viewer", params={"session_id": session.id})
+
+    assert resp.status_code == 200
+    assert "Rehearse Session Viewer" in resp.text
+    assert "Comp negotiation" in resp.text
+    assert "Dana" in resp.text
+    assert "I want to negotiate the offer." in resp.text
+    assert "nervousness 0.80" in resp.text
+    assert "/sessions/viewer-session/audio.wav" in resp.text
+    assert "# Feedback" in resp.text
+
+
+def test_viewer_returns_404_for_unknown_session(app_client) -> None:
+    client, _, _ = app_client
+    resp = client.get("/viewer", params={"session_id": "missing-session"})
+    assert resp.status_code == 404
+    assert resp.json() == {"detail": "unknown session"}
 
 
 def test_media_websocket_bridges_twilio_to_fake_hume(
