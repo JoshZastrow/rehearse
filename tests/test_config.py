@@ -16,6 +16,9 @@ def test_runtime_config_from_env_loads_required_values(
     monkeypatch.setenv("BASE_URL", "https://example.test/")
     monkeypatch.setenv("HUME_API_KEY", "hume-key")
     monkeypatch.setenv("HUME_CONFIG_ID", "cfg-123")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-key")
+    monkeypatch.setenv("ANTHROPIC_MODEL", "claude-3.7-test")
+    monkeypatch.setenv("HUME_CLM_SECRET", "secret-123")
     monkeypatch.setenv("SESSIONS_DIR", str(tmp_path / "sessions"))
     monkeypatch.setenv("LOG_LEVEL", "debug")
     monkeypatch.setenv("VALIDATE_TWILIO_SIGNATURE", "0")
@@ -26,6 +29,9 @@ def test_runtime_config_from_env_loads_required_values(
     assert config.public_base_url == "https://example.test"
     assert config.hume_api_key == "hume-key"
     assert config.hume_config_id == "cfg-123"
+    assert config.anthropic_api_key == "anthropic-key"
+    assert config.anthropic_model == "claude-3.7-test"
+    assert config.hume_clm_secret == "secret-123"
     assert config.log_level == "debug"
     assert config.validate_twilio_signature is False
     assert config.session_root == (tmp_path / "sessions").resolve()

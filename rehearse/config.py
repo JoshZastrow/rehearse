@@ -25,6 +25,9 @@ class RuntimeConfig:
     hume_api_key: str
     hume_config_id: str
     session_root: Path
+    anthropic_api_key: str | None = None
+    anthropic_model: str = "claude-sonnet-4-6"
+    hume_clm_secret: str | None = None
     log_level: str = "info"
     validate_twilio_signature: bool = True
 
@@ -57,6 +60,9 @@ class RuntimeConfig:
             hume_api_key=required["HUME_API_KEY"],  # type: ignore[arg-type]
             hume_config_id=required["HUME_CONFIG_ID"],  # type: ignore[arg-type]
             session_root=session_root,
+            anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY"),
+            anthropic_model=os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6"),
+            hume_clm_secret=os.environ.get("HUME_CLM_SECRET"),
             log_level=os.environ.get("LOG_LEVEL", "info"),
             validate_twilio_signature=os.environ.get("VALIDATE_TWILIO_SIGNATURE", "1") != "0",
         )
