@@ -29,6 +29,7 @@ from rehearse.audio.twilio_stream import TwilioStream
 from rehearse.bus import FrameBus
 from rehearse.config import RuntimeConfig
 from rehearse.frames import AudioChunk
+from rehearse.intake import IntakeProcessor
 from rehearse.phases import PhaseProcessor
 from rehearse.services.hume_evi import HumeEVIClient
 from rehearse.session import SessionOrchestrator, TriggerEvent, utcnow
@@ -189,6 +190,11 @@ def mount_twilio_routes(
         log.info("media.connect", session_id=session_id)
         bus = FrameBus(session_id)
         phase_processor = PhaseProcessor(session_id, orchestrator.store, bus)
+        intake_processor = IntakeProcessor(
+            session_id,
+            orchestrator.store,
+            phase_getter=lambda: phase_processor.current_phase,
+        )
         try:
             async with TwilioStream(ws) as twilio, HumeEVIClient(
                 api_key=config.hume_api_key,
@@ -198,6 +204,7 @@ def mount_twilio_routes(
             ) as hume:
                 await phase_processor.bootstrap()
                 phase_task = asyncio.create_task(phase_processor.run(bus.subscribe()))
+                intake_task = asyncio.create_task(intake_processor.run(bus.subscribe()))
                 transcript_task = asyncio.create_task(
                     TranscriptWriter(
                         session_id,
@@ -241,6 +248,7 @@ def mount_twilio_routes(
                     with suppress(asyncio.CancelledError):
                         await hume_task
                     await phase_task
+                    await intake_task
                     await transcript_task
                     await prosody_task
                     await audio_task

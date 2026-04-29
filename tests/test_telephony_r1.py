@@ -255,6 +255,17 @@ def test_media_websocket_bridges_twilio_to_fake_hume(
                 )
             )
             await self._bus.publish(
+                TranscriptDelta(
+                    session_id=self._session_id,
+                    utterance_id="user-2",
+                    speaker=Speaker.USER,
+                    text="Let's practice asking for more salary and equity.",
+                    is_final=True,
+                    ts_start=0.31,
+                    ts_end=0.4,
+                )
+            )
+            await self._bus.publish(
                 AudioChunk(
                     session_id=self._session_id,
                     speaker=Speaker.COACH,
@@ -297,6 +308,7 @@ def test_media_websocket_bridges_twilio_to_fake_hume(
     assert (session_dir / "telemetry.jsonl").exists()
     manifest = json.loads((session_dir / "session.json").read_text())
     assert manifest["phase_timings"][0]["phase"] == "intake"
+    assert manifest["intake"]["counterparty_relationship"] == "counterparty"
 
 
 def test_twilio_sms_signature_validation_failure(
