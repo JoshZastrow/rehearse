@@ -13,6 +13,7 @@ import structlog
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
+from rehearse.agents import build_clm_responder, mount_clm_routes
 from rehearse.config import RuntimeConfig
 from rehearse.session import SessionOrchestrator
 from rehearse.storage import LocalFilesystemStore
@@ -43,7 +44,9 @@ def create_app(config: RuntimeConfig | None = None) -> FastAPI:
     store = LocalFilesystemStore(root=config.session_root, public_base_url=config.public_base_url)
     orchestrator = SessionOrchestrator(store=store)
     twilio_client = TwilioRestClient(config)
+    clm_responder = build_clm_responder(config)
 
+    mount_clm_routes(app, clm_responder, config)
     mount_twilio_routes(app, orchestrator, twilio_client, config)
 
     app.mount(

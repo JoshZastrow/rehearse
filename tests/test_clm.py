@@ -14,6 +14,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from rehearse.agents.clm import CLMChatRequest, CLMResponder, mount_clm_routes
+from rehearse.app import create_app
 from rehearse.config import RuntimeConfig
 
 
@@ -198,3 +199,22 @@ def test_chat_completions_sse_chunks_are_valid_json_lines(tmp_path: Path) -> Non
     for line in json_lines:
         parsed = json.loads(line)
         assert parsed["object"] == "chat.completion.chunk"
+
+
+def test_create_app_mounts_the_scripted_clm_route(tmp_path: Path) -> None:
+    """The real runtime app should expose the CLM route with the scripted fallback."""
+    client = TestClient(create_app(_config(tmp_path)))
+
+    resp = client.post(
+        "/chat/completions",
+        params={"custom_session_id": "session-live"},
+        json={
+            "messages": [
+                {"role": "user", "content": "I need help asking for more equity."},
+            ]
+        },
+    )
+
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/event-stream")
+    assert "data: [DONE]" in resp.text
