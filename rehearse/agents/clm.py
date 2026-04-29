@@ -19,6 +19,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from rehearse.config import RuntimeConfig
 from rehearse.personas import character_system_prompt, coach_system_prompt
+from rehearse.storage import LocalFilesystemStore
+from rehearse.types import Phase, Session
 
 _DEFAULT_CHARACTER_CONTEXT = (
     "You are the other person in the conversation. Push back realistically, "
@@ -125,37 +127,40 @@ def build_clm_responder(config: RuntimeConfig) -> CLMResponder:
 
 def mount_clm_routes(app: FastAPI, responder: CLMResponder, config: RuntimeConfig) -> None:
     """Register the OpenAI-compatible CLM webhook endpoints on the app."""
+    store = LocalFilesystemStore(root=config.session_root, public_base_url=config.public_base_url)
 
     @app.post("/chat/completions")
     async def chat_completions(
         payload: CLMChatRequest,
         custom_session_id: str | None = Query(default=None),
-        role: str = Query(default="coach"),
+        role: str | None = Query(default=None),
         authorization: str | None = Header(default=None),
     ) -> Response:
         """Handle Hume's recommended SSE CLM endpoint."""
         await _verify_clm_auth(config, authorization)
+        resolved_role = await _resolve_role(role=role, session_id=custom_session_id, store=store)
         return await _handle_clm_request(
             payload=payload,
             responder=responder,
             session_id=custom_session_id,
-            role=role,
+            role=resolved_role,
         )
 
     @app.post("/hume/clm/{session_id}")
     async def hume_clm(
         session_id: str,
         payload: CLMChatRequest,
-        role: str = Query(default="coach"),
+        role: str | None = Query(default=None),
         authorization: str | None = Header(default=None),
     ) -> Response:
         """Handle the older path-based CLM endpoint from the runtime spec."""
         await _verify_clm_auth(config, authorization)
+        resolved_role = await _resolve_role(role=role, session_id=session_id, store=store)
         return await _handle_clm_request(
             payload=payload,
             responder=responder,
             session_id=session_id,
-            role=role,
+            role=resolved_role,
         )
 
 
@@ -350,3 +355,33 @@ def _system_prompt_for_role(role: str) -> str:
     if role == "character":
         return character_system_prompt(_DEFAULT_CHARACTER_CONTEXT)
     return coach_system_prompt()
+
+
+async def _resolve_role(
+    *,
+    role: str | None,
+    session_id: str | None,
+    store: LocalFilesystemStore,
+) -> str:
+    """Return an explicit role override or infer one from the live session phase."""
+    if role in {"coach", "character"}:
+        return role
+    if not session_id:
+        return "coach"
+    try:
+        payload = await store.read(session_id, "session.json")
+    except FileNotFoundError:
+        return "coach"
+    session = Session.model_validate_json(payload)
+    phase = _current_phase(session)
+    if phase == Phase.PRACTICE:
+        return "character"
+    return "coach"
+
+
+def _current_phase(session: Session) -> Phase:
+    """Return the currently active phase for a stored session manifest."""
+    for timing in reversed(session.phase_timings):
+        if timing.ended_at is None:
+            return timing.phase
+    return Phase.INTAKE

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -16,6 +17,9 @@ from fastapi.testclient import TestClient
 from rehearse.agents.clm import CLMChatRequest, CLMResponder, mount_clm_routes
 from rehearse.app import create_app
 from rehearse.config import RuntimeConfig
+from rehearse.types import ConsentState, Phase, PhaseTiming, Session
+
+_NOW = datetime(2026, 4, 28, 12, 0, tzinfo=UTC)
 
 
 class FakeResponder:
@@ -142,6 +146,71 @@ def test_path_based_hume_clm_route_supports_non_stream_json(tmp_path: Path) -> N
     assert payload["choices"][0]["message"]["content"] == "One short reply."
     assert responder.calls[0]["role"] == "character"
     assert responder.calls[0]["session_id"] == "session-abc"
+
+
+def test_chat_completions_infers_character_role_from_practice_phase(tmp_path: Path) -> None:
+    """The CLM route should infer `character` when the live session is in practice."""
+    responder = FakeResponder(["Practice reply."])
+    client = _client(tmp_path, responder)
+    session = Session(
+        id="session-practice",
+        created_at=_NOW,
+        consent=ConsentState.PENDING,
+        phase_timings=[
+            PhaseTiming(
+                phase=Phase.INTAKE,
+                started_at=_NOW,
+                ended_at=_NOW,
+                budget_seconds=60,
+            ),
+            PhaseTiming(
+                phase=Phase.PRACTICE,
+                started_at=_NOW,
+                budget_seconds=180,
+            ),
+        ],
+    )
+    session_dir = tmp_path / session.id
+    session_dir.mkdir()
+    (session_dir / "session.json").write_text(session.model_dump_json(indent=2))
+
+    resp = client.post(
+        "/chat/completions",
+        params={"custom_session_id": session.id},
+        json={"messages": [], "stream": False},
+    )
+
+    assert resp.status_code == 200
+    assert responder.calls[0]["role"] == "character"
+
+
+def test_chat_completions_defaults_to_coach_when_phase_not_practice(tmp_path: Path) -> None:
+    """The CLM route should default to coach outside the practice phase."""
+    responder = FakeResponder(["Coach reply."])
+    client = _client(tmp_path, responder)
+    session = Session(
+        id="session-feedback",
+        created_at=_NOW,
+        consent=ConsentState.PENDING,
+        phase_timings=[
+            PhaseTiming(
+                phase=Phase.FEEDBACK,
+                started_at=_NOW,
+                budget_seconds=60,
+            )
+        ],
+    )
+    session_dir = tmp_path / session.id
+    session_dir.mkdir()
+    (session_dir / "session.json").write_text(session.model_dump_json(indent=2))
+
+    resp = client.post(
+        "/hume/clm/session-feedback",
+        json={"messages": [], "stream": False},
+    )
+
+    assert resp.status_code == 200
+    assert responder.calls[0]["role"] == "coach"
 
 
 def test_chat_completions_rejects_bad_bearer_token(tmp_path: Path) -> None:
