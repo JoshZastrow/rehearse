@@ -11,6 +11,9 @@ uv.lock
 .DS_Store
 sessions/
 evals/runs/
+evals/datasets/mme-emotion/v0-10clip/clips/*
+!evals/datasets/mme-emotion/v0-10clip/clips/.gitkeep
+.cache/
 *.wav
 *.log
 .coverage

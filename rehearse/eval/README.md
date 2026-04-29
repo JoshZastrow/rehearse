@@ -117,9 +117,28 @@ The v0 manifest lives at:
 evals/datasets/mme-emotion/v0-10clip/manifest.json
 ```
 
-This patch checks in the manifest scaffold only. Before a real run, place the
-referenced media files under `evals/datasets/mme-emotion/v0-10clip/clips/` or
-set `MME_EMOTION_MANIFEST_PATH` to another manifest with valid paths.
+The manifest is checked in; media files are not. To fetch the v0 local subset:
+
+```bash
+# Optional if `hf` is not already on PATH
+uv tool install huggingface_hub
+
+python setup/fetch_mme_emotion.py
+```
+
+The script downloads [Karl28/MME-Emotion](https://huggingface.co/datasets/Karl28/MME-Emotion)
+into `.cache/mme-emotion/`, extracts `ER_Lab.zip`, copies the selected clips into
+`evals/datasets/mme-emotion/v0-10clip/clips/`, and rewrites `manifest.json` from
+the upstream annotations. Both `.cache/` and copied clip media are gitignored.
+
+If you already downloaded the dataset, reuse it:
+
+```bash
+python setup/fetch_mme_emotion.py --cache-dir /path/to/mme-emotion --skip-download
+```
+
+You can also set `MME_EMOTION_MANIFEST_PATH` to another manifest with valid
+paths.
 
 ## Running Tests
 
