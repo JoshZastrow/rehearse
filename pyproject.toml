@@ -37,6 +37,10 @@ build-backend = "hatchling.build"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+addopts = "-m 'not live_api'"
+markers = [
+    "live_api: hits real provider APIs; requires sourced .env. Deselected by default. Run with `pytest -m live_api`.",
+]
 
 [tool.ruff]
 line-length = 100

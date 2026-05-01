@@ -614,31 +614,93 @@ uv run rehearse-eval run \
 
 ## 10. Phasing
 
-### Phase RLE1 — Skeleton Rollout, No Model Calls
+### Build status (as of 2026-04-29)
 
-- Add dataset/eval/environment registrations.
-- Add fake deterministic user simulator.
-- Add fake deterministic rehearse agent.
-- Write `trajectory.json`.
-- Scorer returns fixed scores.
-- Tests prove runner can execute the full shape.
+The skeleton rollout described in the original RLE1 has shipped under a
+different name. The `voice-agent-sandbox` environment in
+`rehearse/eval/environments/voice_agent_sandbox.py` already runs two sandboxed
+actors (customer + runtime) over an in-memory duplex transport, writes
+canonical `Session`-shaped artifacts (`transcript.jsonl`, `session.json`,
+`conversation.jsonl`), and is exercised by the `voice-agent-smoke` eval with a
+deterministic completeness scorer. End-to-end runs produce real numbers.
 
-### Phase RLE2 — Real User Simulator + Rehearse Agent Adapter
+The MME-seeded `sandbox-rollout` environment described in §9.3 of this spec
+is **not** built. The current path uses the existing `voice-agent-sandbox`
+environment as the rollout substrate; MME seeding is folded in later (see
+RLE3 below). This is a deliberate simplification to avoid building parallel
+infrastructure when the existing env satisfies the RLE1 contract.
 
-- Implement LLM-backed `SandboxUserAgent`.
-- Implement `RehearseSandboxAgent`.
-- Add prompt fixtures.
-- Tests use mocked model clients.
-- Manual demo produces plausible 8-turn transcript.
+### RLE1 — Skeleton Rollout (✅ shipped)
 
-### Phase RLE3 — Judge Scorer
+Satisfied by `voice-agent-sandbox` environment + `voice-agent-smoke` eval.
+Runs end-to-end with a `ScriptedCustomerAgent` and a `StubVoiceAgent` (echo).
 
-- Implement `TrajectoryJudgeScorer`.
-- Parse structured judge JSON.
-- Emit the two top metrics plus weighted reward.
-- Store judge artifact beside trajectory.
+### RLE2 — Two-LLM Coaching Dialogue (🚧 next, scoped)
 
-### Phase RLE4 — RLAIF Data Export
+Replaces both deterministic stubs with LLM-driven agents on the existing env.
+Builds toward the eventual MME-seeded sandbox-rollout but does not require
+audio inputs yet.
+
+**Scope (cuts taken on 2026-04-29):**
+
+| Cut | Decision |
+|---|---|
+| A | One `LLMSandboxAgent` class with a `role: "customer" \| "coach"` parameter, instead of two separate classes |
+| B | Reuse the existing `_SandboxCompletionScorer` from `voice-agent-smoke`; no new scorer in this phase |
+| C | One hand-authored scenario inlined in the dataset code; no external manifest |
+| D | **Not cut.** Keep the model-slot factory: `customer_agent` and `coach_agent` keys in `model_slots` (or `example.payload`) select between `"scripted"` (default), `"stub"` (default), or `"llm"` |
+| F | One integration test with mocked Anthropic + one real-LLM smoke gated on `ANTHROPIC_API_KEY`; no separate unit tests for the agent class |
+
+**Deliverables:**
+
+- `LLMSandboxAgent(role)` class in `rehearse/eval/environments/voice_agent_sandbox.py`.
+  Same `SandboxAgent` protocol as the scripted/stub agents. Calls Anthropic
+  via the existing pattern in `RawLLMTarget`. Customer prompt is parameterized
+  by the example's `scenario` payload. Coach prompt is fixed for v0.
+- Agent-class factory inside `VoiceAgentSandboxEnvironment.rollout` that
+  reads `customer_agent` and `coach_agent` from `example.payload`, falling
+  back to `self.model_slots`, defaulting to `"scripted"` and `"stub"`. The
+  existing `voice-agent-smoke` eval keeps its current behavior because its
+  payload doesn't set those keys.
+- `rehearse/eval/datasets/coach_dialogue_smoke.py` — new dataset, one
+  scenario inlined, payload includes `customer_agent="llm"`,
+  `coach_agent="llm"`, `scenario={situation, goal, counterparty_role,
+  counterparty_style, stakes, emotional_state}`.
+- `rehearse/eval/evals/coach_dialogue_smoke.py` — new eval composing the
+  dataset + `voice-agent-sandbox` environment + reused
+  `_SandboxCompletionScorer`. `rollout_timeout_s = 90`.
+- Registry updates in `datasets/__init__.py` and `evals/__init__.py`.
+- `tests/eval/test_coach_dialogue_smoke.py`:
+  - One integration test using a `_MockAnthropic` that returns scripted
+    responses; verifies multi-turn alternation, transcript shape, and
+    completeness scoring.
+  - One real-LLM smoke test, skipped when `ANTHROPIC_API_KEY` is unset.
+
+**Success criteria for RLE2:**
+
+1. `uv run rehearse-eval run --eval coach-dialogue-smoke --limit 1` writes a
+   `transcript.jsonl` with at least three customer turns and three coach
+   turns, alternating, both LLM-generated.
+2. `voice-agent-sandbox_completion: 1.000` is reported for a successful run.
+3. The existing `voice-agent-smoke` eval still passes unchanged.
+4. The mocked integration test runs in under 2 seconds without any network
+   calls.
+
+### RLE3 — MME Audio Seed + Trajectory Judge (📝 spec'd, future)
+
+This is where the spec's original RLE2 + RLE3 land, on top of the LLM-driven
+substrate from the new RLE2:
+
+- Add `MMERolloutSeedDataset` reading the existing v0-10clip clips with
+  scenario seed annotations.
+- Extend `VoiceAgentSandboxEnvironment` (or fork to `SandboxRolloutEnvironment`
+  per §9.3) to ingest an audio observation step that runs the MME clip
+  through `multimodal-llm` and adds the inferred emotion to the customer's
+  scenario context.
+- Implement `TrajectoryJudgeScorer` (Claude Opus) emitting
+  `emotion_responsiveness`, `coaching_trajectory_quality`, `weighted_reward`.
+
+### RLE4 — RLAIF Data Export (📝 spec'd, future)
 
 - Export trajectories + scores as JSONL:
 

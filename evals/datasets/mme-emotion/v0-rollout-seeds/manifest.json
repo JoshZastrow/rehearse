@@ -1,0 +1,71 @@
+{
+  "_meta": {
+    "name": "mme-emotion-rollout-seeds",
+    "version": "v0",
+    "source": "Karl28/MME-Emotion + rehearse-authored scenario seeds",
+    "note": "Three hand-curated scenarios for the MME-seeded RL sandbox eval. Each scenario pairs an MME clip's emotion label with a rehearse-product scenario shaped to exercise that opening affect. Audio observation is deferred per RLE3 scope; opening_emotion is taken from upstream MME labels directly."
+  },
+  "rubric_weights": {
+    "emotion_responsiveness": 0.45,
+    "coaching_trajectory_quality": 0.55
+  },
+  "examples": [
+    {
+      "id": "mme-rollout-anger-001",
+      "clip": {
+        "path": "../v0-10clip/clips/Ses05M_script01_1_F034.mp4",
+        "opening_emotion": "Anger",
+        "source_id": "ER_Lab/Ses05M_script01_1_F034.mp4"
+      },
+      "scenario": {
+        "situation": "My business partner keeps making unilateral decisions and I just found out they signed a vendor contract without looping me in.",
+        "goal": "raise this without ending the partnership; get to a real agreement on which decisions need both of us",
+        "counterparty_role": "business partner of three years",
+        "counterparty_style": "decisive, allergic to feeling micromanaged, will get defensive if cornered",
+        "stakes": "the partnership and the trust that holds the business together",
+        "emotional_state": "angry — feeling cut out, second-guessing whether they respect me as an equal"
+      },
+      "rollout": {
+        "max_turns": 6
+      }
+    },
+    {
+      "id": "mme-rollout-sadness-001",
+      "clip": {
+        "path": "../v0-10clip/clips/Ses05M_script02_2_F031.mp4",
+        "opening_emotion": "Sadness",
+        "source_id": "ER_Lab/Ses05M_script02_2_F031.mp4"
+      },
+      "scenario": {
+        "situation": "My oldest friend and I have been drifting for over a year. They've stopped replying to texts and I think I need to say something before this just dissolves into nothing.",
+        "goal": "name what I'm feeling honestly without making them defensive; find out if they want to repair or if it's already over",
+        "counterparty_role": "friend of fifteen years",
+        "counterparty_style": "conflict-avoidant, tends to retreat into 'I've just been busy' as a deflection",
+        "stakes": "a friendship I thought would always be there",
+        "emotional_state": "sad — grieving something that hasn't ended yet, afraid of confirming what I already suspect"
+      },
+      "rollout": {
+        "max_turns": 6
+      }
+    },
+    {
+      "id": "mme-rollout-frustration-001",
+      "clip": {
+        "path": "../v0-10clip/clips/Ses05M_impro04_M006.mp4",
+        "opening_emotion": "Frustration",
+        "source_id": "ER_Lab/Ses05M_impro04_M006.mp4"
+      },
+      "scenario": {
+        "situation": "My direct report keeps missing deadlines and brushing off feedback. I've raised it twice in 1:1s and nothing has changed. I need to have a harder conversation now.",
+        "goal": "give clear, specific feedback that lands; set a real expectation for the next two weeks; preserve the working relationship",
+        "counterparty_role": "direct report I've managed for eight months",
+        "counterparty_style": "talented but defensive, tends to explain instead of listen, takes feedback as personal attack",
+        "stakes": "the team's trust in me as a manager and whether this person stays",
+        "emotional_state": "frustrated — tired of having the same conversation, worried I've been too soft, anxious about delivering it firmly without becoming the bad guy"
+      },
+      "rollout": {
+        "max_turns": 6
+      }
+    }
+  ]
+}
