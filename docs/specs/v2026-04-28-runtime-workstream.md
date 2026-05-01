@@ -1,6 +1,6 @@
 # rehearse — Runtime Workstream
 
-**Status**: draft (implementation-facing)
+**Status**: complete (verified end-to-end on 2026-05-01)
 **Owner**: jz
 **Depends on**: `SPEC.md`, `rehearse/types.py`, `docs/specs/v2026-04-27-runtime.md`, `docs/specs/v2026-04-28-drop-pipecat.md`
 **Separate from**: `docs/specs/v2026-04-27-eval-harness.md`, `docs/specs/v2026-04-28-mme-emotion-and-audio-targets.md`
@@ -205,3 +205,48 @@ When deciding whether code belongs in runtime or eval, ask:
 
 - If yes, it belongs in runtime.
 - If no, and it exists to simulate, benchmark, score, compare, or replay behavior, it belongs in eval.
+
+## 9. Completion note (2026-05-01)
+
+All seven success criteria in §6 verified on a real phone call (session
+`7ebe0d0a446f4570972c13e1b96970c9`).
+
+What landed:
+- Twilio→Hume audio bridge over `/media/{session_id}` (`telephony.py`,
+  `audio/twilio_stream.py`, `services/hume_evi.py`).
+- Per-turn CLM webhook at `POST /chat/completions` with bearer auth via
+  `HUME_CLM_SECRET` (`agents/clm.py`).
+- Streaming writers for transcript / prosody / telemetry; buffered WAV
+  flush at WS close (`writers/artifacts.py`).
+- Three-phase processor (intake → practice → feedback) driving prompt
+  switching during the call (`phases.py`, `intake.py`).
+- `SessionOrchestrator.finalize()` triggered by Twilio's
+  `/twilio/status` callback runs replayable synthesis on frozen artifacts
+  and sends the viewer-link SMS (`session.py`, `synthesis.py`).
+- Replayability test coverage for synthesis: structural assertions,
+  citation resolution against the fixture transcript, byte-identical
+  re-runs, and a faked Anthropic client path
+  (`tests/test_synthesis.py`).
+
+Live walk evidence (logs):
+- `media.connect` → Twilio Media Streams attached.
+- Hume EVI loop produced assistant audio playable to the caller.
+- `twilio.status status=completed` → `session.finalize status=complete`.
+- Twilio Messages API returned 201 for the viewer-link SMS.
+- Artifacts on disk: `transcript.jsonl`, `prosody.jsonl`, `audio.wav`,
+  `telemetry.jsonl`, `story.md`, `feedback.md`, plus
+  `session.json.completion_status = "complete"`.
+
+Known durability gaps left intentionally open (not §6 blockers, tracked
+for follow-up):
+1. `AudioRecorder` buffers PCM in memory and only flushes on WS close;
+   a hard crash loses `audio.wav`.
+2. Finalize depends on Twilio's `/twilio/status` callback; a dropped
+   callback leaves `completion_status = "in_progress"` and skips
+   synthesis + SMS.
+3. `SessionHandle` and the `call_sid → session_id` map are in-memory
+   only; a server restart between WS close and status callback orphans
+   the session.
+
+Each is a small, scoped fix and can be picked up independently when
+priorities allow.
