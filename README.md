@@ -8,19 +8,19 @@ The product is a coaching call. The architecture is an ML data-collection loop. 
 
 See [SPEC.md](SPEC.md) for the foundational design.
 
-Scaffold + eval harness. Runtime not implemented yet.
+Live runtime + eval harness scaffold.
 
+- Runtime: SMS triggers an outbound call. Twilio Media Streams bridges audio to Hume EVI. A custom-language-model webhook serves coach/character turns. Transcript, prosody, audio, and telemetry artifacts persist per session. Post-call synthesis writes `story.md` + `feedback.md` and SMSes a viewer link back. End-to-end verified on a real phone call (2026-05-01). See [`docs/specs/v2026-04-28-runtime-workstream.md`](docs/specs/v2026-04-28-runtime-workstream.md).
 - Eval harness: see [`rehearse/eval/README.md`](rehearse/eval/README.md). Public shape is evals, datasets, scorers, and environments. Runs `noop` offline and has the MME-Emotion audio eval scaffold.
-- Runtime: see the spec at [`docs/specs/v2026-04-27-runtime.md`](docs/specs/v2026-04-27-runtime.md).
 
-## Status (2026-04-28)
+## Status (2026-05-01)
 
 | Workstream | Stage |
 |---|---|
 | Pydantic data contracts (`rehearse/types.py`) | ✅ frozen |
 | Eval harness skeleton | ✅ shipped |
 | MME-Emotion eval + audio environment scaffold | ✅ shipped |
-| Runtime (Twilio + Pipecat + Hume + Claude Agent SDK) | 📝 spec'd, build pending |
+| Runtime (Twilio + owned audio bridge + Hume EVI + CLM webhook) | ✅ shipped — verified end-to-end |
 
 ## Strategic frame
 
@@ -59,13 +59,13 @@ Single FastAPI service: SMS triggers an outbound call, runs an owned Twilio Medi
 
 | Phase | Status | Scope |
 |---|---|---|
-| R1 — Skeleton + Telephony | 📝 spec'd | Twilio SMS/voice/Media Streams handlers; `SessionOrchestrator`; `LocalFilesystemStore`. Demo: SMS triggers a call that says hello and hangs up. |
-| R2 — Owned Twilio/Hume runtime scaffold | 📝 spec'd | `TwilioStream`, `HumeEVIClient`, `FrameBus`, single Hume coach config, no phases yet. Demo: real Hume voice on the call. |
-| R3 — Phase machine + writers | 📝 spec'd | `PhaseProcessor`, transcript/prosody/audio/telemetry writers. Demo: 3 phases, all 4 artifacts populated. |
-| R4 — Claude CLM + agents | 📝 spec'd | CLM endpoint, `CoachAgent` (intake), `CharacterAgent`, `compile_character` real. Demo: real intake → compiled character → live practice. |
-| R5 — Post-call synthesis + viewer | 📝 spec'd | `StoryAgent`, `FeedbackAgent` via Claude Agent SDK; viewer page; SMS notification. Demo: full SMS-to-SMS round-trip. |
-| R6 — Reliability + polish | 📝 spec'd | Soft-cue phase transitions, Hume reconnect, hardened consent gate, signature validation. |
-| R7 — Storage option B (S3 mirror) | 📝 spec'd | New `S3MirrorStore` backend. Migration trigger: first non-founder user invited. |
+| R1 — Skeleton + Telephony | ✅ shipped | Twilio SMS/voice/Media Streams handlers; `SessionOrchestrator`; `LocalFilesystemStore`. |
+| R2 — Owned Twilio/Hume runtime scaffold | ✅ shipped | `TwilioStream`, `HumeEVIClient`, `FrameBus`, live audio loop. |
+| R3 — Phase machine + writers | ✅ shipped | `PhaseProcessor`, transcript/prosody/audio/telemetry writers. Default budgets: 60s intake / 180s practice / 60s feedback (5-min call). |
+| R4 — Claude CLM + agents | ✅ shipped | `POST /chat/completions` CLM endpoint with `HUME_CLM_SECRET` bearer auth; coach + character responders; scripted fallback when no Anthropic key. |
+| R5 — Post-call synthesis + viewer | ✅ shipped | Replayable `SessionSynthesizer` (story + feedback), viewer route, SMS notification. End-to-end SMS-to-SMS round-trip verified 2026-05-01. |
+| R6 — Reliability + polish | 🟡 partial | Soft-cue phase transitions ✅, Twilio signature validation ✅. Open: stream WAV to disk (audio is buffered in RAM today), Hume reconnect, finalize fallback when `/twilio/status` is dropped, persist `SessionHandle` across restarts. |
+| R7 — Storage option B (S3 mirror) | 🔮 future | New `S3MirrorStore` backend. Migration trigger: first non-founder user invited. |
 
 Spec: [`docs/specs/v2026-04-28-runtime-workstream.md`](docs/specs/v2026-04-28-runtime-workstream.md), [`docs/specs/v2026-04-28-drop-pipecat.md`](docs/specs/v2026-04-28-drop-pipecat.md), with historical detail in [`docs/specs/v2026-04-27-runtime.md`](docs/specs/v2026-04-27-runtime.md).
 
