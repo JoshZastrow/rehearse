@@ -11,6 +11,7 @@ events between two endpoints.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Literal, Protocol, runtime_checkable
@@ -102,11 +103,21 @@ class InMemoryTransportEndpoint:
 
 
 class InMemoryDuplexTransport:
-    """Duplex transport pair connecting a customer sandbox to a runtime sandbox."""
+    """Duplex transport pair connecting a customer sandbox to a runtime sandbox.
 
-    def __init__(self) -> None:
+    Optionally invokes ``on_event`` for every event that crosses the boundary.
+    Used by --verbose to stream turns to stdout during a rollout. The hook
+    swallows its own exceptions so a logging error cannot break a rollout.
+    """
+
+    def __init__(
+        self,
+        *,
+        on_event: Callable[[TransportEvent], None] | None = None,
+    ) -> None:
         self.status: TransportStatus = "open"
         self.events: list[TransportEvent] = []
+        self.on_event = on_event
         customer_inbox: asyncio.Queue[TransportEvent] = asyncio.Queue()
         runtime_inbox: asyncio.Queue[TransportEvent] = asyncio.Queue()
         self.customer = InMemoryTransportEndpoint(
@@ -127,3 +138,8 @@ class InMemoryDuplexTransport:
 
     def record(self, event: TransportEvent) -> None:
         self.events.append(event)
+        if self.on_event is not None:
+            try:
+                self.on_event(event)
+            except Exception:
+                pass

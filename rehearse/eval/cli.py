@@ -18,8 +18,21 @@ from pathlib import Path
 from rehearse.eval.datasets import list_datasets
 from rehearse.eval.environments import list_environments
 from rehearse.eval.evals import get_eval, list_evals
+from rehearse.eval.executors import InProcessExecutor
 from rehearse.eval.providers import list_providers
 from rehearse.eval.runner import RunConfig, execute_run
+from rehearse.eval.transports import TransportEvent
+
+
+def _print_event(event: TransportEvent) -> None:
+    if event.kind == "text":
+        text = str(event.payload.get("text", ""))
+        print(f"[{event.source} text] {text}", flush=True)
+    elif event.kind == "control":
+        marker = event.payload.get("event", "")
+        print(f"[{event.source} control] {marker}", flush=True)
+    else:
+        print(f"[{event.source} {event.kind}] {event.payload}", flush=True)
 
 
 def _parse_model_slot(s: str) -> tuple[str, str]:
@@ -69,6 +82,14 @@ def _build_parser() -> argparse.ArgumentParser:
     run.add_argument("--tag", default=None)
     run.add_argument("--runs-root", default="evals/runs", type=Path)
     run.add_argument("--dry-run", action="store_true")
+    run.add_argument(
+        "--verbose",
+        action="store_true",
+        help=(
+            "stream transport events to stdout as the rollout runs. "
+            "Forces in-process execution (no subprocess isolation)."
+        ),
+    )
 
     show = sub.add_parser("show", help="print summary.md for a run_id")
     show.add_argument("run_id")
@@ -137,7 +158,8 @@ def main(argv: list[str] | None = None) -> int:
             tag=args.tag,
             runs_root=args.runs_root,
         )
-        outcome = asyncio.run(execute_run(config))
+        executor = InProcessExecutor(on_event=_print_event) if args.verbose else None
+        outcome = asyncio.run(execute_run(config, executor=executor))
         print(f"run_id: {outcome.run_id}")
         print(f"run_dir: {outcome.run_dir}")
         print(

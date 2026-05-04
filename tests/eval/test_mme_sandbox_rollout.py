@@ -11,53 +11,17 @@ Two layers:
 
 from __future__ import annotations
 
-import asyncio
 import json
-import os
 from dataclasses import dataclass, field
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from rehearse.eval.environments import get_environment
 from rehearse.eval.environments.voice_agent_sandbox import LLMSandboxAgent
-from rehearse.eval.protocols import BenchmarkExample, RolloutResult
+from rehearse.eval.executors import InProcessExecutor as _InProcessExecutor
 from rehearse.eval.runner import RunConfig, execute_run
 from rehearse.eval.scorers.llm_judge import LLMJudge
-
-
-class _InProcessExecutor:
-    async def submit(
-        self,
-        target_name: str,
-        target_version: str,
-        model_slots: dict[str, str],
-        example: BenchmarkExample,
-        run_dir: Path,
-        timeout_s: int,
-        rng_seed: int,
-    ) -> RolloutResult:
-        run_dir.mkdir(parents=True, exist_ok=True)
-        env = get_environment(target_name, model_slots)
-        started = datetime.now()
-        try:
-            return await asyncio.wait_for(
-                env.rollout(example, run_dir, rng_seed), timeout=timeout_s
-            )
-        except asyncio.TimeoutError:
-            completed = datetime.now()
-            return RolloutResult(
-                example_id=example.id,
-                target_name=target_name,
-                target_version=target_version,
-                status="timeout",
-                started_at=started,
-                completed_at=completed,
-                duration_ms=int((completed - started).total_seconds() * 1000),
-                error=f"in-process rollout exceeded {timeout_s}s",
-            )
 
 
 @dataclass

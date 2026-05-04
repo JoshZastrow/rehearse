@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime
@@ -21,7 +22,11 @@ from rehearse.eval.protocols import BenchmarkExample, RolloutResult
 from rehearse.eval.sandbox_agents import SandboxAgent, SandboxAgentRunner, SandboxAgentRunResult
 from rehearse.eval.sandbox_connection import SandboxConnection
 from rehearse.eval.sandboxes import CustomerAgentSandbox, SandboxHandle, VoiceAgentSandbox
-from rehearse.eval.transports import RuntimeDuplexEndpoint, TransportEvent
+from rehearse.eval.transports import (
+    InMemoryDuplexTransport,
+    RuntimeDuplexEndpoint,
+    TransportEvent,
+)
 from rehearse.types import ConsentState, Phase, Session, Speaker, TranscriptFrame
 
 
@@ -396,6 +401,7 @@ class VoiceAgentSandboxEnvironment:
 
     def __init__(self, model_slots: dict[str, str] | None = None) -> None:
         self.model_slots = model_slots or {}
+        self.on_event: Callable[[TransportEvent], None] | None = None
 
     async def rollout(
         self,
@@ -433,6 +439,7 @@ class VoiceAgentSandboxEnvironment:
                 runtime=voice_runtime,
                 model_slots=self.model_slots,
             ),
+            transport=InMemoryDuplexTransport(on_event=self.on_event),
         )
 
         try:
