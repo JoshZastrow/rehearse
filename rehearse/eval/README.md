@@ -62,6 +62,9 @@ uv run rehearse-eval run --eval mme-emotion --environment multimodal-llm --provi
 
 # 5. View the summary for a previous run
 uv run rehearse-eval show <run_id>
+
+# 6. Watch a sandbox rollout turn-by-turn (subprocess isolation is bypassed)
+uv run rehearse-eval run --eval coach-dialogue-smoke --limit 1 --verbose
 ```
 
 Deprecated aliases still work during migration: `list-benchmarks`,
@@ -85,6 +88,7 @@ rehearse-eval run \
     --tag LABEL                  # human label for the run
     --runs-root PATH             # where to write results (default evals/runs)
     --dry-run                    # resolve and print plan, don't execute
+    --verbose                    # stream transport events live; forces in-process execution
 rehearse-eval show <run_id> [--runs-root PATH]
 ```
 
