@@ -15,7 +15,7 @@ from rehearse.bus import FrameBus
 from rehearse.frames import EndOfCall, Frame, PhaseSignal, TranscriptDelta
 from rehearse.session import utcnow
 from rehearse.storage import LocalFilesystemStore
-from rehearse.types import Phase, PhaseTiming, Session, Speaker
+from rehearse.types import ConsentState, Phase, PhaseTiming, Session, Speaker
 
 
 @dataclass(frozen=True)
@@ -46,6 +46,7 @@ class PhaseProcessor:
         *,
         budgets: PhaseBudgets | None = None,
         clock: Callable[[], datetime] = utcnow,
+        consent_getter: Callable[[], ConsentState] | None = None,
     ) -> None:
         """Store the session id, manifest store, bus, and timing dependencies."""
         self._session_id = session_id
@@ -53,6 +54,7 @@ class PhaseProcessor:
         self._bus = bus
         self._budgets = budgets or PhaseBudgets()
         self._clock = clock
+        self._consent_getter = consent_getter or (lambda: ConsentState.GRANTED)
         self._current_phase = Phase.INTAKE
         self._phase_started_at: datetime | None = None
         self._final_user_turns = 0
@@ -104,6 +106,11 @@ class PhaseProcessor:
         """Advance the phase when the active phase has exhausted its time budget."""
         if self._phase_started_at is None or self._current_phase == Phase.FEEDBACK:
             return
+        if (
+            self._current_phase == Phase.INTAKE
+            and self._consent_getter() != ConsentState.GRANTED
+        ):
+            return
         budget = timedelta(seconds=self._budgets.for_phase(self._current_phase))
         if self._clock() - self._phase_started_at < budget:
             return
@@ -114,6 +121,8 @@ class PhaseProcessor:
         """Advance the phase when a simple transcript cue says the user is ready."""
         text = frame.text.lower()
         if self._current_phase == Phase.INTAKE:
+            if self._consent_getter() != ConsentState.GRANTED:
+                return
             if self._final_user_turns >= 2 or any(cue in text for cue in _INTAKE_READY_CUES):
                 await self._transition(Phase.PRACTICE, reason="cue")
             return

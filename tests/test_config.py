@@ -52,3 +52,60 @@ def test_runtime_config_from_env_raises_for_missing_values(
 
     with pytest.raises(RuntimeError, match="Missing required env vars"):
         RuntimeConfig.from_env(load_dotenv_file=False)
+
+
+def _set_required_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Set the minimum env vars required for `RuntimeConfig.from_env`."""
+    monkeypatch.setenv("TWILIO_ACCOUNT_SID", "AC123")
+    monkeypatch.setenv("TWILIO_AUTH_TOKEN", "token")
+    monkeypatch.setenv("TWILIO_PHONE_NUMBER", "+15555550100")
+    monkeypatch.setenv("BASE_URL", "https://example.test/")
+    monkeypatch.setenv("HUME_API_KEY", "hume-key")
+    monkeypatch.setenv("HUME_CONFIG_ID", "cfg-123")
+    monkeypatch.setenv("SESSIONS_DIR", str(tmp_path / "sessions"))
+
+
+@pytest.mark.parametrize(
+    "env_var,attr,value,expected",
+    [
+        ("CONSENT_PROMPT_TIMEOUT_SECONDS", "consent_prompt_timeout_seconds", "30", 30),
+        ("CONSENT_REPROMPT_LIMIT", "consent_reprompt_limit", "2", 2),
+        ("OUTCOME_PROMPT_LEAD_SECONDS", "outcome_prompt_lead_seconds", "10", 10),
+        ("OUTCOME_RESPONSE_TIMEOUT_SECONDS", "outcome_response_timeout_seconds", "20", 20),
+        ("OUTCOME_REPROMPT_LIMIT", "outcome_reprompt_limit", "0", 0),
+    ],
+)
+def test_runtime_config_loads_consent_outcome_knobs(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    env_var: str,
+    attr: str,
+    value: str,
+    expected: int,
+) -> None:
+    """Each consent/outcome knob from spec §9 reads from its env var."""
+    _set_required_env(monkeypatch, tmp_path)
+    monkeypatch.setenv(env_var, value)
+    config = RuntimeConfig.from_env(load_dotenv_file=False)
+    assert getattr(config, attr) == expected
+
+
+def test_runtime_config_consent_outcome_defaults(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Defaults match spec §9 when the knobs are not set in the environment."""
+    _set_required_env(monkeypatch, tmp_path)
+    for key in [
+        "CONSENT_PROMPT_TIMEOUT_SECONDS",
+        "CONSENT_REPROMPT_LIMIT",
+        "OUTCOME_PROMPT_LEAD_SECONDS",
+        "OUTCOME_RESPONSE_TIMEOUT_SECONDS",
+        "OUTCOME_REPROMPT_LIMIT",
+    ]:
+        monkeypatch.delenv(key, raising=False)
+    config = RuntimeConfig.from_env(load_dotenv_file=False)
+    assert config.consent_prompt_timeout_seconds == 20
+    assert config.consent_reprompt_limit == 1
+    assert config.outcome_prompt_lead_seconds == 15
+    assert config.outcome_response_timeout_seconds == 15
+    assert config.outcome_reprompt_limit == 1

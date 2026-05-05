@@ -323,8 +323,22 @@ def test_media_websocket_bridges_twilio_to_fake_hume(
         async def __aexit__(self, *_args):
             return None
 
+        async def say(self, text: str) -> None:
+            return None
+
         async def send_audio(self, pcm16_16k: bytes) -> None:
             self.seen_audio.append(pcm16_16k)
+            await self._bus.publish(
+                TranscriptDelta(
+                    session_id=self._session_id,
+                    utterance_id="user-consent",
+                    speaker=Speaker.USER,
+                    text="yes",
+                    is_final=True,
+                    ts_start=0.0,
+                    ts_end=0.05,
+                )
+            )
             await self._bus.publish(
                 TranscriptDelta(
                     session_id=self._session_id,

@@ -66,6 +66,7 @@ Single FastAPI service: SMS triggers an outbound call, runs an owned Twilio Medi
 | R5 — Post-call synthesis + viewer | ✅ shipped | Replayable `SessionSynthesizer` (story + feedback), viewer route, SMS notification. End-to-end SMS-to-SMS round-trip verified 2026-05-01. |
 | R6 — Reliability + polish | 🟡 partial | Soft-cue phase transitions ✅, Twilio signature validation ✅. Open: stream WAV to disk (audio is buffered in RAM today), Hume reconnect, finalize fallback when `/twilio/status` is dropped, persist `SessionHandle` across restarts. |
 | R7 — Storage option B (S3 mirror) | 🔮 future | New `S3MirrorStore` backend. Migration trigger: first non-founder user invited. |
+| R8 — Consent + inline outcome capture | 📝 spec'd, stubs landed | Verbal consent gate during intake; on-the-line "did this rehearsal feel useful?" probe at end of feedback phase. Deterministic classifiers — no LLM. Schema fields and `rehearse/outcome.py` stubbed; full implementation per spec is the next runtime PR. Blocker for inviting non-founder callers (legal + training-data). Spec: [`docs/specs/v2026-05-01-consent-and-outcome-capture.md`](docs/specs/v2026-05-01-consent-and-outcome-capture.md). |
 
 Spec: [`docs/specs/v2026-04-28-runtime-workstream.md`](docs/specs/v2026-04-28-runtime-workstream.md), [`docs/specs/v2026-04-28-drop-pipecat.md`](docs/specs/v2026-04-28-drop-pipecat.md), with historical detail in [`docs/specs/v2026-04-27-runtime.md`](docs/specs/v2026-04-27-runtime.md).
 

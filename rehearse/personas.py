@@ -10,8 +10,80 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 from datetime import datetime
+from typing import Literal
 
 from rehearse.types import CounterpartyPersona, IntakeRecord
+
+ConsentClassification = Literal["granted", "declined", "unclear"]
+
+CONSENT_PROMPT = (
+    "Quick heads up before we start: this call is recorded so I can give you "
+    "feedback afterward. If that's okay, just say yes to begin. If not, say "
+    "no and I'll end the call now."
+)
+
+CONSENT_REPROMPT = (
+    "Sorry — I didn't catch that. Are you okay with the call being recorded? "
+    "Yes or no."
+)
+
+CONSENT_DECLINE_ACK = (
+    "No problem — I won't record this call. Take care."
+)
+
+_AFFIRMATIVE: frozenset[str] = frozenset(
+    {
+        "yes",
+        "yeah",
+        "yep",
+        "yup",
+        "sure",
+        "okay",
+        "ok",
+        "go ahead",
+        "that's fine",
+        "thats fine",
+        "sounds good",
+        "alright",
+        "absolutely",
+        "fine",
+    }
+)
+
+_NEGATIVE: frozenset[str] = frozenset(
+    {
+        "no",
+        "nope",
+        "nah",
+        "not okay",
+        "don't",
+        "do not",
+        "decline",
+        "stop",
+        "i'd rather not",
+        "id rather not",
+        "no thanks",
+    }
+)
+
+
+def classify_consent(text: str) -> ConsentClassification:
+    """Classify a user response to the consent prompt as granted/declined/unclear.
+
+    Deterministic: lowercased, stripped of trailing punctuation, matched against
+    small lexicons. Misclassifying toward 'unclear' is safe (we re-prompt); a
+    confident false 'granted' is not.
+    """
+    norm = text.strip().lower().rstrip(".!?,")
+    if not norm:
+        return "unclear"
+    for phrase in _NEGATIVE:
+        if norm == phrase or norm.startswith(phrase + " ") or norm.startswith(phrase + ","):
+            return "declined"
+    for phrase in _AFFIRMATIVE:
+        if norm == phrase or norm.startswith(phrase + " ") or norm.startswith(phrase + ","):
+            return "granted"
+    return "unclear"
 
 COACH_PROMPT = """You are Rehearse, a calm and practical conversation coach.
 

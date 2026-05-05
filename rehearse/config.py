@@ -30,6 +30,11 @@ class RuntimeConfig:
     hume_clm_secret: str | None = None
     log_level: str = "info"
     validate_twilio_signature: bool = True
+    consent_prompt_timeout_seconds: int = 20
+    consent_reprompt_limit: int = 1
+    outcome_prompt_lead_seconds: int = 15
+    outcome_response_timeout_seconds: int = 15
+    outcome_reprompt_limit: int = 1
 
     @classmethod
     def from_env(cls, *, load_dotenv_file: bool = True) -> RuntimeConfig:
@@ -66,4 +71,15 @@ class RuntimeConfig:
             hume_clm_secret=os.environ.get("HUME_CLM_SECRET"),
             log_level=os.environ.get("LOG_LEVEL", "info"),
             validate_twilio_signature=os.environ.get("VALIDATE_TWILIO_SIGNATURE", "1") != "0",
+            consent_prompt_timeout_seconds=int(
+                os.environ.get("CONSENT_PROMPT_TIMEOUT_SECONDS", "20")
+            ),
+            consent_reprompt_limit=int(os.environ.get("CONSENT_REPROMPT_LIMIT", "1")),
+            outcome_prompt_lead_seconds=int(
+                os.environ.get("OUTCOME_PROMPT_LEAD_SECONDS", "15")
+            ),
+            outcome_response_timeout_seconds=int(
+                os.environ.get("OUTCOME_RESPONSE_TIMEOUT_SECONDS", "15")
+            ),
+            outcome_reprompt_limit=int(os.environ.get("OUTCOME_REPROMPT_LIMIT", "1")),
         )

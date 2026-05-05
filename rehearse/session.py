@@ -131,14 +131,64 @@ class SessionOrchestrator:
         except FileNotFoundError:
             log.warning("session.finalize.missing_manifest", session_id=session_id)
             return
+        if session.consent == ConsentState.DECLINED:
+            await self._finalize_declined(session_id)
+            log.info("session.finalize", session_id=session_id, status="declined")
+            return
         session.completion_status = status
         session = await persist_synthesis(self._store, session, self._synthesizer)
-        await self._store.update_session(
+        session = await self._store.update_session(
             session_id,
             lambda current: _apply_completion_status(current, status=status),
         )
+        await self._promote_outcome_status(session_id, session)
         await self._send_viewer_sms(handle)
         log.info("session.finalize", session_id=session_id, status=status)
+
+    async def _finalize_declined(self, session_id: str) -> None:
+        """Skip synthesis, purge audio + prosody, and truncate transcript on decline."""
+        session_dir = self._store.session_dir(session_id)
+        for name in ("audio.wav", "prosody.jsonl"):
+            path = session_dir / name
+            if path.exists():
+                path.unlink()
+                log.info(
+                    "consent.purge",
+                    session_id=session_id,
+                    file=name,
+                )
+        transcript = session_dir / "transcript.jsonl"
+        if transcript.exists():
+            lines = transcript.read_text().splitlines()
+            kept: list[str] = []
+            user_finals = 0
+            for line in lines:
+                is_user_final = (
+                    '"speaker":"user"' in line and '"is_interim":false' in line
+                )
+                if is_user_final and user_finals >= 2:
+                    break
+                kept.append(line)
+                if is_user_final:
+                    user_finals += 1
+            transcript.write_text("\n".join(kept) + ("\n" if kept else ""))
+        await self._store.update_session(
+            session_id,
+            lambda current: _apply_completion_status_and_artifacts(
+                current,
+                status="partial",
+                drop_keys=("audio", "prosody"),
+            ),
+        )
+
+    async def _promote_outcome_status(self, session_id: str, session: Session) -> None:
+        """Rewrite a still-pending outcome probe status to 'skipped' on finalize."""
+        if session.outcome_probe_status not in ("pending", "asked"):
+            return
+        await self._store.update_session(
+            session_id,
+            lambda current: _set_outcome_skipped(current),
+        )
 
     async def _send_viewer_sms(self, handle: SessionHandle | None) -> None:
         """Send the viewer URL to the caller when a notifier is configured."""
@@ -165,4 +215,24 @@ def utcnow() -> datetime:
 def _apply_completion_status(session: Session, *, status: CompletionStatus) -> Session:
     """Set the final completion status on the session manifest."""
     session.completion_status = status
+    return session
+
+
+def _apply_completion_status_and_artifacts(
+    session: Session,
+    *,
+    status: CompletionStatus,
+    drop_keys: tuple[str, ...],
+) -> Session:
+    """Set completion status and drop named artifact paths from the manifest."""
+    session.completion_status = status
+    for key in drop_keys:
+        session.artifact_paths.pop(key, None)
+    return session
+
+
+def _set_outcome_skipped(session: Session) -> Session:
+    """Mark an unfinished outcome probe as skipped during finalize."""
+    if session.outcome_probe_status in ("pending", "asked"):
+        session.outcome_probe_status = "skipped"
     return session

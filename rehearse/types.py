@@ -243,7 +243,9 @@ class Session(Strict):
     phase_timings: list[PhaseTiming] = Field(default_factory=list)
     artifact_paths: dict[str, str] = Field(default_factory=dict)
     completion_status: Literal["complete", "partial", "failed", "in_progress"] = "in_progress"
+    finalized_at: datetime | None = None
     outcome_label: OutcomeLabel | None = None
+    outcome_probe_status: Literal["pending", "asked", "captured", "skipped"] | None = None
     pipeline_version: str | None = None
     model_slots: dict[str, str] = Field(default_factory=dict)
 

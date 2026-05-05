@@ -28,9 +28,11 @@ from twilio.rest import Client as TwilioClient
 from rehearse.audio.twilio_stream import TwilioStream
 from rehearse.bus import FrameBus
 from rehearse.config import RuntimeConfig
-from rehearse.frames import AudioChunk
+from rehearse.consent import ConsentGate, ConsentGateConfig
+from rehearse.frames import AudioChunk, EndOfCall
 from rehearse.intake import IntakeProcessor
-from rehearse.phases import PhaseProcessor
+from rehearse.outcome import OutcomeProbe, OutcomeProbeConfig
+from rehearse.phases import PhaseBudgets, PhaseProcessor
 from rehearse.services.hume_evi import HumeEVIClient
 from rehearse.session import SessionOrchestrator, TriggerEvent, utcnow
 from rehearse.types import Speaker
@@ -189,7 +191,19 @@ def mount_twilio_routes(
         await ws.accept()
         log.info("media.connect", session_id=session_id)
         bus = FrameBus(session_id)
-        phase_processor = PhaseProcessor(session_id, orchestrator.store, bus)
+        budgets = PhaseBudgets()
+        consent_state = {"declined": False}
+
+        def _consent_getter():
+            return _read_consent_from_disk(orchestrator, session_id)
+
+        phase_processor = PhaseProcessor(
+            session_id,
+            orchestrator.store,
+            bus,
+            budgets=budgets,
+            consent_getter=_consent_getter,
+        )
         intake_processor = IntakeProcessor(
             session_id,
             orchestrator.store,
@@ -202,7 +216,42 @@ def mount_twilio_routes(
                 bus=bus,
                 session_id=session_id,
             ) as hume:
+                async def _on_decline() -> None:
+                    """Mark the session for shutdown on consent decline."""
+                    consent_state["declined"] = True
+                    await bus.publish(
+                        EndOfCall(
+                            session_id=session_id,
+                            reason="consent_decline",
+                            ts=utcnow().timestamp(),
+                        )
+                    )
+
+                consent_gate = ConsentGate(
+                    session_id,
+                    orchestrator.store,
+                    bus,
+                    speak=hume.say,
+                    on_decline=_on_decline,
+                    config=ConsentGateConfig(
+                        prompt_timeout_seconds=config.consent_prompt_timeout_seconds,
+                        reprompt_limit=config.consent_reprompt_limit,
+                    ),
+                )
+                outcome_probe = OutcomeProbe(
+                    session_id,
+                    orchestrator.store,
+                    speak=hume.say,
+                    config=OutcomeProbeConfig(
+                        response_timeout_seconds=config.outcome_response_timeout_seconds,
+                        reprompt_limit=config.outcome_reprompt_limit,
+                        prompt_lead_seconds=config.outcome_prompt_lead_seconds,
+                        feedback_budget_seconds=budgets.feedback_seconds,
+                    ),
+                )
                 await phase_processor.bootstrap()
+                consent_task = asyncio.create_task(consent_gate.run(bus.subscribe()))
+                outcome_task = asyncio.create_task(outcome_probe.run(bus.subscribe()))
                 phase_task = asyncio.create_task(phase_processor.run(bus.subscribe()))
                 intake_task = asyncio.create_task(intake_processor.run(bus.subscribe()))
                 transcript_task = asyncio.create_task(
@@ -230,6 +279,8 @@ def mount_twilio_routes(
                 hume_task = asyncio.create_task(hume.run_event_loop())
                 try:
                     async for chunk in twilio.inbound():
+                        if consent_state["declined"]:
+                            break
                         await hume.send_audio(chunk)
                         await bus.publish(
                             AudioChunk(
@@ -247,12 +298,16 @@ def mount_twilio_routes(
                         await assistant_task
                     with suppress(asyncio.CancelledError):
                         await hume_task
+                    await consent_task
+                    await outcome_task
                     await phase_task
                     await intake_task
                     await transcript_task
                     await prosody_task
                     await audio_task
                     await telemetry_task
+                    if consent_state["declined"]:
+                        await orchestrator.finalize(session_id, "partial")
         except WebSocketDisconnect:
             log.info("media.disconnect", session_id=session_id)
 
@@ -269,6 +324,17 @@ def _stream_twiml(config: RuntimeConfig, session_id: str) -> str:
         "</Connect>"
         "</Response>"
     )
+
+
+def _read_consent_from_disk(orchestrator: SessionOrchestrator, session_id: str):
+    """Best-effort fallback to read consent from the manifest when no handle exists."""
+    from rehearse.types import ConsentState, Session
+
+    path = orchestrator.store.session_dir(session_id) / "session.json"
+    try:
+        return Session.model_validate_json(path.read_text()).consent
+    except Exception:
+        return ConsentState.PENDING
 
 
 async def _pump_assistant_audio(twilio: TwilioStream, bus: FrameBus) -> None:

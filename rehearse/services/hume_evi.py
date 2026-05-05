@@ -17,6 +17,7 @@ from contextlib import AsyncExitStack
 from typing import Any
 
 from hume.client import AsyncHumeClient
+from hume.empathic_voice.types.assistant_input import AssistantInput
 from hume.empathic_voice.types.audio_input import AudioInput
 
 from rehearse.audio.resample import resample_pcm16
@@ -71,6 +72,16 @@ class HumeEVIClient:
             raise RuntimeError("HumeEVIClient not connected")
         payload = base64.b64encode(pcm16_16k).decode("ascii")
         await self._socket.send_audio_input(AudioInput(data=payload))
+
+    async def say(self, text: str) -> None:
+        """Have the coach speak `text` directly via an assistant_input message.
+
+        Used by deterministic on-call surfaces (consent gate, outcome probe)
+        that must utter exact copy without an LLM round-trip.
+        """
+        if self._socket is None:
+            raise RuntimeError("HumeEVIClient not connected")
+        await self._socket.send_assistant_input(AssistantInput(text=text))
 
     async def run_event_loop(self) -> None:
         """Read Hume events until the socket closes and publish runtime frames."""

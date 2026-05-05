@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Literal, TypeAlias
 
-from rehearse.types import Phase, ProsodyScores, Speaker, Strict
+from rehearse.types import ConsentState, Phase, ProsodyScores, Speaker, Strict
 
 
 class AudioChunk(Strict):
@@ -57,8 +57,23 @@ class EndOfCall(Strict):
     """Carry the final termination reason for a live call."""
 
     session_id: str
-    reason: Literal["hangup", "error", "budget_exceeded"]
+    reason: Literal["hangup", "error", "budget_exceeded", "consent_decline"]
     ts: float
 
 
-Frame: TypeAlias = AudioChunk | TranscriptDelta | ProsodyEvent | PhaseSignal | EndOfCall
+class ConsentResolved(Strict):
+    """Carry the resolved consent state once the consent gate has decided."""
+
+    session_id: str
+    state: ConsentState
+    ts: float
+
+
+Frame: TypeAlias = (
+    AudioChunk
+    | TranscriptDelta
+    | ProsodyEvent
+    | PhaseSignal
+    | EndOfCall
+    | ConsentResolved
+)
