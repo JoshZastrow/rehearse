@@ -36,6 +36,10 @@ class RuntimeConfig:
     outcome_prompt_lead_seconds: int = 15
     outcome_response_timeout_seconds: int = 15
     outcome_reprompt_limit: int = 1
+    finalize_sweep_max_call_seconds: int = 360
+    finalize_sweep_grace_seconds: int = 60
+    finalize_sweep_interval_seconds: int = 60
+    finalize_sweep_enabled: bool = True
 
     @classmethod
     def from_env(cls, *, load_dotenv_file: bool = True) -> RuntimeConfig:
@@ -84,4 +88,14 @@ class RuntimeConfig:
                 os.environ.get("OUTCOME_RESPONSE_TIMEOUT_SECONDS", "15")
             ),
             outcome_reprompt_limit=int(os.environ.get("OUTCOME_REPROMPT_LIMIT", "1")),
+            finalize_sweep_max_call_seconds=int(
+                os.environ.get("FINALIZE_SWEEP_MAX_CALL_SECONDS", "360")
+            ),
+            finalize_sweep_grace_seconds=int(
+                os.environ.get("FINALIZE_SWEEP_GRACE_SECONDS", "60")
+            ),
+            finalize_sweep_interval_seconds=int(
+                os.environ.get("FINALIZE_SWEEP_INTERVAL_SECONDS", "60")
+            ),
+            finalize_sweep_enabled=os.environ.get("FINALIZE_SWEEP_ENABLED", "1") != "0",
         )

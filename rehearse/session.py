@@ -127,18 +127,27 @@ class SessionOrchestrator:
         return self._by_call_sid.get(call_sid)
 
     async def finalize(self, session_id: str, status: CompletionStatus) -> None:
-        """Mark a session finished and persist its final completion status."""
+        """Mark a session finished and persist its final completion status.
+
+        Idempotent: if the manifest is already in a terminal state, this is a
+        no-op. Works without an in-memory handle so the finalize-sweeper and
+        a late Twilio status callback can both call it safely after a restart.
+        """
         handle = self._handles.pop(session_id, None)
         if handle and handle.call_sid:
             self._by_call_sid.pop(handle.call_sid, None)
-        if handle is None:
-            log.warning("session.finalize.unknown", session_id=session_id)
-            return
         try:
             existing = await self._store.read(session_id, "session.json")
             session = Session.model_validate_json(existing)
         except FileNotFoundError:
             log.warning("session.finalize.missing_manifest", session_id=session_id)
+            return
+        if session.completion_status != "in_progress":
+            log.info(
+                "session.finalize.already_terminal",
+                session_id=session_id,
+                status=session.completion_status,
+            )
             return
         if session.consent == ConsentState.DECLINED:
             await self._finalize_declined(session_id)

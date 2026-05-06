@@ -7,6 +7,8 @@ handlers, and static artifact serving. It does not hold core business logic.
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 import structlog
 from fastapi import FastAPI
@@ -14,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 
 from rehearse.agents import build_clm_responder, mount_clm_routes
 from rehearse.config import RuntimeConfig
+from rehearse.finalize_sweeper import FinalizeSweeper
 from rehearse.session import SessionOrchestrator
 from rehearse.storage import LocalFilesystemStore
 from rehearse.telephony import TwilioRestClient, mount_twilio_routes
@@ -40,7 +43,6 @@ def create_app(config: RuntimeConfig | None = None) -> FastAPI:
     config = config or RuntimeConfig.from_env()
     _configure_logging(config.log_level)
 
-    app = FastAPI(title="rehearse")
     store = LocalFilesystemStore(root=config.session_root, public_base_url=config.public_base_url)
     twilio_client = TwilioRestClient(config)
     notifier = None if config.disable_sms else twilio_client
@@ -48,6 +50,27 @@ def create_app(config: RuntimeConfig | None = None) -> FastAPI:
     if config.disable_sms:
         structlog.get_logger(__name__).info("sms.disabled")
     clm_responder = build_clm_responder(config)
+
+    sweeper = FinalizeSweeper(
+        orchestrator,
+        store,
+        max_call_seconds=config.finalize_sweep_max_call_seconds,
+        grace_seconds=config.finalize_sweep_grace_seconds,
+        sweep_interval_seconds=config.finalize_sweep_interval_seconds,
+    )
+
+    @asynccontextmanager
+    async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        """Run the finalize sweeper for the duration of the FastAPI app."""
+        if config.finalize_sweep_enabled:
+            sweeper.start()
+        try:
+            yield
+        finally:
+            if config.finalize_sweep_enabled:
+                await sweeper.stop()
+
+    app = FastAPI(title="rehearse", lifespan=_lifespan)
 
     mount_clm_routes(app, clm_responder, config)
     mount_twilio_routes(app, orchestrator, twilio_client, config)
