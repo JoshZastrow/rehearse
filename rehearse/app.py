@@ -43,7 +43,10 @@ def create_app(config: RuntimeConfig | None = None) -> FastAPI:
     app = FastAPI(title="rehearse")
     store = LocalFilesystemStore(root=config.session_root, public_base_url=config.public_base_url)
     twilio_client = TwilioRestClient(config)
-    orchestrator = SessionOrchestrator(store=store, notifier=twilio_client)
+    notifier = None if config.disable_sms else twilio_client
+    orchestrator = SessionOrchestrator(store=store, notifier=notifier)
+    if config.disable_sms:
+        structlog.get_logger(__name__).info("sms.disabled")
     clm_responder = build_clm_responder(config)
 
     mount_clm_routes(app, clm_responder, config)

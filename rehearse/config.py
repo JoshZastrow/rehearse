@@ -30,6 +30,7 @@ class RuntimeConfig:
     hume_clm_secret: str | None = None
     log_level: str = "info"
     validate_twilio_signature: bool = True
+    disable_sms: bool = False
     consent_prompt_timeout_seconds: int = 20
     consent_reprompt_limit: int = 1
     outcome_prompt_lead_seconds: int = 15
@@ -71,6 +72,7 @@ class RuntimeConfig:
             hume_clm_secret=os.environ.get("HUME_CLM_SECRET"),
             log_level=os.environ.get("LOG_LEVEL", "info"),
             validate_twilio_signature=os.environ.get("VALIDATE_TWILIO_SIGNATURE", "1") != "0",
+            disable_sms=os.environ.get("DISABLE_SMS", "0") == "1",
             consent_prompt_timeout_seconds=int(
                 os.environ.get("CONSENT_PROMPT_TIMEOUT_SECONDS", "20")
             ),
