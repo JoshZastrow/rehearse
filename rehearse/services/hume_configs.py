@@ -14,9 +14,27 @@ Example:
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
-from typing import Literal
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any, Literal
 
+from hume.empathic_voice.types.posted_builtin_tool import PostedBuiltinTool
+from hume.empathic_voice.types.posted_config_prompt_spec import PostedConfigPromptSpec
+from hume.empathic_voice.types.posted_event_message_spec import PostedEventMessageSpec
+from hume.empathic_voice.types.posted_event_message_specs import PostedEventMessageSpecs
+from hume.empathic_voice.types.posted_language_model import PostedLanguageModel
+from hume.empathic_voice.types.posted_timeout_specs import PostedTimeoutSpecs
+from hume.empathic_voice.types.posted_timeout_specs_inactivity import (
+    PostedTimeoutSpecsInactivity,
+)
+from hume.empathic_voice.types.posted_timeout_specs_max_duration import (
+    PostedTimeoutSpecsMaxDuration,
+)
+from hume.empathic_voice.types.posted_turn_detection_spec import PostedTurnDetectionSpec
+from hume.empathic_voice.types.voice_id import VoiceId
+from hume.empathic_voice.types.voice_name import VoiceName
 from pydantic import BaseModel, ConfigDict
 
 
@@ -253,3 +271,127 @@ def _diff_fields(persona: HumePersonaConfig, snap: RemoteConfigSnapshot) -> list
         if getattr(persona, name) != getattr(snap, name):
             diffs.append(name)
     return diffs
+
+
+MAPPING_PATH_DEFAULT = Path("sessions/.hume_configs.json")
+
+
+def select_config_id(
+    persona_key: str,
+    *,
+    mapping_path: Path = MAPPING_PATH_DEFAULT,
+    fallback: str,
+) -> str:
+    """Return the Hume config id for `persona_key`, falling back if unknown.
+
+    Reads the mapping file written by `apply_sync`. If the file is missing or
+    the persona key is absent, returns `fallback` (typically `RuntimeConfig.hume_config_id`).
+    """
+    if not mapping_path.exists():
+        return fallback
+    try:
+        data = json.loads(mapping_path.read_text())
+    except json.JSONDecodeError:
+        return fallback
+    return data.get(persona_key, fallback)
+
+
+async def apply_sync(
+    client: Any,
+    actions: list[SyncAction],
+    *,
+    mapping_path: Path = MAPPING_PATH_DEFAULT,
+) -> dict[str, str]:
+    """Execute Create / NewVersion actions against Hume and write the mapping.
+
+    Returns the persona_key -> config_id mapping that was persisted.
+    """
+    mapping: dict[str, str] = {}
+    for action in actions:
+        if isinstance(action, Create):
+            kwargs = _to_create_kwargs(action.persona)
+            response = await client.empathic_voice.configs.create_config(**kwargs)
+            mapping[action.persona.persona_key] = response.id
+        elif isinstance(action, NewVersion):
+            kwargs = _to_version_kwargs(action.persona)
+            await client.empathic_voice.configs.create_config_version(
+                id=action.config_id, **kwargs
+            )
+            mapping[action.persona.persona_key] = action.config_id
+        elif isinstance(action, NoOp):
+            mapping[action.persona.persona_key] = action.config_id
+    payload = {**mapping, "synced_at": datetime.now(UTC).isoformat()}
+    mapping_path.parent.mkdir(parents=True, exist_ok=True)
+    mapping_path.write_text(json.dumps(payload, indent=2))
+    return mapping
+
+
+def _to_create_kwargs(persona: HumePersonaConfig) -> dict[str, Any]:
+    """Render a persona into kwargs for `configs.create_config`."""
+    return {
+        "evi_version": persona.evi_version,
+        "name": persona.display_name,
+        "voice": _render_voice(persona.voice),
+        "language_model": _render_language_model(persona.language_model),
+        "prompt": PostedConfigPromptSpec(text=persona.prompt_text),
+        "event_messages": _render_event_messages(persona),
+        "timeouts": _render_timeouts(persona.timeouts),
+        "turn_detection": _render_turn_detection(persona.turn_detection),
+        "builtin_tools": _render_builtin_tools(persona.builtin_tools),
+    }
+
+
+def _to_version_kwargs(persona: HumePersonaConfig) -> dict[str, Any]:
+    """Render a persona into kwargs for `configs.create_config_version`."""
+    kwargs = _to_create_kwargs(persona)
+    kwargs.pop("name", None)
+    return kwargs
+
+
+def _render_voice(voice: HumeVoice) -> VoiceName | VoiceId:
+    if voice.id is not None:
+        return VoiceId(id=voice.id, provider=voice.provider)
+    if voice.name is None:
+        raise ValueError("HumeVoice requires either id or name")
+    return VoiceName(name=voice.name, provider=voice.provider)
+
+
+def _render_language_model(lm: HumeLanguageModel) -> PostedLanguageModel:
+    return PostedLanguageModel(
+        model_provider=lm.provider,
+        model_resource=lm.model,
+        temperature=lm.temperature,
+    )
+
+
+def _render_event_messages(persona: HumePersonaConfig) -> PostedEventMessageSpecs:
+    def spec(msg: HumeEventMessage | None) -> PostedEventMessageSpec | None:
+        if msg is None:
+            return None
+        return PostedEventMessageSpec(enabled=msg.enabled, text=msg.text)
+
+    return PostedEventMessageSpecs(
+        on_new_chat=spec(persona.on_new_chat),
+        on_inactivity_timeout=spec(persona.on_inactivity_timeout),
+        on_max_duration_timeout=spec(persona.on_max_duration_timeout),
+    )
+
+
+def _render_timeouts(t: HumeTimeouts) -> PostedTimeoutSpecs:
+    return PostedTimeoutSpecs(
+        inactivity=PostedTimeoutSpecsInactivity(enabled=True, duration_secs=t.inactivity_secs),
+        max_duration=PostedTimeoutSpecsMaxDuration(enabled=True, duration_secs=t.max_duration_secs),
+    )
+
+
+def _render_turn_detection(td: HumeTurnDetection) -> PostedTurnDetectionSpec:
+    # Note: PostedTurnDetectionSpec in this SDK version has no `type` field.
+    return PostedTurnDetectionSpec(
+        end_of_turn_silence_ms=td.end_of_turn_silence_ms,
+        prefix_padding_ms=td.prefix_padding_ms,
+        speech_detection_threshold=td.speech_detection_threshold,
+    )
+
+
+def _render_builtin_tools(names: list[str]) -> list[PostedBuiltinTool]:
+    return [PostedBuiltinTool(name=name) for name in names]

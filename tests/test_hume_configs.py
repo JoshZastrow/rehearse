@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from rehearse.services.hume_configs import (
     PERSONAS,
     Create,
@@ -10,6 +13,7 @@ from rehearse.services.hume_configs import (
     NoOp,
     RemoteConfigSnapshot,
     plan_sync,
+    select_config_id,
 )
 
 
@@ -109,3 +113,20 @@ def test_plan_sync_ignores_unmatched_remote_configs():
     actions = plan_sync(PERSONAS, remote_configs=[other])
     assert len(actions) == 1
     assert isinstance(actions[0], Create)
+
+
+def test_select_config_id_reads_mapping(tmp_path: Path):
+    path = tmp_path / "mapping.json"
+    path.write_text(json.dumps({"default": "cfg_abc", "synced_at": "2026-05-06T00:00:00Z"}))
+    assert select_config_id("default", mapping_path=path, fallback="env_id") == "cfg_abc"
+
+
+def test_select_config_id_falls_back_when_file_missing(tmp_path: Path):
+    path = tmp_path / "missing.json"
+    assert select_config_id("default", mapping_path=path, fallback="env_id") == "env_id"
+
+
+def test_select_config_id_falls_back_when_key_missing(tmp_path: Path):
+    path = tmp_path / "mapping.json"
+    path.write_text(json.dumps({"other": "cfg_xyz"}))
+    assert select_config_id("default", mapping_path=path, fallback="env_id") == "env_id"
