@@ -11,12 +11,20 @@ from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from rehearse.agents.clm import CLMChatRequest, CLMResponder, mount_clm_routes
+from rehearse.agents.clm import (
+    AnthropicCLMResponder,
+    CLMChatRequest,
+    CLMMessage,
+    CLMResponder,
+    mount_clm_routes,
+)
 from rehearse.app import create_app
 from rehearse.config import RuntimeConfig
+from rehearse.storage import LocalFilesystemStore
 from rehearse.types import ConsentState, CounterpartyPersona, Phase, PhaseTiming, Session
 
 _NOW = datetime(2026, 4, 28, 12, 0, tzinfo=UTC)
@@ -331,3 +339,77 @@ def test_create_app_infers_character_role_from_practice_phase(tmp_path: Path) ->
     assert resp.status_code == 200
     payload = resp.json()
     assert "As recruiter" in payload["choices"][0]["message"]["content"]
+
+
+class _FakeAnthropicStream:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_exc):
+        return False
+
+    @property
+    def text_stream(self):
+        async def _gen():
+            yield "ok"
+        return _gen()
+
+
+class _CapturingMessages:
+    def __init__(self):
+        self.last_kwargs: dict | None = None
+
+    def stream(self, **kwargs):
+        self.last_kwargs = kwargs
+        return _FakeAnthropicStream()
+
+
+class _CapturingClient:
+    def __init__(self):
+        self.messages = _CapturingMessages()
+
+
+@pytest.mark.asyncio
+async def test_anthropic_responder_sends_two_system_blocks(tmp_path):
+    started = datetime(2026, 5, 6, 12, 0, tzinfo=UTC)
+    session = Session(
+        id="sess_test",
+        created_at=started,
+        consent=ConsentState.GRANTED,
+        persona=CounterpartyPersona(
+            session_id="sess_test",
+            name=None,
+            relationship="manager",
+            personality_prompt="You are a direct manager.",
+            likely_reactions=["pushes back"],
+            compiled_at=started,
+        ),
+        phase_timings=[
+            PhaseTiming(phase=Phase.INTAKE, started_at=started, budget_seconds=60),
+        ],
+    )
+    store = LocalFilesystemStore(root=tmp_path, public_base_url="https://example.test")
+    await store.write("sess_test", "session.json", session.model_dump_json())
+
+    responder = AnthropicCLMResponder(
+        api_key="test", model="claude-test", store=store
+    )
+    fake = _CapturingClient()
+    responder._client = fake  # type: ignore[attr-defined]
+
+    request = CLMChatRequest(messages=[CLMMessage(role="user", content="hi")])
+    chunks = []
+    async for chunk in responder.stream_reply(
+        session_id="sess_test", role="coach", request=request
+    ):
+        chunks.append(chunk)
+
+    kwargs = fake.messages.last_kwargs
+    assert kwargs is not None
+    system = kwargs["system"]
+    assert isinstance(system, list)
+    assert len(system) == 2
+    assert system[0]["type"] == "text"
+    assert system[0]["cache_control"] == {"type": "ephemeral"}
+    assert "Live timing" in system[1]["text"]
+    assert system[1].get("cache_control") is None

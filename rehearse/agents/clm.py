@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import json
 import time
-from collections.abc import AsyncIterator, Iterable
+from collections.abc import AsyncIterator, Callable, Iterable
+from datetime import datetime
 from typing import Any, Protocol
 
 from anthropic import AsyncAnthropic
@@ -17,8 +18,10 @@ from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+from rehearse.agents.timecard import build_time_card, render_time_card
 from rehearse.config import RuntimeConfig
 from rehearse.personas import character_system_prompt, coach_system_prompt
+from rehearse.session import utcnow
 from rehearse.storage import LocalFilesystemStore
 from rehearse.types import Phase, Session
 
@@ -83,11 +86,19 @@ class ScriptedCLMResponder:
 class AnthropicCLMResponder:
     """Wrap Claude so Hume can use it as the live conversation brain."""
 
-    def __init__(self, api_key: str, model: str, store: LocalFilesystemStore) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        model: str,
+        store: LocalFilesystemStore,
+        *,
+        clock: Callable[[], datetime] = utcnow,
+    ) -> None:
         """Store Anthropic credentials and create the async client lazily."""
         self._client = AsyncAnthropic(api_key=api_key)
         self._model = model
         self._store = store
+        self._clock = clock
 
     async def stream_reply(
         self,
@@ -98,17 +109,29 @@ class AnthropicCLMResponder:
     ) -> AsyncIterator[str]:
         """Yield text chunks from Anthropic's streaming messages API."""
         session = await _load_session(session_id, self._store)
-        system = _system_prompt_for_role(role, session)
+        static_prompt = _system_prompt_for_role(role, session)
+        if session_id:
+            static_prompt = f"{static_prompt}\n\nSession ID: {session_id}"
         messages = _anthropic_messages(request.messages)
         if not messages:
             messages = [{"role": "user", "content": "Greet the caller and start the coaching."}]
-        if session_id:
-            system = f"{system}\n\nSession ID: {session_id}"
+
+        system_blocks: list[dict[str, Any]] = [
+            {
+                "type": "text",
+                "text": static_prompt,
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
+        if session is not None and session.phase_timings:
+            card = build_time_card(session, now=self._clock())
+            system_blocks.append({"type": "text", "text": render_time_card(card)})
+
         async with self._client.messages.stream(
             model=self._model,
             max_tokens=512,
             temperature=0.4,
-            system=system,
+            system=system_blocks,
             messages=messages,
         ) as stream:
             async for text in stream.text_stream:
