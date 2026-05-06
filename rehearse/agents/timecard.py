@@ -90,7 +90,7 @@ def _open_phase_timing(session: Session):
     for timing in reversed(session.phase_timings):
         if timing.ended_at is None:
             return timing
-    return session.phase_timings[-1]
+    raise ValueError("session has no open phase timing; call has already ended")
 
 
 def _mmss(seconds: int) -> str:

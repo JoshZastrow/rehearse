@@ -86,3 +86,18 @@ def test_render_time_card_contains_phase_remaining_and_words():
     assert "2:18" in rendered
     assert "3:18" in rendered
     assert "36" in rendered
+
+
+def test_build_time_card_raises_when_no_open_phase():
+    import pytest as _pytest
+    started = _T0
+    session = _session(
+        PhaseTiming(
+            phase=Phase.FEEDBACK,
+            started_at=started,
+            ended_at=started + timedelta(seconds=60),
+            budget_seconds=60,
+        ),
+    )
+    with _pytest.raises(ValueError, match="no open phase"):
+        build_time_card(session, now=started + timedelta(seconds=70))
