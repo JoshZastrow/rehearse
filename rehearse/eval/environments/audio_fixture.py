@@ -7,30 +7,32 @@ trajectory shape:
 
     {
         "transcript": [
-            {"speaker": "user", "text": "..."},
-            {"speaker": "coach", "text": "..."},
+            {"speaker": "user", "text": "...", "description": "anxious"},
+            {"speaker": "coach", "text": "...", "description": "warm, steady"},
             ...
         ],
-        "user_audio_durations_s": [0.5, 0.5, ...],   # per user turn
-        "coach_audio_durations_s": [0.6, 0.6, ...],  # per coach turn
+        "user_audio_durations_s": [0.5, 0.5, ...],   # silent-fallback only
+        "coach_audio_durations_s": [0.6, 0.6, ...],  # silent-fallback only
         "silence_between_turns_s": 0.0,              # optional pad between turns
     }
 
 The environment writes:
     {run_dir}/transcript.jsonl
-    {run_dir}/audio/user/turn_<N>.wav   (silent PCM16 WAVs)
+    {run_dir}/audio/user/turn_<N>.wav
     {run_dir}/audio/coach/turn_<N>.wav
-    {run_dir}/timing.jsonl              (per-turn audio_start/audio_end events)
+    {run_dir}/timing.jsonl
 
-Audio is synthesized as silent WAVs of the requested durations so the
-fixture has no external asset dependencies. Timing events are computed
-sequentially: each turn starts when the previous turn ends (plus any
-configured silence pad). For real audio + true timing data, use a
-sandbox or production-replay environment.
+Audio synthesis path: if a TTS provider is configured (see
+`rehearse.eval.tts_bridge.get_default_provider`), each turn's text is
+synthesized to a real WAV and timing is computed from the *actual*
+audio duration. If no provider is configured, the environment falls
+back to silent WAVs sized by `*_audio_durations_s` so CI smoke runs
+stay hermetic.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import wave
 from datetime import datetime
@@ -38,6 +40,7 @@ from pathlib import Path
 from typing import Any
 
 from rehearse.eval.protocols import BenchmarkExample, RolloutResult
+from rehearse.eval.tts_bridge import TTSProvider, get_default_provider
 
 
 class AudioFixtureEnvironment:
@@ -46,8 +49,17 @@ class AudioFixtureEnvironment:
     name = "audio-fixture"
     version = "v1"
 
-    def __init__(self, model_slots: dict[str, str] | None = None) -> None:
+    def __init__(
+        self,
+        model_slots: dict[str, str] | None = None,
+        *,
+        tts_provider: TTSProvider | None = None,
+    ) -> None:
         self.model_slots = model_slots or {}
+        # If no provider is injected, resolve from env (None = silent fallback).
+        # To force silent even when HUME_API_KEY is set, export
+        # REHEARSE_TTS_PROVIDER=none.
+        self._tts_provider = tts_provider or get_default_provider()
 
     async def rollout(
         self,
@@ -72,16 +84,26 @@ class AudioFixtureEnvironment:
             + ("\n" if transcript else "")
         )
 
-        # Synthesize per-turn audio for each role.
-        _write_per_turn_audio(run_dir / "audio" / "user", user_durations)
-        _write_per_turn_audio(run_dir / "audio" / "coach", coach_durations)
+        # Synthesize per-turn audio. If a TTS provider is configured,
+        # produce real speech and use the resulting durations. Otherwise
+        # fall back to silent WAVs sized by the declared durations.
+        if self._tts_provider is not None:
+            real_user_durations, real_coach_durations = await self._synthesize_turns(
+                run_dir=run_dir,
+                transcript=transcript,
+            )
+            timing_user_durations = real_user_durations
+            timing_coach_durations = real_coach_durations
+        else:
+            _write_silent_per_turn_audio(run_dir / "audio" / "user", user_durations)
+            _write_silent_per_turn_audio(run_dir / "audio" / "coach", coach_durations)
+            timing_user_durations = list(user_durations)
+            timing_coach_durations = list(coach_durations)
 
-        # Generate timing.jsonl by sequencing transcript turns against the
-        # corresponding audio durations.
         timing_events = _timing_from_transcript(
             transcript=transcript,
-            user_durations_s=user_durations,
-            coach_durations_s=coach_durations,
+            user_durations_s=timing_user_durations,
+            coach_durations_s=timing_coach_durations,
             silence_between_s=silence_between_s,
         )
         if timing_events:
@@ -101,6 +123,46 @@ class AudioFixtureEnvironment:
             artifacts_dir=run_dir,
         )
 
+    async def _synthesize_turns(
+        self,
+        *,
+        run_dir: Path,
+        transcript: list[dict[str, Any]],
+    ) -> tuple[list[float], list[float]]:
+        """Synthesize each turn in parallel; return per-role real durations."""
+        assert self._tts_provider is not None
+        provider = self._tts_provider
+
+        plan: list[tuple[str, int, dict[str, Any]]] = []
+        role_idx = {"user": 0, "coach": 0}
+        for frame in transcript:
+            role = frame.get("speaker")
+            if role not in ("user", "coach"):
+                continue
+            plan.append((role, role_idx[role], frame))
+            role_idx[role] += 1
+
+        async def _one(role: str, idx: int, frame: dict[str, Any]) -> tuple[str, int, float]:
+            out = run_dir / "audio" / role / f"turn_{idx}.wav"
+            text = (frame.get("text") or "").strip()
+            if not text:
+                _silent_wav(out, duration_s=0.2)
+                return role, idx, 0.2
+            duration = await provider.synthesize(
+                text=text,
+                out_path=out,
+                description=frame.get("description"),
+            )
+            return role, idx, duration
+
+        results = await asyncio.gather(*(_one(r, i, f) for r, i, f in plan))
+
+        user_durations: list[float] = []
+        coach_durations: list[float] = []
+        for role, _idx, duration in results:
+            (user_durations if role == "user" else coach_durations).append(duration)
+        return user_durations, coach_durations
+
 
 def _normalize_frame(frame: dict[str, Any]) -> dict[str, Any]:
     return {
@@ -109,7 +171,7 @@ def _normalize_frame(frame: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _write_per_turn_audio(out_dir: Path, durations_s: list[float]) -> None:
+def _write_silent_per_turn_audio(out_dir: Path, durations_s: list[float]) -> None:
     if not durations_s:
         return
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -120,6 +182,7 @@ def _write_per_turn_audio(out_dir: Path, durations_s: list[float]) -> None:
 
 def _silent_wav(path: Path, *, duration_s: float, sample_rate: int = 16_000) -> None:
     n_samples = max(1, int(duration_s * sample_rate))
+    path.parent.mkdir(parents=True, exist_ok=True)
     with wave.open(str(path), "wb") as wav:
         wav.setnchannels(1)
         wav.setsampwidth(2)
