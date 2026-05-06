@@ -395,3 +395,64 @@ def _render_turn_detection(td: HumeTurnDetection) -> PostedTurnDetectionSpec:
 
 def _render_builtin_tools(names: list[str]) -> list[PostedBuiltinTool]:
     return [PostedBuiltinTool(name=name) for name in names]
+
+
+async def fetch_remote_configs(client: Any) -> list[RemoteConfigSnapshot]:
+    """Page through the workspace and return the latest version of each config.
+
+    Hume's `list_configs` returns one entry per config-name (latest version).
+    """
+    snapshots: list[RemoteConfigSnapshot] = []
+    pager = await client.empathic_voice.configs.list_configs()
+    async for cfg in pager:
+        snapshots.append(_snapshot_from_remote(cfg))
+    return snapshots
+
+
+def _snapshot_from_remote(cfg: Any) -> RemoteConfigSnapshot:
+    """Convert one Hume `ReturnConfig` into a comparison snapshot."""
+    voice = HumeVoice(
+        name=getattr(cfg.voice, "name", None) if cfg.voice else None,
+        id=getattr(cfg.voice, "id", None) if cfg.voice else None,
+        provider=getattr(cfg.voice, "provider", "HUME_AI") if cfg.voice else "HUME_AI",
+    )
+    lm = HumeLanguageModel(
+        provider=getattr(cfg.language_model, "model_provider", "ANTHROPIC"),
+        model=getattr(cfg.language_model, "model_resource", None),
+        temperature=getattr(cfg.language_model, "temperature", None),
+    )
+    em = cfg.event_messages
+    prompt_text = getattr(cfg.prompt, "text", "") if cfg.prompt else ""
+    timeouts = HumeTimeouts(
+        max_duration_secs=cfg.timeouts.max_duration.duration_secs,
+        inactivity_secs=cfg.timeouts.inactivity.duration_secs,
+    )
+    td = cfg.turn_detection
+    return RemoteConfigSnapshot(
+        id=cfg.id,
+        display_name=cfg.name,
+        evi_version=cfg.evi_version,
+        voice=voice,
+        language_model=lm,
+        prompt_text=prompt_text,
+        on_new_chat=_event(em.on_new_chat) if em else None,
+        on_resume_chat=_event(getattr(em, "on_resume_chat", None)) if em else None,
+        on_max_duration_timeout=_event(em.on_max_duration_timeout) if em else None,
+        on_inactivity_timeout=_event(em.on_inactivity_timeout) if em else None,
+        timeouts=timeouts,
+        turn_detection=HumeTurnDetection(
+            end_of_turn_silence_ms=td.end_of_turn_silence_ms,
+            prefix_padding_ms=td.prefix_padding_ms,
+            speech_detection_threshold=td.speech_detection_threshold,
+        ),
+        interruption_min_ms=cfg.interruption.min_interruption_ms,
+        nudges_enabled=getattr(cfg.nudges, "enabled", False) if cfg.nudges else False,
+        nudges_interval_secs=getattr(cfg.nudges, "interval_secs", 0) if cfg.nudges else 0,
+        builtin_tools=[t.name for t in (cfg.builtin_tools or [])],
+    )
+
+
+def _event(spec: Any) -> HumeEventMessage | None:
+    if spec is None:
+        return None
+    return HumeEventMessage(enabled=spec.enabled, text=spec.text)
