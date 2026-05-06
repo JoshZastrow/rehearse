@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from rehearse.agents.timecard import (
     HARD_CAP_SECONDS,
     TimeCard,
@@ -89,7 +91,6 @@ def test_render_time_card_contains_phase_remaining_and_words():
 
 
 def test_build_time_card_raises_when_no_open_phase():
-    import pytest as _pytest
     started = _T0
     session = _session(
         PhaseTiming(
@@ -99,5 +100,5 @@ def test_build_time_card_raises_when_no_open_phase():
             budget_seconds=60,
         ),
     )
-    with _pytest.raises(ValueError, match="no open phase"):
+    with pytest.raises(ValueError, match="no open phase"):
         build_time_card(session, now=started + timedelta(seconds=70))

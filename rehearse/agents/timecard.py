@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
-from rehearse.types import Phase, Session
+from rehearse.types import Phase, PhaseTiming, Session
 
 HARD_CAP_SECONDS: int = 300
 """Hume's per-call model-provider cap. Calls must end before this elapses."""
@@ -84,7 +84,7 @@ def _word_budget(phase: Phase, remaining_in_phase: int) -> int:
     return max(_WORD_BUDGET_FLOOR, min(_WORD_BUDGET_CEIL, int(round(raw))))
 
 
-def _open_phase_timing(session: Session):
+def _open_phase_timing(session: Session) -> PhaseTiming:
     if not session.phase_timings:
         raise ValueError("session has no phase_timings; PhaseProcessor.bootstrap not run")
     for timing in reversed(session.phase_timings):

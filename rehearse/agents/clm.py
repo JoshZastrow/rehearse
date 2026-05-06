@@ -124,8 +124,12 @@ class AnthropicCLMResponder:
             }
         ]
         if session is not None and session.phase_timings:
-            card = build_time_card(session, now=self._clock())
-            system_blocks.append({"type": "text", "text": render_time_card(card)})
+            try:
+                card = build_time_card(session, now=self._clock())
+            except ValueError:
+                card = None
+            if card is not None:
+                system_blocks.append({"type": "text", "text": render_time_card(card)})
 
         async with self._client.messages.stream(
             model=self._model,

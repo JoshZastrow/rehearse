@@ -412,4 +412,6 @@ async def test_anthropic_responder_sends_two_system_blocks(tmp_path):
     assert system[0]["type"] == "text"
     assert system[0]["cache_control"] == {"type": "ephemeral"}
     assert "Live timing" in system[1]["text"]
+    assert "intake" in system[1]["text"].lower()
+    assert "words" in system[1]["text"].lower()
     assert system[1].get("cache_control") is None
