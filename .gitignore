@@ -16,6 +16,9 @@ evals/datasets/mme-emotion/v0-10clip/clips/*
 evals/fixtures/founder-recorded/clips/*
 !evals/fixtures/founder-recorded/clips/.gitkeep
 .cache/
+.deepeval/
+.deepeval-cache/
+.deepeval_telemetry.txt
 *.wav
 *.log
 .coverage

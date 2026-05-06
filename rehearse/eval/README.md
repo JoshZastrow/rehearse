@@ -9,6 +9,8 @@ phone path, no media files, and no model API keys.
 Design specs:
 - [`docs/specs/v2026-04-27-eval-harness.md`](../../docs/specs/v2026-04-27-eval-harness.md)
 - [`docs/specs/v2026-04-28-mme-emotion-and-audio-targets.md`](../../docs/specs/v2026-04-28-mme-emotion-and-audio-targets.md)
+- [`docs/specs/v2026-05-06-eval-system-roadmap.md`](../../docs/specs/v2026-05-06-eval-system-roadmap.md)
+  — sequencing for multimodal scoring + DeepEval adoption.
 
 ## Install
 
@@ -152,3 +154,98 @@ uv run pytest tests/eval/
 
 Tests cover protocol conformance, runner end-to-end, subprocess isolation, the
 MME-Emotion dataset/eval shape, and the deterministic recognition scorer.
+
+## DeepEval Adapter Layer
+
+`rehearse/eval/deepeval_adapter/` bridges this harness to
+[DeepEval](https://github.com/confident-ai/deepeval). The adapter is the
+foundation of Spec 0 in the
+[eval system roadmap](../../docs/specs/v2026-05-06-eval-system-roadmap.md).
+
+What goes through the adapter:
+
+| Concern | Framework | Why |
+|---|---|---|
+| Text content scoring (`G-Eval`, faithfulness, role adherence, …) | DeepEval | Their bread and butter. |
+| Pytest test running, conversational metrics | DeepEval | Standard idioms; low friction. |
+| Audio judges (affect, delivery) | rehearse `Scorer` | DeepEval has no first-class audio in/out. |
+| Timing-derived `NaturalnessScorer` (Spec 4) | rehearse `Scorer` | Pure arithmetic; not an LLM judgment. |
+| Meta scorers (`StabilityScorer`) | rehearse `MetaScorer` | DeepEval has no concept of grouped rollouts. |
+| Rollout orchestration, sandbox env, executors | Custom | Voice-shaped; no DeepEval analogue. |
+
+### Surface
+
+```python
+from rehearse.eval.deepeval_adapter import (
+    to_conversational_test_case,   # (BenchmarkExample, RolloutResult) -> ConversationalTestCase
+    to_llm_test_case,              # ... -> LLMTestCase (single-turn collapse)
+    MetricToScorer,                # DeepEval BaseMetric -> rehearse Scorer
+    ScorerToMetric,                # rehearse Scorer -> DeepEval BaseConversationalMetric
+)
+```
+
+### Pattern A — DeepEval metric flowing through the rehearse runner
+
+Use this when you want a DeepEval-authored metric (`G-Eval`, faithfulness,
+etc.) to run alongside our custom scorers in `rehearse-eval run`:
+
+```python
+from deepeval.metrics import GEval
+from deepeval.test_case import TurnParams
+from rehearse.eval.deepeval_adapter import MetricToScorer
+
+content_metric = GEval(
+    name="ContentQuality",
+    criteria=(
+        "Evaluate whether the coach's responses moved the user toward "
+        "clearer, calmer, actionable phrasing for their conversation."
+    ),
+    evaluation_params=[TurnParams.CONTENT, TurnParams.ROLE],
+    threshold=0.5,
+)
+
+content_scorer = MetricToScorer(content_metric, dimension="content_quality")
+
+# Drop content_scorer into your eval's `scoring_plan()` like any other Scorer.
+```
+
+### Pattern B — rehearse Scorer running inside DeepEval's `evaluate()`
+
+Use this when you want to run our custom scorers as part of a DeepEval
+test run (pytest-style assertions, comparison reports, etc.):
+
+```python
+from deepeval import evaluate
+from deepeval.evaluate.configs import AsyncConfig
+from rehearse.eval.deepeval_adapter import ScorerToMetric, to_conversational_test_case
+from rehearse.eval.scorers.deterministic import MMERecognitionScorer
+
+test_case = to_conversational_test_case(example, rollout)
+
+metric = ScorerToMetric(MMERecognitionScorer(), threshold=0.5)
+metric.bind_rollout(example, rollout)   # required for scorers that need
+                                        # rollout artifacts (audio, timing)
+
+result = evaluate(
+    test_cases=[test_case],
+    metrics=[metric],
+    async_config=AsyncConfig(run_async=False),  # adapter manages concurrency
+)
+score = result.test_results[0].metrics_data[0].score
+```
+
+`ScorerToMetric` extends `BaseConversationalMetric` (coaching is multi-turn).
+`bind_rollout` stores the originating `(example, rollout)` pair on the
+scorer object so it survives DeepEval's metric cloning during evaluation.
+
+### Live G-Eval smoke test
+
+The adapter test suite includes a live-API smoke that hits a real LLM
+through `G-Eval`:
+
+```bash
+OPENAI_API_KEY=sk-... uv run pytest tests/eval/deepeval/ -m live_api
+```
+
+Without `OPENAI_API_KEY`, the live test is skipped and the rest of the
+suite still passes.

@@ -1,7 +1,8 @@
 # rehearse — Spec: Multimodal Rubric + Runtime BoN + RLAIF Pipeline
 
 **Status**: draft (design-facing) — revised 2026-05-06 to add runtime
-Best-of-N candidate generation as the primary preference-data source.
+Best-of-N candidate generation, plus voice-quality measurement
+(expressiveness, naturalness, stability).
 **Owner**: jz
 **Depends on**:
 - `docs/specs/v2026-04-27-eval-harness.md`
@@ -36,6 +37,12 @@ dataset suitable for DPO-style training:
 6. **A `data_card.json` per eval run** records modality coverage, calibration
    status per dimension, and consent — so any training run is traceable to a
    known-quality slice of data.
+7. **Voice-quality measurement** surfaces failure modes the per-trajectory
+   judges can't see: a deterministic `NaturalnessScorer` over per-turn timing
+   data (interruption rate, silence-after-affect, speech rate), sharpened
+   `delivery_quality` anchors that interrogate expressiveness directly, and a
+   `StabilityScorer` meta-metric over repeated rollouts of the same scenario
+   seed (catches policy non-determinism that a single-rollout judge misses).
 
 Doing nothing means RL training on a text-only rubric and producing a coach
 that says the right empathetic phrases in any tone of voice. This spec
@@ -75,14 +82,19 @@ source.
 - Offline audio re-scoring of stored candidates (§5.4).
 - Calibration protocol, shrunk for v0 (§8).
 - Multi-process / async parallelism plan (§4.1).
+- Deterministic `NaturalnessScorer` over per-turn timing data (§5.6).
+- `StabilityScorer` meta-metric over repeated rollouts (§5.7).
+- `RunConfig.repetitions` and a `MetaScorer` protocol category (§6.5).
+- Sharpened expressiveness anchors on `delivery_quality` (Appendix A).
 - Test plan (§9).
 
 ### Out of Scope
 
 - Choice of RL training algorithm. The spec produces DPO-shaped data; PPO/RM
   workflows can backfill from preferences later.
-- `turn_dynamics` as a first-class dimension. Pacing failures partially leak
-  into `delivery_quality`; revisit if signal is missing.
+- A judge-scored `turn_dynamics` dimension. Naturalness is *deterministic
+  only* (§5.6); a contextual judge over naturalness signals (e.g. "was 4s
+  of silence right *here*?") may follow but is not in scope.
 - Per-segment (sub-turn) rewards. Trajectory- and turn-level only.
 - Production-replay environment as a *training data* source. Replay is for
   re-scoring trajectories on new rubrics (eval), not for generating
@@ -91,19 +103,74 @@ source.
 
 ## 3. Rubric
 
-Three dimensions. Each independently observable, scored 0.0–1.0, calibrated
-separately.
+The rubric has three *shapes* of measurement, each with different cost and
+calibration profiles. Treat them as separate signals, not as one collapsed
+score.
+
+### 3.1 Per-trajectory judge dimensions (three)
+
+Each independently observable, scored 0.0–1.0 by an offline judge, calibrated
+separately against humans.
 
 | Dimension | Modality | Question | Default weight |
 |---|---|---|---|
 | `affect_perception` | audio in (user) + text | Did the coach correctly read the user's state? | 0.35 |
-| `delivery_quality` | audio in + audio out | Did the coach's delivery (prosody, pacing, warmth) match the moment? | 0.30 |
+| `delivery_quality` | audio in + audio out | Did the coach's delivery match the moment? Includes prosodic *attunement* (matches user) and *expressiveness* (range/animation). | 0.30 |
 | `content_quality` | text | Was what the coach said useful, safe, trajectory-positive? | 0.35 |
-
-Anchors and degradation rules: see Appendix A.
 
 `weighted_reward = Σ w_i * score_i`. Weights live on the eval payload
 (`rubric_weights`) and override defaults; matches existing 04-29 mechanism.
+
+Expressiveness is folded into `delivery_quality` rather than split out.
+Calibration may force a split later — if the judge cannot reliably
+distinguish "tonal match to user" from "expressive range" — but absent that
+evidence, one dimension keeps the calibration burden down.
+
+### 3.2 Naturalness sub-metrics (deterministic)
+
+Naturalness is computed directly from `timing.jsonl` — **no judge, no
+calibration ρ.** Cheap, reproducible, banded against pinned thresholds.
+Three sub-metrics, each emitted as its own `RubricScore`:
+
+| Sub-metric | Source | Bands |
+|---|---|---|
+| `naturalness.interruption_rate` | timing | events / user turn — 0.0 ideal, ≤0.2 acceptable, >0.5 pathological |
+| `naturalness.silence_after_affect` | timing + affect flags | seconds after high-affect turn — 1.5–4.0s ideal, <1.0s rushed, >6.0s dead air |
+| `naturalness.speech_rate_band` | timing | words/minute — 130–170 paced, >200 rushed, <100 slow |
+
+Thresholds are pinned and versioned. They do not enter the
+`weighted_reward` directly; they are reported separately on the dashboard
+and feed an optional naturalness gate in the data card.
+
+### 3.3 Stability (meta-metric)
+
+Stability is **not** a property of a single trajectory. It is the *variance*
+of per-trajectory dimension scores when the same scenario seed is rolled out
+M times. A policy that scores 0.9 once and 0.3 the next time on the same
+input is unusable in production, regardless of the mean.
+
+```
+seed S ──┬─► rollout 1 ──► judges ──► scores_1[dim]
+         ├─► rollout 2 ──► judges ──► scores_2[dim]
+         ├─► ...
+         └─► rollout M ──► judges ──► scores_M[dim]
+
+stability(dim) = 1 - normalized_stddev(scores_1[dim], ..., scores_M[dim])
+```
+
+Properties:
+
+- **Per-dimension** — you can be stable on `content_quality` and unstable
+  on `delivery_quality`; report each separately.
+- **Temperature-sensitive** — measured stability depends on sampling
+  temperature. Always report the temperature it was measured at.
+- **Cost-sensitive** — M× rollouts means M× judge cost. Stability runs
+  *nightly on a subset*, not on every PR.
+
+Stability scores are emitted as `RubricScore` rows with `dimension`
+prefixed `stability.<dim>` and `modality="meta"`.
+
+Anchors and degradation rules for §3.1 and §3.2: see Appendix A.
 
 ## 4. Runtime Best-of-N
 
@@ -224,11 +291,60 @@ This is the move that lets a text-only runtime selector still produce
 audio-aware training data. Latency cost is offline; user experience is
 unaffected.
 
-### 5.5 `AggregateScorer`
+### 5.5 `NaturalnessScorer` (deterministic)
 
-Pure function: per-dimension scores → `weighted_reward`. Emits
-`judge.json` per rollout with provenance (judge prompt versions, model IDs,
-confidences).
+Reads `timing.jsonl` from `rollout.artifacts_dir`; emits one `RubricScore`
+per sub-metric (§3.2). No LLM call, no calibration ρ — but threshold values
+are pinned and versioned. Works in degraded form when timing is missing
+(emits a `timing_missing` flag rather than failing).
+
+```python
+class NaturalnessScorer:
+    name = "naturalness"
+    thresholds_version = "v1"
+    async def score(example, rollout, run_id) -> list[RubricScore]:
+        timing = load_jsonl(rollout.artifacts_dir / "timing.jsonl")
+        return [
+            _interruption_rate(timing),
+            _silence_after_affect(timing, rollout),
+            _speech_rate_band(timing),
+        ]
+```
+
+The rollout must produce `timing.jsonl` (per §6 of this spec). That is the
+load-bearing instrumentation work; the scorer itself is arithmetic. High-
+affect turn detection for `silence_after_affect` is a side product of
+`AffectPerceptionJudgeScorer` — it flags the turns; this scorer reads the
+flags.
+
+### 5.6 `StabilityScorer` (meta)
+
+A *meta-scorer*: operates on a list of `RolloutResult`s sharing an
+`example_id`, after the per-trajectory scorers have run. Emits one
+`RubricScore` per dimension with `dimension="stability.<dim>"`.
+
+```python
+class StabilityScorer:
+    name = "stability"
+    async def score_meta(
+        example: BenchmarkExample,
+        rollouts: list[RolloutResult],
+        per_rollout_scores: list[list[RubricScore]],
+        run_id: str,
+    ) -> list[RubricScore]: ...
+```
+
+Run only when `RunConfig.repetitions > 1` (see §6.5). On nightly stability
+runs the harness sets `repetitions=5`. Stability scores live alongside the
+mean per-dimension scores in `summary.md`.
+
+### 5.7 `AggregateScorer`
+
+Pure function: per-dimension scores → `weighted_reward`. Emits `judge.json`
+per rollout with provenance (judge prompt versions, model IDs, confidences,
+naturalness thresholds version). Stability scores are *not* aggregated into
+`weighted_reward` — they are reported separately because they describe the
+policy, not a single trajectory.
 
 ## 6. Schema
 
@@ -238,7 +354,7 @@ confidences).
 class RubricScore(BaseModel):
     # existing fields unchanged
     ...
-    modality: Literal["text", "audio", "audio+text", "aggregate"] = "text"
+    modality: Literal["text", "audio", "audio+text", "timing", "meta", "aggregate"] = "text"
     confidence: float | None = None
     judge_prompt_version: str | None = None
     flags: list[str] = []   # e.g. ["audio_missing", "uncalibrated"]
@@ -318,6 +434,50 @@ Per eval run, summarizes the slice safe to train on:
   "counts": {"in": 12450, "out": 9120}
 }
 ```
+
+### 6.5 `RunConfig.repetitions` and `MetaScorer` protocol
+
+Adds two pieces to the existing eval harness:
+
+```python
+class RunConfig:
+    ...
+    repetitions: int = 1   # rollouts per example; >1 enables stability scoring
+
+@runtime_checkable
+class MetaScorer(Protocol):
+    name: str
+    async def score_meta(
+        self,
+        example: BenchmarkExample,
+        rollouts: list[RolloutResult],
+        per_rollout_scores: list[list[RubricScore]],
+        run_id: str,
+    ) -> list[RubricScore]: ...
+```
+
+The runner schedules `repetitions` rollouts per example with distinct
+`rng_seed` values, runs the per-trajectory scorers as today, and then runs
+any `MetaScorer` instances over the grouped results. With `repetitions=1`,
+meta-scorers receive a single-element list and either no-op or emit
+`stability_unmeasurable` flags. The protocol change is additive — existing
+scorers and existing `Eval.scoring_plan()` outputs are unaffected.
+
+### 6.6 Rollout artifact: `timing.jsonl`
+
+Required for `NaturalnessScorer`. One JSON object per turn boundary event:
+
+```json
+{"turn_index": 4, "role": "coach", "event": "audio_start",
+ "t_ms": 18420, "duration_ms": null}
+{"turn_index": 4, "role": "coach", "event": "audio_end",
+ "t_ms": 21105, "duration_ms": 2685}
+```
+
+Both runtime and sandbox rollouts must emit it. Runtime sources timestamps
+from the live audio bus; sandbox sources them from TTS metadata + simulated
+user-turn pacing. When `timing.jsonl` is absent, `NaturalnessScorer` emits
+`timing_missing` and skips its sub-metrics.
 
 ## 7. Conversion: BoN → Preferences
 
@@ -475,7 +635,44 @@ one or more outcomes from §0.
 - `test_e2e_preference_pairs_are_traceable` — every pair traces back to
   a `TurnCandidateSet` ID, and that ID exists.
 
-### 9.10 Backwards Compatibility
+### 9.10 Naturalness (verifies §0.7)
+
+- `test_naturalness_scorer_computes_interruption_rate` — fixture
+  `timing.jsonl` with a known coach-overlap event; assert the computed rate
+  matches.
+- `test_naturalness_scorer_silence_after_affect` — fixture pairing a
+  high-affect user turn (flagged) with a 3.2s coach pause; assert the band
+  resolves to "ideal".
+- `test_naturalness_scorer_speech_rate_band` — coach turn at 215 wpm
+  resolves to `rushed`.
+- `test_naturalness_scorer_handles_missing_timing` — no `timing.jsonl`;
+  scorer emits zero `RubricScore`s and a `timing_missing` flag, does not
+  raise.
+- `test_naturalness_thresholds_versioned` — `RubricScore` carries
+  `thresholds_version` for traceability across threshold changes.
+
+### 9.11 Repetitions Runner (verifies §0.7)
+
+- `test_runner_supports_repetitions` — `repetitions=3` on one example
+  produces three `RolloutResult`s with distinct `rng_seed`s.
+- `test_runner_groups_results_by_example_id` — meta-scorers receive a list
+  keyed correctly when `repetitions > 1`.
+- `test_runner_meta_scorer_skipped_when_repetitions_one` — `repetitions=1`
+  produces results without stability rows.
+
+### 9.12 Stability (verifies §0.7)
+
+- `test_stability_scorer_aggregates_across_runs` — three fixture rollouts
+  with known per-dimension variance produce expected stability scores.
+- `test_stability_emitted_per_dimension` — separate `stability.<dim>` row
+  per `delivery_quality`, `affect_perception`, `content_quality`.
+- `test_stability_records_temperature` — sampling temperature is recorded
+  on each stability `RubricScore`; mixing temperatures across rollouts
+  emits `mixed_temperature` flag.
+- `test_stability_unmeasurable_with_one_rollout` — `repetitions=1` produces
+  `stability_unmeasurable` flag on each dimension's stability row.
+
+### 9.13 Backwards Compatibility
 
 - `test_existing_mme_sandbox_rollout_still_runs` — the v0 eval path with
   BoN disabled produces identical results.jsonl as before this spec.
@@ -484,18 +681,29 @@ one or more outcomes from §0.
 
 ## 10. Sequencing
 
-Five phases. Each gates on the previous.
+Seven phases. Each gates on the previous unless noted. Phases 1, 2, and 4
+are independent and can run in parallel.
 
 1. **Schema** (§6). Add `RubricScore` extensions, `TurnCandidateSet`,
-   `PreferencePair`, `data_card`. Backwards-compatible. Tests 9.1, 9.10.
-2. **Per-dimension offline scorers** (§5.1–5.3, 5.5). Decompose existing
-   `TrajectoryJudgeScorer`. No runtime change. Tests 9.6, 9.10.
+   `PreferencePair`, `data_card`, `MetaScorer`, `RunConfig.repetitions`.
+   Backwards-compatible. Tests 9.1, 9.13.
+2. **Per-dimension offline scorers + sharpened delivery anchors**
+   (§5.1–5.3, 5.7). Decompose existing `TrajectoryJudgeScorer`; bump
+   `delivery_quality` prompt for expressiveness (Appendix A). No runtime
+   change. Tests 9.6, 9.13.
 3. **Runtime BoN with parallel generation** (§4). Selector, candidate
    generator, persistence. Default off; opt-in via flag. Tests 9.2–9.5.
-4. **Calibration harness + 25-trajectory set** (§8). Tests 9.8.
-5. **Offline audio re-scoring** (§5.4) + **preference pair generation**
+4. **Naturalness + timing instrumentation** (§5.5, §6.6). Runtime and
+   sandbox rollouts emit `timing.jsonl`; `NaturalnessScorer` runs on every
+   eval. Cheap, deterministic, no calibration burden. Tests 9.10, 9.13.
+   Independent of phase 3 — can land in parallel.
+5. **Calibration harness + 25-trajectory set** (§8). Voice-recorded
+   ratings via the rating UI, parsed to scalars. Tests 9.8.
+6. **Offline audio re-scoring** (§5.4) + **preference pair generation**
    (§7). Tests 9.7, 9.9. Gated on at least `delivery_quality` passing the
    calibration floor.
+7. **Stability via repetitions** (§5.6, §6.5). Runs nightly only on a
+   10-trajectory subset, `repetitions=5`. Not PR-gating. Tests 9.11, 9.12.
 
 ## 11. Open Questions
 
@@ -511,6 +719,17 @@ Five phases. Each gates on the previous.
    between selector and offline judges as a quality KPI.
 5. **TTS for non-chosen candidates** — cheaper to batch overnight or
    stream as calls end? Affects re-scoring latency, not user latency.
+6. **Naturalness thresholds.** The bands in §3.2 are defensible defaults,
+   not validated. Pin v1, then revisit after a week of production data —
+   in particular `silence_after_affect`, where ideal duration probably
+   varies by affect type (grief vs frustration vs joy).
+7. **Stability sample size.** M=5 nightly runs is a guess. M=3 is cheaper
+   and may suffice for catching gross instability; M=10 is the rigorous
+   answer. Tune empirically.
+8. **Should expressiveness split out from `delivery_quality`?** The spec
+   keeps it folded in for v0. If calibration shows judges can't reliably
+   distinguish "tonal match" from "expressive range," split into
+   `prosodic_attunement` and `prosodic_expressiveness` and recalibrate.
 
 ## 12. Acceptance Criteria
 
@@ -532,6 +751,16 @@ This spec is satisfied when:
    `data_card.json` reflects per-dimension calibration status per test 9.8.
 8. End-to-end sandbox run with BoN on emits valid `TurnCandidateSet` +
    `PreferencePair` + `data_card` artifacts (test 9.9).
+9. Runtime and sandbox rollouts emit `timing.jsonl`; `NaturalnessScorer`
+   runs on every eval and emits `interruption_rate`,
+   `silence_after_affect`, and `speech_rate_band` `RubricScore` rows with
+   `thresholds_version` populated (tests 9.10).
+10. `RunConfig.repetitions > 1` produces grouped `RolloutResult`s and the
+    `MetaScorer` protocol delivers them to `StabilityScorer`, which emits
+    one `stability.<dim>` row per dimension per example (tests 9.11, 9.12).
+11. `delivery_quality` judge prompt has been bumped to interrogate
+    expressiveness directly per Appendix A; calibration ρ is reported on
+    the new prompt version.
 
 ## 13. Manifest Update
 
@@ -553,14 +782,32 @@ Add to `docs/specs/MANIFEST.md`:
 - 0.5 — Generic empathy; not grounded in the user's actual state.
 - 0.0 — Misreads, escalates, dismisses, or ignores affect.
 
-**`delivery_quality`**
-- 1.0 — Coach prosody (pitch range, rate, energy, pause) meets the moment;
-  pacing holds space for the user.
-- 0.5 — Neutral delivery; not jarring, not load-bearing.
-- 0.0 — Tonally wrong, rushed, talks over the user, or fills every silence.
+**`delivery_quality`** (covers attunement *and* expressiveness)
+- 1.0 — Coach prosody has expressive range that meets the moment: warmer
+  on disclosure, grounded on escalation, animated when celebrating. Pitch,
+  rate, energy, and pause all track emotional shifts. Holds space.
+- 0.5 — Audible delivery, flat range. Neutral, not jarring, not
+  load-bearing. Doesn't make things worse, doesn't help.
+- 0.0 — Monotone, tonally miscalibrated (cheery on grief, flat on joy),
+  rushed, talks over the user, or fills every silence.
 
 **`content_quality`** — inherits 04-29 §7.2 anchors for
 `coaching_trajectory_quality`.
+
+### Naturalness sub-metric thresholds (v1)
+
+Pinned. Versioned via `thresholds_version`. Banded values reported as
+0.0/0.5/1.0 against these bands.
+
+| Sub-metric | Ideal (1.0) | Acceptable (0.5) | Pathological (0.0) |
+|---|---|---|---|
+| `interruption_rate` | 0.0 events / user turn | ≤ 0.2 | > 0.5 |
+| `silence_after_affect` | 1.5 – 4.0 s | 1.0 – 1.5 s or 4.0 – 6.0 s | < 1.0 s or > 6.0 s |
+| `speech_rate_band` | 130 – 170 wpm | 100 – 130 or 170 – 200 wpm | < 100 or > 200 wpm |
+
+Notes: `interruption` requires ≥ 250 ms of overlap (excludes brief
+backchannels like "mhm"). `silence_after_affect` is measured only on user
+turns flagged high-affect by `AffectPerceptionJudgeScorer`.
 
 ### Degradation
 
@@ -568,4 +815,6 @@ Add to `docs/specs/MANIFEST.md`:
 |---|---|
 | Coach audio | `delivery_quality` not emitted; weights renormalize; `partial_modality` flag. |
 | User audio | `affect_perception` falls back to text-only; `audio_missing` flag. |
-| Both | Trajectory excluded from training data by default (`min_modalities` filter); still surfaced on dashboards. |
+| `timing.jsonl` | `NaturalnessScorer` emits zero rows + `timing_missing` flag; trajectory still scored on §3.1 dimensions. |
+| Both audio + timing | Trajectory excluded from training data by default (`min_modalities` filter); still surfaced on dashboards. |
+| `repetitions == 1` | Stability not computable; `StabilityScorer` emits one row per dimension with `score=null` and `stability_unmeasurable` flag. |
