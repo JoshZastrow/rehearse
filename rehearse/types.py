@@ -293,7 +293,27 @@ class ExampleScenario(Strict):
 
 
 class RubricScore(Strict):
-    """Store one scored rubric dimension for one run/example pair."""
+    """Store one scored rubric dimension for one run/example pair.
+
+    Spec 1 (v2026-05-06 roadmap) added optional fields. All new fields
+    have backwards-compatible defaults so artifacts written before this
+    change still deserialize.
+
+    Fields:
+      - `modality` — what kind of signal produced the score. `"text"` for
+        transcript-only judges, `"audio"` / `"audio+text"` for audio
+        judges, `"timing"` for deterministic naturalness scorers, `"meta"`
+        for cross-rollout meta-scorers (e.g. stability), `"aggregate"` for
+        combined scores like `weighted_reward`.
+      - `confidence` — judge-reported confidence ∈ [0, 1]. Optional.
+      - `judge_prompt_version` — version string for the prompt or
+        deterministic-threshold set that produced this score. Required for
+        scores that enter training data; old scores stay valid for
+        historical eval runs but cannot mix with new prompt versions.
+      - `flags` — surfaces degradations (`"audio_missing"`,
+        `"timing_missing"`, `"uncalibrated"`, `"partial_modality"`, etc.)
+        Used by the data-card filter to exclude scores from training data.
+    """
 
     run_id: str
     example_id: str
@@ -302,6 +322,12 @@ class RubricScore(Strict):
     value: float
     scorer: Literal["deterministic", "llm_judge", "human"]
     rationale: str | None = None
+    modality: Literal[
+        "text", "audio", "audio+text", "timing", "meta", "aggregate"
+    ] = "text"
+    confidence: float | None = None
+    judge_prompt_version: str | None = None
+    flags: list[str] = Field(default_factory=list)
 
 
 class EvalRun(Strict):

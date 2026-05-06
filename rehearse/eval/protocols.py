@@ -120,6 +120,28 @@ class Scorer(Protocol):
 
 
 @runtime_checkable
+class MetaScorer(Protocol):
+    """A scorer that operates on a *list* of rollouts sharing an example_id.
+
+    Distinct from `Scorer`, which scores one rollout at a time. Meta-scorers
+    run after per-trajectory scoring and are the substrate for cross-rollout
+    metrics like stability (Spec 8 of the v2026-05-06 roadmap). Only used
+    when `RunConfig.repetitions > 1`; with a single rollout per example, a
+    meta-scorer either no-ops or emits a `stability_unmeasurable` flag.
+    """
+
+    name: str
+
+    async def score_meta(
+        self,
+        example: BenchmarkExample,
+        rollouts: list[RolloutResult],
+        per_rollout_scores: list[list[RubricScore]],
+        run_id: str,
+    ) -> list[RubricScore]: ...
+
+
+@runtime_checkable
 class Executor(Protocol):
     async def submit(
         self,

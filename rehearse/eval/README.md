@@ -155,6 +155,54 @@ uv run pytest tests/eval/
 Tests cover protocol conformance, runner end-to-end, subprocess isolation, the
 MME-Emotion dataset/eval shape, and the deterministic recognition scorer.
 
+## Per-Dimension Scorers (Spec 1)
+
+Spec 1 of the [eval roadmap](../../docs/specs/v2026-05-06-eval-system-roadmap.md)
+introduced two new scorers and four `RubricScore` schema fields. The audio
+companions (`AffectPerceptionJudgeScorer`, `DeliveryJudgeScorer`) arrive
+with Spec 2.
+
+| Scorer | Dimension | Modality | Source | Notes |
+|---|---|---|---|---|
+| `ContentJudgeScorer` | `content_quality` | `text` | DeepEval `G-Eval` via `MetricToScorer` | Default criteria narrowed to *what was said* — content, safety, trajectory direction. Stamps `judge_prompt_version` on every score. |
+| `AggregateScorer` | `weighted_reward` | `aggregate` | Pure function over per-dim scores | Per-example `rubric_weights` override defaults; missing dimensions renormalize and tag `partial_modality`. Writes `judge.json` provenance to `artifacts_dir` when set. |
+
+`RubricScore` gained four optional fields, all backwards-compatible with
+artifacts written before Spec 1:
+
+```python
+class RubricScore:
+    ...                                                       # legacy fields unchanged
+    modality: Literal["text", "audio", "audio+text", "timing", "meta", "aggregate"] = "text"
+    confidence: float | None = None
+    judge_prompt_version: str | None = None
+    flags: list[str] = []   # e.g. ["audio_missing", "uncalibrated", "partial_modality"]
+```
+
+A new `MetaScorer` protocol sits alongside `Scorer` for cross-rollout
+metrics (stability lands in Spec 8); no implementations yet.
+
+`TrajectoryJudgeScorer` is still in place during the transition. It will
+be retired when Spec 2's audio judges replace its `emotion_responsiveness`
+output; until then, `mme-sandbox-rollout` continues to use it.
+
+### Composing the new scorers
+
+```python
+from rehearse.eval.scorers import AggregateScorer, ContentJudgeScorer
+
+content = ContentJudgeScorer(prompt_version="content-quality-v1")
+aggregator = AggregateScorer(
+    weights={"content_quality": 0.35, "affect_perception": 0.35, "delivery_quality": 0.30},
+    version="aggregate-v1",
+)
+
+# In an Eval.scoring_plan(): emit per-dim scorers via .score(), then call
+# aggregator.aggregate(example, rollout, all_dim_scores, run_id) once the
+# per-dim rows are collected. The runner will wire this in once all four
+# scorers (content + affect + delivery + naturalness) coexist.
+```
+
 ## DeepEval Adapter Layer
 
 `rehearse/eval/deepeval_adapter/` bridges this harness to
