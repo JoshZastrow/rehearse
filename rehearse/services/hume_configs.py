@@ -154,9 +154,14 @@ PERSONAS: dict[str, HumePersonaConfig] = {
         ),
         evi_version="4-mini",
         voice=HumeVoice(name="Inspiring Woman", provider="HUME_AI"),
+        # Route the per-turn LLM through our phase-aware /chat/completions
+        # webhook so coach / character / feedback_coach prompts swap on
+        # phase transitions. The CLM URL is set workspace-wide in Hume; the
+        # bearer secret is HUME_CLM_SECRET. See
+        # docs/specs/v2026-05-06-persona-config-swap.md.
         language_model=HumeLanguageModel(
-            provider="ANTHROPIC",
-            model="claude-sonnet-4-20250514",
+            provider="CUSTOM_LANGUAGE_MODEL",
+            model=None,
         ),
         prompt_text=_DEFAULT_PROMPT,
         on_new_chat=HumeEventMessage(enabled=True, text="Hey there, what's on the mind?"),
@@ -183,8 +188,8 @@ PERSONAS: dict[str, HumePersonaConfig] = {
         evi_version="4-mini",
         voice=HumeVoice(name="Inspiring Woman", provider="HUME_AI"),
         language_model=HumeLanguageModel(
-            provider="ANTHROPIC",
-            model="claude-sonnet-4-20250514",
+            provider="CUSTOM_LANGUAGE_MODEL",
+            model=None,
         ),
         prompt_text=_RELATIONSHIP_PROMPT,
         on_new_chat=HumeEventMessage(

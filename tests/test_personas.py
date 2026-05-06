@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from rehearse.personas import build_intake_record, character_system_prompt, compile_character
+from rehearse.personas import (
+    build_intake_record,
+    character_system_prompt,
+    compile_character,
+    coach_system_prompt,
+    feedback_coach_system_prompt,
+)
 
 _NOW = datetime(2026, 4, 28, 12, 0, tzinfo=UTC)
 
@@ -44,3 +50,13 @@ def test_compile_character_builds_persona_prompt_from_intake() -> None:
     assert persona.hot_buttons
     assert persona.likely_reactions
     assert character_system_prompt(persona) == persona.personality_prompt
+
+
+def test_feedback_coach_prompt_is_distinct_from_coach_prompt() -> None:
+    """The feedback debrief prompt must differ from the elicitation prompt."""
+    coach = coach_system_prompt()
+    feedback = feedback_coach_system_prompt()
+    assert coach != feedback
+    lowered = feedback.lower()
+    assert "drop any character" in lowered
+    assert "cit" in lowered  # "citing" / "cite their actual words"

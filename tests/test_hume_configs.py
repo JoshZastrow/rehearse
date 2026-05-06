@@ -24,10 +24,22 @@ def test_default_persona_is_registered():
     assert persona.display_name == "Rehearse Coach (default)"
     assert persona.voice.name == "Inspiring Woman"
     assert persona.voice.provider == "HUME_AI"
-    assert persona.language_model.provider == "ANTHROPIC"
-    assert persona.language_model.model == "claude-sonnet-4-20250514"
+    assert persona.language_model.provider == "CUSTOM_LANGUAGE_MODEL"
+    assert persona.language_model.model is None
     assert persona.timeouts.max_duration_secs == 300
     assert "web_search" in persona.builtin_tools
+
+
+def test_all_personas_route_through_custom_language_model() -> None:
+    """Every shipped persona must route Hume's per-turn LLM through our CLM
+    webhook — otherwise Hume calls Anthropic directly with one static prompt
+    and our phase-aware coach/character/feedback_coach swap never runs.
+    """
+    for key, persona in PERSONAS.items():
+        assert persona.language_model.provider == "CUSTOM_LANGUAGE_MODEL", (
+            f"persona {key!r} has provider={persona.language_model.provider!r}; "
+            "must be CUSTOM_LANGUAGE_MODEL for per-phase prompt swap"
+        )
 
 
 def test_persona_config_round_trip():

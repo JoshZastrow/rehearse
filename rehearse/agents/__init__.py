@@ -7,10 +7,12 @@ from rehearse.agents.clm import (
     build_clm_responder,
     mount_clm_routes,
 )
+from rehearse.agents.persona_swap import PersonaSwapCoordinator
 
 __all__ = [
     "AnthropicCLMResponder",
     "CLMResponder",
+    "PersonaSwapCoordinator",
     "ScriptedCLMResponder",
     "build_clm_responder",
     "mount_clm_routes",

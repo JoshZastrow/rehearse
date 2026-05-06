@@ -20,7 +20,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from rehearse.agents.timecard import build_time_card, render_time_card
 from rehearse.config import RuntimeConfig
-from rehearse.personas import character_system_prompt, coach_system_prompt
+from rehearse.personas import (
+    character_system_prompt,
+    coach_system_prompt,
+    feedback_coach_system_prompt,
+)
 from rehearse.session import utcnow
 from rehearse.storage import LocalFilesystemStore
 from rehearse.types import Phase, Session
@@ -389,6 +393,8 @@ def _system_prompt_for_role(role: str, session: Session | None) -> str:
         if session and session.persona is not None:
             return character_system_prompt(session.persona)
         return character_system_prompt("Be the other person in the conversation.")
+    if role == "feedback_coach":
+        return feedback_coach_system_prompt()
     return coach_system_prompt()
 
 
@@ -410,7 +416,7 @@ async def _resolve_role(
     store: LocalFilesystemStore,
 ) -> str:
     """Return an explicit role override or infer one from the live session phase."""
-    if role in {"coach", "character"}:
+    if role in {"coach", "character", "feedback_coach"}:
         return role
     session = await _load_session(session_id, store)
     if session is None:
@@ -418,6 +424,8 @@ async def _resolve_role(
     phase = _current_phase(session)
     if phase == Phase.PRACTICE:
         return "character"
+    if phase == Phase.FEEDBACK:
+        return "feedback_coach"
     return "coach"
 
 

@@ -192,9 +192,11 @@ def test_chat_completions_infers_character_role_from_practice_phase(tmp_path: Pa
     assert responder.calls[0]["role"] == "character"
 
 
-def test_chat_completions_defaults_to_coach_when_phase_not_practice(tmp_path: Path) -> None:
-    """The CLM route should default to coach outside the practice phase."""
-    responder = FakeResponder(["Coach reply."])
+def test_chat_completions_infers_feedback_coach_role_from_feedback_phase(
+    tmp_path: Path,
+) -> None:
+    """The CLM route should infer `feedback_coach` when the live session is in feedback."""
+    responder = FakeResponder(["Feedback reply."])
     client = _client(tmp_path, responder)
     session = Session(
         id="session-feedback",
@@ -214,6 +216,35 @@ def test_chat_completions_defaults_to_coach_when_phase_not_practice(tmp_path: Pa
 
     resp = client.post(
         "/hume/clm/session-feedback",
+        json={"messages": [], "stream": False},
+    )
+
+    assert resp.status_code == 200
+    assert responder.calls[0]["role"] == "feedback_coach"
+
+
+def test_chat_completions_defaults_to_coach_in_intake_phase(tmp_path: Path) -> None:
+    """An intake-phase session should resolve to the coach role."""
+    responder = FakeResponder(["Coach reply."])
+    client = _client(tmp_path, responder)
+    session = Session(
+        id="session-intake",
+        created_at=_NOW,
+        consent=ConsentState.PENDING,
+        phase_timings=[
+            PhaseTiming(
+                phase=Phase.INTAKE,
+                started_at=_NOW,
+                budget_seconds=60,
+            )
+        ],
+    )
+    session_dir = tmp_path / session.id
+    session_dir.mkdir()
+    (session_dir / "session.json").write_text(session.model_dump_json(indent=2))
+
+    resp = client.post(
+        "/hume/clm/session-intake",
         json={"messages": [], "stream": False},
     )
 
@@ -415,3 +446,34 @@ async def test_anthropic_responder_sends_two_system_blocks(tmp_path):
     assert "intake" in system[1]["text"].lower()
     assert "words" in system[1]["text"].lower()
     assert system[1].get("cache_control") is None
+
+
+@pytest.mark.asyncio
+async def test_anthropic_responder_uses_feedback_prompt_for_feedback_coach_role(tmp_path):
+    started = datetime(2026, 5, 6, 12, 0, tzinfo=UTC)
+    session = Session(
+        id="sess_fb",
+        created_at=started,
+        consent=ConsentState.GRANTED,
+        phase_timings=[
+            PhaseTiming(phase=Phase.FEEDBACK, started_at=started, budget_seconds=60),
+        ],
+    )
+    store = LocalFilesystemStore(root=tmp_path, public_base_url="https://example.test")
+    await store.write("sess_fb", "session.json", session.model_dump_json())
+
+    responder = AnthropicCLMResponder(api_key="test", model="claude-test", store=store)
+    fake = _CapturingClient()
+    responder._client = fake  # type: ignore[attr-defined]
+
+    request = CLMChatRequest(messages=[CLMMessage(role="user", content="that was hard")])
+    async for _ in responder.stream_reply(
+        session_id="sess_fb", role="feedback_coach", request=request
+    ):
+        pass
+
+    kwargs = fake.messages.last_kwargs
+    assert kwargs is not None
+    static_prompt = kwargs["system"][0]["text"]
+    assert "debriefing" in static_prompt.lower()
+    assert "drop any character" in static_prompt.lower()

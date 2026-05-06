@@ -25,6 +25,7 @@ from fastapi.responses import PlainTextResponse, Response
 from twilio.request_validator import RequestValidator
 from twilio.rest import Client as TwilioClient
 
+from rehearse.agents.persona_swap import PersonaSwapCoordinator
 from rehearse.audio.twilio_stream import TwilioStream
 from rehearse.bus import FrameBus
 from rehearse.config import RuntimeConfig
@@ -256,10 +257,18 @@ def mount_twilio_routes(
                     ),
                 )
                 await phase_processor.bootstrap()
+                persona_swap = PersonaSwapCoordinator(
+                    session_id,
+                    orchestrator.store,
+                    speak=hume.say,
+                )
                 consent_task = asyncio.create_task(consent_gate.run(bus.subscribe()))
                 outcome_task = asyncio.create_task(outcome_probe.run(bus.subscribe()))
                 phase_task = asyncio.create_task(phase_processor.run(bus.subscribe()))
                 intake_task = asyncio.create_task(intake_processor.run(bus.subscribe()))
+                persona_swap_task = asyncio.create_task(
+                    persona_swap.run(bus.subscribe())
+                )
                 transcript_task = asyncio.create_task(
                     TranscriptWriter(
                         session_id,
@@ -311,6 +320,7 @@ def mount_twilio_routes(
                     await outcome_task
                     await phase_task
                     await intake_task
+                    await persona_swap_task
                     await transcript_task
                     await prosody_task
                     await audio_task

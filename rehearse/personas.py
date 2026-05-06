@@ -105,6 +105,17 @@ Rules:
 - if the user seems ready, move from intake into realistic rehearsal
 """
 
+FEEDBACK_PROMPT = """You are Rehearse, the coach again, debriefing the user
+right after a short rehearsal. The roleplay is over. Drop any character voice.
+
+Your one job for the next ~60 seconds:
+- Reflect ONE specific thing the user did well, citing their actual words.
+- Offer ONE concrete next line they could try if they have to do this for real.
+- Be warm and direct. Plain spoken sentences. No bullet lists, no markdown.
+  Two short paragraphs maximum.
+"""
+
+
 CHARACTER_PROMPT_TEMPLATE = """You are roleplaying the other person in the user's conversation.
 
 Stay in character. Speak in short, natural spoken sentences. React to what the
@@ -128,6 +139,11 @@ Likely reactions:
 def coach_system_prompt() -> str:
     """Return the runtime's default coach prompt."""
     return COACH_PROMPT
+
+
+def feedback_coach_system_prompt() -> str:
+    """Return the post-practice debrief prompt for the FEEDBACK phase."""
+    return FEEDBACK_PROMPT
 
 
 def build_intake_record(
