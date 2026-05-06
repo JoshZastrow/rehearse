@@ -20,11 +20,18 @@ from rehearse.types import ConsentState, Phase, PhaseTiming, Session, Speaker
 
 @dataclass(frozen=True)
 class PhaseBudgets:
-    """Store the live time budget for each phase in seconds."""
+    """Store the live time budget and minimum dwell for each phase in seconds.
+
+    `*_min_dwell_seconds` is the floor a phase must run for before a cue-driven
+    transition is allowed. Budget-driven transitions ignore the floor — they
+    fire only after the full budget has elapsed anyway.
+    """
 
     intake_seconds: int = 60
     practice_seconds: int = 180
     feedback_seconds: int = 60
+    intake_min_dwell_seconds: int = 30
+    practice_min_dwell_seconds: int = 90
 
     def for_phase(self, phase: Phase) -> int:
         """Return the configured time budget for one phase."""
@@ -33,6 +40,12 @@ class PhaseBudgets:
         if phase == Phase.FEEDBACK:
             return self.feedback_seconds
         return self.intake_seconds
+
+    def min_dwell_for(self, phase: Phase) -> int:
+        """Return the minimum dwell-time floor before a cue can leave a phase."""
+        if phase == Phase.PRACTICE:
+            return self.practice_min_dwell_seconds
+        return self.intake_min_dwell_seconds
 
 
 class PhaseProcessor:
@@ -82,8 +95,12 @@ class PhaseProcessor:
                 and frame.speaker == Speaker.USER
                 and frame.is_final
             ):
-                self._final_user_turns += 1
-                await self._maybe_advance_for_cue(frame)
+                # Don't count consent-phase turns toward intake progress.
+                # Otherwise "Yup" (consent grant) plus the user's first real
+                # answer trips the n>=2 cue before intake content lands.
+                if self._consent_getter() == ConsentState.GRANTED:
+                    self._final_user_turns += 1
+                    await self._maybe_advance_for_cue(frame)
             elif isinstance(frame, EndOfCall):
                 break
         await self._close_current_phase()
@@ -118,17 +135,28 @@ class PhaseProcessor:
         await self._transition(next_phase, reason="budget")
 
     async def _maybe_advance_for_cue(self, frame: TranscriptDelta) -> None:
-        """Advance the phase when a simple transcript cue says the user is ready."""
+        """Advance the phase when a transcript cue plus minimum dwell are met."""
+        if not self._min_dwell_elapsed():
+            return
         text = frame.text.lower()
         if self._current_phase == Phase.INTAKE:
             if self._consent_getter() != ConsentState.GRANTED:
                 return
-            if self._final_user_turns >= 2 or any(cue in text for cue in _INTAKE_READY_CUES):
+            if self._final_user_turns >= 2 and _matches_any(text, _INTAKE_READY_CUES):
                 await self._transition(Phase.PRACTICE, reason="cue")
             return
         if self._current_phase == Phase.PRACTICE:
-            if self._final_user_turns >= 5 or any(cue in text for cue in _FEEDBACK_READY_CUES):
+            if self._final_user_turns >= 5 or _matches_any(text, _FEEDBACK_READY_CUES):
                 await self._transition(Phase.FEEDBACK, reason="cue")
+
+    def _min_dwell_elapsed(self) -> bool:
+        """Return True if the active phase has run past its minimum dwell floor."""
+        if self._phase_started_at is None:
+            return False
+        floor = self._budgets.min_dwell_for(self._current_phase)
+        if floor <= 0:
+            return True
+        return self._clock() - self._phase_started_at >= timedelta(seconds=floor)
 
     async def _transition(self, to_phase: Phase, *, reason: str) -> None:
         """Move to a new phase, persist the manifest change, and emit a signal."""
@@ -201,5 +229,39 @@ def _close_open_phase(session: Session, *, ended_at: datetime) -> Session:
     return session
 
 
-_INTAKE_READY_CUES = frozenset({"let's practice", "roleplay", "start the conversation", "try it"})
-_FEEDBACK_READY_CUES = frozenset({"feedback", "debrief", "how did that go", "what should i change"})
+_INTAKE_READY_CUES: frozenset[str] = frozenset(
+    {
+        "let's practice",
+        "let's roleplay",
+        "let's try it",
+        "start the conversation",
+        "i'm ready",
+        "ready to practice",
+        "ready to roleplay",
+        "begin the scene",
+    }
+)
+
+# Phrasal cues only — bare "feedback" matches every job-feedback / performance-
+# review situation in intake content and trips a premature transition.
+_FEEDBACK_READY_CUES: frozenset[str] = frozenset(
+    {
+        "give me feedback",
+        "your feedback",
+        "some feedback",
+        "how did i do",
+        "how did that go",
+        "what should i change",
+        "what would you change",
+        "let's debrief",
+        "stop the scene",
+        "pause the scene",
+        "out of scene",
+        "step out",
+    }
+)
+
+
+def _matches_any(text: str, cues: frozenset[str]) -> bool:
+    """Return True if any cue phrase appears as a substring of the lowered text."""
+    return any(cue in text for cue in cues)
