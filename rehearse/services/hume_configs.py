@@ -14,6 +14,7 @@ Example:
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
@@ -143,3 +144,112 @@ PERSONAS: dict[str, HumePersonaConfig] = {
         builtin_tools=["web_search", "hang_up"],
     ),
 }
+
+
+class RemoteConfigSnapshot(BaseModel):
+    """Hume-side view of one config used as input to `plan_sync`.
+
+    This is the subset of fields we care about for reconciliation. Fields
+    Hume manages (`created_on`, `version`, voice `reference_tokens`, prompt
+    `id`/`version`) are deliberately excluded.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    display_name: str
+    evi_version: str
+    voice: HumeVoice
+    language_model: HumeLanguageModel
+    prompt_text: str
+    on_new_chat: HumeEventMessage | None = None
+    on_resume_chat: HumeEventMessage | None = None
+    on_max_duration_timeout: HumeEventMessage | None = None
+    on_inactivity_timeout: HumeEventMessage | None = None
+    timeouts: HumeTimeouts
+    turn_detection: HumeTurnDetection
+    interruption_min_ms: int
+    nudges_enabled: bool
+    nudges_interval_secs: int
+    builtin_tools: list[str]
+
+
+@dataclass(frozen=True)
+class Create:
+    """Action: create a new Hume config for one persona."""
+
+    persona: HumePersonaConfig
+
+
+@dataclass(frozen=True)
+class NewVersion:
+    """Action: append a new version to an existing matched Hume config."""
+
+    persona: HumePersonaConfig
+    config_id: str
+    diff: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class NoOp:
+    """Action: declared persona already matches the live config exactly."""
+
+    persona: HumePersonaConfig
+    config_id: str
+
+
+SyncAction = Create | NewVersion | NoOp
+
+
+_COMPARED_FIELDS: tuple[str, ...] = (
+    "evi_version",
+    "voice",
+    "language_model",
+    "prompt_text",
+    "on_new_chat",
+    "on_resume_chat",
+    "on_max_duration_timeout",
+    "on_inactivity_timeout",
+    "timeouts",
+    "turn_detection",
+    "interruption_min_ms",
+    "nudges_enabled",
+    "nudges_interval_secs",
+    "builtin_tools",
+)
+
+
+def plan_sync(
+    personas: dict[str, HumePersonaConfig],
+    *,
+    remote_configs: list[RemoteConfigSnapshot],
+) -> list[SyncAction]:
+    """Return the list of sync actions needed to align Hume with `personas`.
+
+    Match key: `display_name` (exact, case-sensitive). If no remote config
+    matches a persona, emit `Create`. If one matches but compared fields
+    differ, emit `NewVersion` with a list of differing field names. If
+    everything matches, emit `NoOp`.
+    """
+    by_name = {snap.display_name: snap for snap in remote_configs}
+    actions: list[SyncAction] = []
+    for persona in personas.values():
+        snap = by_name.get(persona.display_name)
+        if snap is None:
+            actions.append(Create(persona=persona))
+            continue
+        diff = _diff_fields(persona, snap)
+        if diff:
+            actions.append(NewVersion(persona=persona, config_id=snap.id, diff=diff))
+        else:
+            actions.append(NoOp(persona=persona, config_id=snap.id))
+    return actions
+
+
+def _diff_fields(persona: HumePersonaConfig, snap: RemoteConfigSnapshot) -> list[str]:
+    """Return the list of compared field names that differ between two configs."""
+    diffs: list[str] = []
+    for name in _COMPARED_FIELDS:
+        if getattr(persona, name) != getattr(snap, name):
+            diffs.append(name)
+    return diffs
