@@ -36,7 +36,13 @@ from rehearse.phases import PhaseBudgets, PhaseProcessor
 from rehearse.services.hume_evi import HumeEVIClient
 from rehearse.session import SessionOrchestrator, TriggerEvent, utcnow
 from rehearse.types import Speaker
-from rehearse.writers import AudioRecorder, ProsodyWriter, TelemetryLogger, TranscriptWriter
+from rehearse.writers import (
+    AudioRecorder,
+    ProsodyWriter,
+    TelemetryLogger,
+    TimingWriter,
+    TranscriptWriter,
+)
 
 log = structlog.get_logger(__name__)
 
@@ -267,6 +273,9 @@ def mount_twilio_routes(
                 audio_task = asyncio.create_task(
                     AudioRecorder(session_id, orchestrator.store).run(bus.subscribe())
                 )
+                timing_task = asyncio.create_task(
+                    TimingWriter(session_id, orchestrator.store).run(bus.subscribe())
+                )
                 telemetry_task = asyncio.create_task(
                     TelemetryLogger(
                         session_id,
@@ -305,6 +314,7 @@ def mount_twilio_routes(
                     await transcript_task
                     await prosody_task
                     await audio_task
+                    await timing_task
                     await telemetry_task
                     if consent_state["declined"]:
                         await orchestrator.finalize(session_id, "partial")

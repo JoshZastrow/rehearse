@@ -10,7 +10,13 @@ import pytest
 from rehearse.frames import AudioChunk, ProsodyEvent, TranscriptDelta
 from rehearse.storage import LocalFilesystemStore
 from rehearse.types import ConsentState, Phase, ProsodyScores, Session, Speaker
-from rehearse.writers import AudioRecorder, ProsodyWriter, TelemetryLogger, TranscriptWriter
+from rehearse.writers import (
+    AudioRecorder,
+    ProsodyWriter,
+    TelemetryLogger,
+    TimingWriter,
+    TranscriptWriter,
+)
 
 
 @pytest.fixture
@@ -181,6 +187,80 @@ async def test_audio_recorder_header_valid_after_each_chunk(
             assert wav_file.getnchannels() == 1
             wav_file.readframes(wav_file.getnframes())
     assert len(snapshots[0]) < len(snapshots[1])
+
+
+@pytest.mark.asyncio
+async def test_timing_writer_segments_turns_and_persists(
+    writer_store: LocalFilesystemStore,
+) -> None:
+    session_id = writer_store._test_session_id  # type: ignore[attr-defined]
+
+    # Drive the writer's internal clock from a controllable list of monotonic
+    # readings — one tick per AudioChunk seen, in seconds.
+    ticks = iter([0.0, 0.1, 0.2, 1.0, 1.5, 2.5])
+
+    writer = TimingWriter(
+        session_id,
+        writer_store,
+        silence_threshold_ms=600,
+        clock=lambda: next(ticks),
+    )
+
+    # 100ms PCM16 chunk = 16000 samples/s * 0.1s * 2 bytes/sample = 3200 bytes.
+    chunk_100ms = b"\x00\x00" * 1600
+
+    frames = [
+        # Coach turn 0: three contiguous chunks at t=0.0, 0.1, 0.2.
+        AudioChunk(session_id=session_id, speaker=Speaker.COACH, pcm16_16k=chunk_100ms, ts=0.0),
+        AudioChunk(session_id=session_id, speaker=Speaker.COACH, pcm16_16k=chunk_100ms, ts=0.0),
+        AudioChunk(session_id=session_id, speaker=Speaker.COACH, pcm16_16k=chunk_100ms, ts=0.0),
+        # User turn 0 at t=1.0 (>600ms after coach last_end at 300ms; new role anyway).
+        AudioChunk(session_id=session_id, speaker=Speaker.USER, pcm16_16k=chunk_100ms, ts=0.0),
+        # Coach turn 1 at t=1.5 (1200ms after coach turn-0 end of 300ms → new turn).
+        AudioChunk(session_id=session_id, speaker=Speaker.COACH, pcm16_16k=chunk_100ms, ts=0.0),
+        # User turn 1 at t=2.5 (1400ms after user turn-0 end of 1100ms → new turn).
+        AudioChunk(session_id=session_id, speaker=Speaker.USER, pcm16_16k=chunk_100ms, ts=0.0),
+    ]
+
+    await writer.run(_iter_frames(frames))
+
+    timing_path = writer_store.session_dir(session_id) / "timing.jsonl"
+    rows = [json.loads(line) for line in timing_path.read_text().splitlines() if line]
+
+    by_role: dict[str, list[dict]] = {"user": [], "coach": []}
+    for row in rows:
+        by_role[row["role"]].append(row)
+
+    coach = by_role["coach"]
+    assert [(r["turn_index"], r["event"]) for r in coach] == [
+        (0, "audio_start"),
+        (0, "audio_end"),
+        (1, "audio_start"),
+        (1, "audio_end"),
+    ]
+    # Coach turn 0: started at 0ms, last chunk ends at 200ms+100ms = 300ms.
+    assert coach[0]["t_ms"] == 0
+    assert coach[1]["t_ms"] == 300
+    assert coach[1]["duration_ms"] == 300
+    # Coach turn 1: started at 1500ms, ends at 1600ms.
+    assert coach[2]["t_ms"] == 1500
+    assert coach[3]["t_ms"] == 1600
+    assert coach[3]["duration_ms"] == 100
+
+    user = by_role["user"]
+    assert [(r["turn_index"], r["event"]) for r in user] == [
+        (0, "audio_start"),
+        (0, "audio_end"),
+        (1, "audio_start"),
+        (1, "audio_end"),
+    ]
+    assert user[0]["t_ms"] == 1000
+    assert user[1]["t_ms"] == 1100
+    assert user[2]["t_ms"] == 2500
+    assert user[3]["t_ms"] == 2600
+
+    manifest = json.loads((writer_store.session_dir(session_id) / "session.json").read_text())
+    assert manifest["artifact_paths"]["timing"] == "timing.jsonl"
 
 
 @pytest.mark.asyncio

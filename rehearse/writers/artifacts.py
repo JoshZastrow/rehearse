@@ -8,6 +8,8 @@ basic telemetry.
 from __future__ import annotations
 
 import asyncio
+import json
+import time
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import BinaryIO
@@ -125,6 +127,119 @@ class AudioRecorder:
                     await asyncio.to_thread(writer.write, frame.pcm16_16k)
         finally:
             await asyncio.to_thread(writer.close)
+
+
+class TimingWriter:
+    """Segment per-speaker AudioChunk frames into turns and write `timing.jsonl`.
+
+    Mini-spec 4 (second half) of the 05-06 eval-system roadmap. A turn is
+    a contiguous run of audio for one role; a gap of more than
+    `silence_threshold_ms` of wall-clock time without a chunk for that
+    role closes the turn. The next chunk opens a fresh turn with
+    `turn_index` incremented.
+
+    Output rows match the shape the `NaturalnessScorer` already consumes
+    from fixture-emitted timing files:
+
+        {"turn_index": int, "role": "user"|"coach", "event": "audio_start", "t_ms": int}
+        {"turn_index": int, "role": "user"|"coach", "event": "audio_end",   "t_ms": int, "duration_ms": int}
+
+    `t_ms` is wall-clock milliseconds since the writer saw its first
+    chunk, so user-side and coach-side timestamps share one clock
+    regardless of upstream `AudioChunk.ts` semantics.
+    """
+
+    _SAMPLE_RATE_HZ = 16_000
+    _BYTES_PER_SAMPLE = 2  # PCM16 mono
+
+    def __init__(
+        self,
+        session_id: str,
+        store: LocalFilesystemStore,
+        *,
+        silence_threshold_ms: int = 600,
+        clock: Callable[[], float] | None = None,
+    ) -> None:
+        """Store the session id, artifact store, and segmentation knobs."""
+        self._session_id = session_id
+        self._store = store
+        self._silence_threshold_ms = silence_threshold_ms
+        self._clock = clock or time.monotonic
+
+    async def run(self, frames: AsyncIterator[Frame]) -> None:
+        """Consume audio chunks, segment into turns, append timing rows."""
+        await _register_artifact(self._store, self._session_id, "timing", "timing.jsonl")
+        anchor: float | None = None
+        next_turn_index: dict[str, int] = {"user": 0, "coach": 0}
+        open_turn: dict[str, dict[str, int] | None] = {"user": None, "coach": None}
+        try:
+            async for frame in frames:
+                if not isinstance(frame, AudioChunk):
+                    continue
+                if not frame.pcm16_16k:
+                    continue
+                role = frame.speaker.value
+                if role not in next_turn_index:
+                    continue
+                now = self._clock()
+                if anchor is None:
+                    anchor = now
+                t_ms = int((now - anchor) * 1000)
+                chunk_ms = (
+                    len(frame.pcm16_16k)
+                    // self._BYTES_PER_SAMPLE
+                    * 1000
+                    // self._SAMPLE_RATE_HZ
+                )
+                end_ms = t_ms + chunk_ms
+                turn = open_turn[role]
+                if turn is None or t_ms - turn["last_end_ms"] > self._silence_threshold_ms:
+                    if turn is not None:
+                        await self._emit_end(role, turn)
+                        next_turn_index[role] += 1
+                    new_turn = {
+                        "turn_index": next_turn_index[role],
+                        "start_ms": t_ms,
+                        "last_end_ms": end_ms,
+                    }
+                    open_turn[role] = new_turn
+                    await self._emit_start(role, new_turn)
+                else:
+                    turn["last_end_ms"] = end_ms
+        finally:
+            for role in ("user", "coach"):
+                turn = open_turn[role]
+                if turn is not None:
+                    await self._emit_end(role, turn)
+
+    async def _emit_start(self, role: str, turn: dict[str, int]) -> None:
+        await self._store.append(
+            self._session_id,
+            "timing.jsonl",
+            json.dumps(
+                {
+                    "turn_index": turn["turn_index"],
+                    "role": role,
+                    "event": "audio_start",
+                    "t_ms": turn["start_ms"],
+                }
+            ),
+        )
+
+    async def _emit_end(self, role: str, turn: dict[str, int]) -> None:
+        await self._store.append(
+            self._session_id,
+            "timing.jsonl",
+            json.dumps(
+                {
+                    "turn_index": turn["turn_index"],
+                    "role": role,
+                    "event": "audio_end",
+                    "t_ms": turn["last_end_ms"],
+                    "duration_ms": turn["last_end_ms"] - turn["start_ms"],
+                }
+            ),
+        )
 
 
 class TelemetryLogger:
