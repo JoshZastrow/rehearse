@@ -421,14 +421,24 @@ def _render_builtin_tools(names: list[str]) -> list[PostedBuiltinTool]:
     return [PostedBuiltinTool(name=name) for name in names]
 
 
-async def fetch_remote_configs(client: Any) -> list[RemoteConfigSnapshot]:
-    """Page through the workspace and return the latest version of each config.
+async def fetch_remote_configs(
+    client: Any,
+    *,
+    personas: dict[str, HumePersonaConfig] = PERSONAS,
+) -> list[RemoteConfigSnapshot]:
+    """Page through the workspace and return snapshots of configs we care about.
 
-    Hume's `list_configs` returns one entry per config-name (latest version).
+    Only configs whose `name` matches a declared persona's `display_name` are
+    snapshotted. Other workspace configs are skipped — we never compare against
+    them and may not even support their shape (e.g., older configs may have
+    `turn_detection=None` or other nullable subobjects we don't model).
     """
+    declared_names = {persona.display_name for persona in personas.values()}
     snapshots: list[RemoteConfigSnapshot] = []
     pager = await client.empathic_voice.configs.list_configs(restrict_to_most_recent=True)
     async for cfg in pager:
+        if cfg.name not in declared_names:
+            continue
         snapshots.append(_snapshot_from_remote(cfg))
     return snapshots
 
