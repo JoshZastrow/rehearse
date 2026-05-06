@@ -110,3 +110,24 @@ async def test_session_orchestrator_finalize_writes_story_and_feedback(
             f"https://example.test/viewer?session_id={handle.session_id}",
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_set_persona_key_persists(tmp_path):
+    from rehearse.session import SessionOrchestrator, TriggerEvent, utcnow
+    from rehearse.storage import LocalFilesystemStore
+    from rehearse.types import Session
+
+    store = LocalFilesystemStore(root=tmp_path, public_base_url="https://example.test")
+    orch = SessionOrchestrator(store=store)
+    handle = await orch.start(
+        TriggerEvent(
+            from_number="+15555550100", body="anything", received_at=utcnow()
+        )
+    )
+
+    await orch.set_persona_key(handle.session_id, "relationship_coach")
+
+    payload = await store.read(handle.session_id, "session.json")
+    session = Session.model_validate_json(payload)
+    assert session.persona_key == "relationship_coach"

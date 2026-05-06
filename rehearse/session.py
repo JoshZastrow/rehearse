@@ -113,6 +113,15 @@ class SessionOrchestrator:
             self._by_call_sid[call_sid] = session_id
         log.info("session.attach_call", session_id=session_id, call_sid=call_sid)
 
+    async def set_persona_key(self, session_id: str, persona_key: str) -> None:
+        """Persist the chosen persona key on the session manifest."""
+
+        def _set(session: Session) -> Session:
+            session.persona_key = persona_key
+            return session
+
+        await self._store.update_session(session_id, _set)
+
     def find_by_call_sid(self, call_sid: str) -> str | None:
         """Look up a session id from a Twilio call SID."""
         return self._by_call_sid.get(call_sid)
