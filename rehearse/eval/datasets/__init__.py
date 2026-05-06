@@ -13,6 +13,7 @@ from rehearse.eval.datasets.mme_emotion import MMEEmotionDataset
 from rehearse.eval.datasets.mme_rollout_seeds import MMERolloutSeedDataset
 from rehearse.eval.datasets.noop import NoopDataset
 from rehearse.eval.datasets.voice_agent_smoke import VoiceAgentSmokeDataset
+from rehearse.eval.datasets.voice_judges_smoke import VoiceJudgesSmokeDataset
 from rehearse.eval.protocols import Dataset
 
 DATASETS: dict[str, Callable[[], Dataset]] = {
@@ -21,6 +22,7 @@ DATASETS: dict[str, Callable[[], Dataset]] = {
     "voice-agent-smoke": VoiceAgentSmokeDataset,
     "coach-dialogue-smoke": CoachDialogueSmokeDataset,
     "mme-emotion-rollout-seeds": MMERolloutSeedDataset,
+    "voice-judges-smoke": VoiceJudgesSmokeDataset,
 }
 
 

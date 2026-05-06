@@ -155,6 +155,76 @@ uv run pytest tests/eval/
 Tests cover protocol conformance, runner end-to-end, subprocess isolation, the
 MME-Emotion dataset/eval shape, and the deterministic recognition scorer.
 
+## Audio Judges (Spec 2 — partial)
+
+Two multimodal-LLM judges that score the *voice* side of a coaching call.
+Both read per-turn audio artifacts from `rollout.artifacts_dir` and emit
+a single `RubricScore` with `judge_prompt_version` populated.
+
+| Scorer | Dimension | Reads | Notes |
+|---|---|---|---|
+| `AffectPerceptionJudgeScorer` | `affect_perception` | `audio/user/turn_<N>.wav` + `transcript.jsonl` | Did the coach correctly read the user's state? Degrades to text-only with `audio_missing` flag. |
+| `DeliveryJudgeScorer` | `delivery_quality` | `audio/user/turn_<N>.wav` + `audio/coach/turn_<N>.wav` | Did the coach's prosody/pacing/expressiveness match the moment? Requires both legs of audio. |
+
+Both wrap an `AudioJudge` primitive (Gemini 2.5 by default). For tests
+and offline smoke runs, use `StubAudioJudge` which returns a configured
+payload without any network call.
+
+### Run the smoke eval
+
+```bash
+# Default: stub judge, deterministic 0.5 scores. No API key needed.
+uv run rehearse-eval run --eval voice-judges-smoke
+
+# Live: real Gemini-backed judge over silent fixture audio. Requires
+# GEMINI_API_KEY and a funded project.
+REHEARSE_AUDIO_JUDGE=live GEMINI_API_KEY=... uv run rehearse-eval run --eval voice-judges-smoke
+
+# Inspect run artifacts
+uv run rehearse-eval show <run_id>
+```
+
+The smoke eval composes:
+- `voice-judges-smoke` dataset (1 fixture example with transcript +
+  per-turn audio durations)
+- `audio-fixture` environment (synthesizes silent WAVs at the
+  requested durations and writes them to `audio/user/turn_<N>.wav`
+  and `audio/coach/turn_<N>.wav`)
+- `AffectPerceptionJudgeScorer` + `DeliveryJudgeScorer` in the scoring
+  plan
+
+Output: per-turn audio + transcript persisted under
+`evals/runs/{run_id}/sessions/{example_id}/`. Two `RubricScore` rows in
+`results.jsonl` with `modality="audio+text"` (affect) and `modality="audio"`
+(delivery).
+
+### Compose audio judges in a custom scoring plan
+
+```python
+from rehearse.eval.scorers import (
+    AffectPerceptionJudgeScorer,
+    AggregateScorer,
+    AudioJudge,
+    ContentJudgeScorer,
+    DeliveryJudgeScorer,
+)
+
+# All four dimensions
+scoring_plan = [
+    ContentJudgeScorer(prompt_version="content-quality-v1"),
+    AffectPerceptionJudgeScorer(judge=AudioJudge(), prompt_version="affect-perception-v1"),
+    DeliveryJudgeScorer(judge=AudioJudge(), prompt_version="delivery-quality-v1"),
+]
+aggregator = AggregateScorer(
+    weights={"content_quality": 0.35, "affect_perception": 0.35, "delivery_quality": 0.30},
+)
+```
+
+The aggregator composes after the per-dim scorers run and produces
+`weighted_reward` from the collected rows. Wiring an environment that
+populates per-turn audio artifacts on production calls is the remaining
+half of Spec 2 (sandbox TTS integration + production capture).
+
 ## Per-Dimension Scorers (Spec 1)
 
 Spec 1 of the [eval roadmap](../../docs/specs/v2026-05-06-eval-system-roadmap.md)
