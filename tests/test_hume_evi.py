@@ -10,6 +10,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 import pytest
+from hume.empathic_voice.types.assistant_end import AssistantEnd
 from hume.empathic_voice.types.assistant_message import AssistantMessage
 from hume.empathic_voice.types.audio_output import AudioOutput
 from hume.empathic_voice.types.user_message import UserMessage
@@ -18,6 +19,13 @@ from hume.empathic_voice.types.web_socket_error import WebSocketError
 from rehearse.bus import FrameBus
 from rehearse.frames import AudioChunk, EndOfCall, ProsodyEvent, TranscriptDelta
 from rehearse.services.hume_evi import HumeEVIClient
+
+
+class _Sleep:
+    """Test marker: sleeping inside the event stream to advance the clock."""
+
+    def __init__(self, seconds: float) -> None:
+        self.seconds = seconds
 
 
 class FakeHumeSocket:
@@ -29,12 +37,15 @@ class FakeHumeSocket:
         return self
 
     async def __anext__(self) -> object:
-        if not self._events:
-            raise StopAsyncIteration
-        event = self._events.pop(0)
-        if isinstance(event, Exception):
-            raise event
-        return event
+        while self._events:
+            event = self._events.pop(0)
+            if isinstance(event, _Sleep):
+                await asyncio.sleep(event.seconds)
+                continue
+            if isinstance(event, Exception):
+                raise event
+            return event
+        raise StopAsyncIteration
 
     async def send_audio_input(self, message: object) -> None:
         self.sent_audio_inputs.append(message)
@@ -137,6 +148,7 @@ async def test_hume_client_maps_user_assistant_and_audio_events() -> None:
                     "data": _wav_payload(pcm48k),
                 }
             ),
+            AssistantEnd.model_validate({"type": "assistant_end"}),
         ]
     )
     bus = FrameBus("s1")
@@ -155,16 +167,110 @@ async def test_hume_client_maps_user_assistant_and_audio_events() -> None:
         await bus.aclose()
         frames = await consume
 
+    # Coach TranscriptDelta is buffered until assistant_end fires, so
+    # it lands AFTER the AudioChunk emitted by intervening audio_output.
     assert [type(frame) for frame in frames] == [
         TranscriptDelta,
         ProsodyEvent,
-        TranscriptDelta,
         AudioChunk,
+        TranscriptDelta,
     ]
     assert frames[0].text == "hello"
     assert frames[1].scores.emotions["joy"] == 0.8
-    assert frames[2].text == "hi there"
-    assert len(frames[3].pcm16_16k) > 0
+    assert len(frames[2].pcm16_16k) > 0
+    assert frames[3].text == "hi there"
+    # Coach turn now carries a real ts_end >= ts_start (was equal before).
+    assert frames[3].ts_end >= frames[3].ts_start
+
+
+@pytest.mark.asyncio
+async def test_coach_transcript_records_real_duration_from_assistant_end() -> None:
+    """ts_end of the coach TranscriptDelta reflects time elapsed before assistant_end."""
+    socket = FakeHumeSocket(
+        [
+            AssistantMessage.model_validate(
+                {
+                    "type": "assistant_message",
+                    "from_text": False,
+                    "is_quick_response": False,
+                    "message": {"role": "assistant", "content": "hi"},
+                    "models": {},
+                }
+            ),
+            # Sleep before assistant_end to grow the elapsed clock.
+            _Sleep(0.05),
+            AssistantEnd.model_validate({"type": "assistant_end"}),
+        ]
+    )
+    bus = FrameBus("s1")
+    client = HumeEVIClient(
+        api_key="api",
+        config_id="cfg",
+        bus=bus,
+        session_id="s1",
+        connect_fn=_connect_factory([socket]),
+    )
+
+    async with client:
+        consume = asyncio.create_task(_drain(bus))
+        await asyncio.sleep(0)
+        await client.run_event_loop()
+        await bus.aclose()
+        frames = await consume
+
+    coach = [f for f in frames if isinstance(f, TranscriptDelta)]
+    assert len(coach) == 1
+    assert coach[0].text == "hi"
+    assert coach[0].ts_end - coach[0].ts_start >= 0.04
+
+
+@pytest.mark.asyncio
+async def test_two_assistant_messages_without_end_flush_previous() -> None:
+    """A second assistant_message before assistant_end flushes the first turn."""
+    socket = FakeHumeSocket(
+        [
+            AssistantMessage.model_validate(
+                {
+                    "type": "assistant_message",
+                    "from_text": False,
+                    "is_quick_response": False,
+                    "message": {"role": "assistant", "content": "first"},
+                    "models": {},
+                }
+            ),
+            _Sleep(0.02),
+            AssistantMessage.model_validate(
+                {
+                    "type": "assistant_message",
+                    "from_text": False,
+                    "is_quick_response": False,
+                    "message": {"role": "assistant", "content": "second"},
+                    "models": {},
+                }
+            ),
+            AssistantEnd.model_validate({"type": "assistant_end"}),
+        ]
+    )
+    bus = FrameBus("s1")
+    client = HumeEVIClient(
+        api_key="api",
+        config_id="cfg",
+        bus=bus,
+        session_id="s1",
+        connect_fn=_connect_factory([socket]),
+    )
+
+    async with client:
+        consume = asyncio.create_task(_drain(bus))
+        await asyncio.sleep(0)
+        await client.run_event_loop()
+        await bus.aclose()
+        frames = await consume
+
+    coach = [f for f in frames if isinstance(f, TranscriptDelta)]
+    assert [f.text for f in coach] == ["first", "second"]
+    # First turn's ts_end is bounded by the second turn's ts_start.
+    assert coach[0].ts_end <= coach[1].ts_start
 
 
 @pytest.mark.asyncio

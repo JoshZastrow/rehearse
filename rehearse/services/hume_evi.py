@@ -14,6 +14,7 @@ import time
 import wave
 from collections.abc import Callable
 from contextlib import AsyncExitStack
+from dataclasses import dataclass
 from typing import Any
 
 from hume.client import AsyncHumeClient
@@ -26,6 +27,15 @@ from rehearse.bus import FrameBus
 from rehearse.frames import AudioChunk, EndOfCall, ProsodyEvent, TranscriptDelta
 from rehearse.services.hume_configs import select_config_id
 from rehearse.types import ProsodyScores, Speaker
+
+
+@dataclass
+class _PendingCoachTurn:
+    """One assistant utterance whose `ts_end` is not yet known."""
+
+    utterance_id: str
+    text: str
+    ts_start: float
 
 
 class HumeEVIClient:
@@ -56,6 +66,12 @@ class HumeEVIClient:
         self._socket: Any = None
         self._started_at = time.monotonic()
         self._utterance_counter = 0
+        # Coach (assistant) turn timing is reconstructed from the
+        # message/audio/end event triplet Hume emits. The text arrives in
+        # `assistant_message`; the duration is only knowable once
+        # `assistant_end` fires (or, as a safety net, when the next
+        # assistant_message arrives or the socket closes).
+        self._pending_coach: _PendingCoachTurn | None = None
 
     async def __aenter__(self) -> HumeEVIClient:
         """Open the Hume websocket connection and return the adapter."""
@@ -64,6 +80,7 @@ class HumeEVIClient:
 
     async def __aexit__(self, *_args: object) -> None:
         """Close any open Hume websocket resources."""
+        await self._flush_pending_coach(self._elapsed_s())
         if self._stack is not None:
             await self._stack.aclose()
         self._stack = None
@@ -100,6 +117,7 @@ class HumeEVIClient:
             except Exception:
                 attempts += 1
                 if attempts > 1:
+                    await self._flush_pending_coach(self._elapsed_s())
                     await self._bus.publish(
                         EndOfCall(
                             session_id=self._session_id,
@@ -160,6 +178,9 @@ class HumeEVIClient:
         if event_type == "assistant_message":
             await self._publish_assistant_message(event)
             return
+        if event_type == "assistant_end":
+            await self._flush_pending_coach(self._elapsed_s())
+            return
         if event_type == "assistant_prosody":
             return
         if event_type == "user_interruption":
@@ -212,18 +233,42 @@ class HumeEVIClient:
         )
 
     async def _publish_assistant_message(self, event: Any) -> None:
-        """Publish one assistant transcript frame from a Hume message event."""
-        text = getattr(getattr(event, "message", None), "content", "") or ""
+        """Buffer one assistant utterance; publish on the matching assistant_end.
+
+        Hume sends `assistant_message` (text) before streaming the TTS
+        audio, then `assistant_end` once the audio has finished. To
+        record true coach-turn duration on the transcript, we hold the
+        text until `assistant_end` and stamp `ts_end` from the elapsed
+        clock at that moment. If a second `assistant_message` arrives
+        before `assistant_end` (uncommon, but defensive), we flush the
+        previous one with `ts_end` set to "now" — the boundary between
+        the two turns.
+        """
         now = self._elapsed_s()
+        if self._pending_coach is not None:
+            await self._flush_pending_coach(now)
+        text = getattr(getattr(event, "message", None), "content", "") or ""
+        self._pending_coach = _PendingCoachTurn(
+            utterance_id=self._new_utterance_id("assistant"),
+            text=text,
+            ts_start=now,
+        )
+
+    async def _flush_pending_coach(self, ts_end: float) -> None:
+        """Publish the buffered coach `TranscriptDelta` with a real `ts_end`."""
+        pending = self._pending_coach
+        if pending is None:
+            return
+        self._pending_coach = None
         await self._bus.publish(
             TranscriptDelta(
                 session_id=self._session_id,
-                utterance_id=self._new_utterance_id("assistant"),
+                utterance_id=pending.utterance_id,
                 speaker=Speaker.COACH,
-                text=text,
+                text=pending.text,
                 is_final=True,
-                ts_start=now,
-                ts_end=now,
+                ts_start=pending.ts_start,
+                ts_end=max(ts_end, pending.ts_start),
             )
         )
 
