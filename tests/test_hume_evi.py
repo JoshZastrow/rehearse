@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import io
+import json
 import struct
 import wave
 from collections.abc import AsyncIterator
@@ -209,6 +210,92 @@ async def test_hume_client_reconnects_once_then_emits_end_of_call() -> None:
 
     assert isinstance(frames[-1], EndOfCall)
     assert frames[-1].reason == "error"
+
+
+@pytest.mark.asyncio
+async def test_connect_uses_mapped_config_id_for_persona(tmp_path, monkeypatch):
+    from rehearse.bus import FrameBus
+    from rehearse.services import hume_configs
+
+    mapping = tmp_path / "mapping.json"
+    mapping.write_text(
+        json.dumps({"relationship_coach": "cfg_relationship", "default": "cfg_default"})
+    )
+    monkeypatch.setattr(hume_configs, "MAPPING_PATH_DEFAULT", mapping)
+
+    captured: dict = {}
+
+    class _FakeSocket:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_exc):
+            return False
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            raise StopAsyncIteration
+
+    def _connect_fn(**kwargs):
+        captured.update(kwargs)
+        return _FakeSocket()
+
+    bus = FrameBus("sess_test")
+    client = HumeEVIClient(
+        api_key="k",
+        config_id="cfg_env_fallback",
+        persona_key="relationship_coach",
+        bus=bus,
+        session_id="sess_test",
+        connect_fn=_connect_fn,
+    )
+    async with client:
+        pass
+
+    assert captured["config_id"] == "cfg_relationship"
+
+
+@pytest.mark.asyncio
+async def test_connect_falls_back_to_env_config_id_when_no_mapping(tmp_path, monkeypatch):
+    from rehearse.bus import FrameBus
+    from rehearse.services import hume_configs
+
+    monkeypatch.setattr(hume_configs, "MAPPING_PATH_DEFAULT", tmp_path / "missing.json")
+
+    captured: dict = {}
+
+    class _FakeSocket:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_exc):
+            return False
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            raise StopAsyncIteration
+
+    def _connect_fn(**kwargs):
+        captured.update(kwargs)
+        return _FakeSocket()
+
+    bus = FrameBus("sess_test")
+    client = HumeEVIClient(
+        api_key="k",
+        config_id="cfg_env_fallback",
+        persona_key="relationship_coach",
+        bus=bus,
+        session_id="sess_test",
+        connect_fn=_connect_fn,
+    )
+    async with client:
+        pass
+
+    assert captured["config_id"] == "cfg_env_fallback"
 
 
 _OTHER_EMOTIONS = [

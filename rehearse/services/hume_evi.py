@@ -20,9 +20,11 @@ from hume.client import AsyncHumeClient
 from hume.empathic_voice.types.assistant_input import AssistantInput
 from hume.empathic_voice.types.audio_input import AudioInput
 
+import rehearse.services.hume_configs as _hume_configs
 from rehearse.audio.resample import resample_pcm16
 from rehearse.bus import FrameBus
 from rehearse.frames import AudioChunk, EndOfCall, ProsodyEvent, TranscriptDelta
+from rehearse.services.hume_configs import select_config_id
 from rehearse.types import ProsodyScores, Speaker
 
 
@@ -36,12 +38,14 @@ class HumeEVIClient:
         config_id: str,
         bus: FrameBus,
         session_id: str,
+        persona_key: str = "default",
         connect_fn: Callable[..., Any] | None = None,
         reconnect_backoff_s: float = 0.1,
     ) -> None:
         """Store connection settings and test seams for one Hume session."""
         self._api_key = api_key
-        self._config_id = config_id
+        self._fallback_config_id = config_id
+        self._persona_key = persona_key
         self._bus = bus
         self._session_id = session_id
         self._connect_fn = (
@@ -111,15 +115,21 @@ class HumeEVIClient:
         """Swap the active Hume config during a call when that feature exists."""
 
         raise NotImplementedError(
-            f"live config swap not implemented yet for {config_id} / {system_prompt!r}"
+            f"live config swap not implemented yet for {config_id} / {system_prompt!r} "
+            f"(fallback: {self._fallback_config_id})"
         )
 
     async def _connect(self) -> None:
         """Open a fresh Hume chat websocket and store the socket object."""
+        resolved_config_id = select_config_id(
+            self._persona_key,
+            mapping_path=_hume_configs.MAPPING_PATH_DEFAULT,
+            fallback=self._fallback_config_id,
+        )
         self._stack = AsyncExitStack()
         self._socket = await self._stack.enter_async_context(
             self._connect_fn(
-                config_id=self._config_id,
+                config_id=resolved_config_id,
                 api_key=self._api_key,
                 session_settings={
                     "custom_session_id": self._session_id,
