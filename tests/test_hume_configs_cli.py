@@ -70,24 +70,34 @@ async def test_run_diff_returns_zero_when_in_sync(tmp_path: Path, monkeypatch, c
     from rehearse.services import hume_configs
 
     async def _fake_fetch(client):
-        snap = hume_configs.RemoteConfigSnapshot(
-            id="cfg_match",
-            display_name=PERSONAS["default"].display_name,
-            evi_version=PERSONAS["default"].evi_version,
-            voice=PERSONAS["default"].voice.model_copy(),
-            language_model=PERSONAS["default"].language_model.model_copy(),
-            prompt_text=PERSONAS["default"].prompt_text,
-            on_new_chat=PERSONAS["default"].on_new_chat.model_copy(),
-            on_max_duration_timeout=PERSONAS["default"].on_max_duration_timeout.model_copy(),
-            on_inactivity_timeout=PERSONAS["default"].on_inactivity_timeout.model_copy(),
-            timeouts=PERSONAS["default"].timeouts.model_copy(),
-            turn_detection=PERSONAS["default"].turn_detection.model_copy(),
-            interruption_min_ms=PERSONAS["default"].interruption_min_ms,
-            nudges_enabled=PERSONAS["default"].nudges_enabled,
-            nudges_interval_secs=PERSONAS["default"].nudges_interval_secs,
-            builtin_tools=list(PERSONAS["default"].builtin_tools),
-        )
-        return [snap]
+        return [
+            hume_configs.RemoteConfigSnapshot(
+                id=f"cfg_{key}",
+                display_name=persona.display_name,
+                evi_version=persona.evi_version,
+                voice=persona.voice.model_copy(),
+                language_model=persona.language_model.model_copy(),
+                prompt_text=persona.prompt_text,
+                on_new_chat=persona.on_new_chat.model_copy() if persona.on_new_chat else None,
+                on_max_duration_timeout=(
+                    persona.on_max_duration_timeout.model_copy()
+                    if persona.on_max_duration_timeout
+                    else None
+                ),
+                on_inactivity_timeout=(
+                    persona.on_inactivity_timeout.model_copy()
+                    if persona.on_inactivity_timeout
+                    else None
+                ),
+                timeouts=persona.timeouts.model_copy(),
+                turn_detection=persona.turn_detection.model_copy(),
+                interruption_min_ms=persona.interruption_min_ms,
+                nudges_enabled=persona.nudges_enabled,
+                nudges_interval_secs=persona.nudges_interval_secs,
+                builtin_tools=list(persona.builtin_tools),
+            )
+            for key, persona in PERSONAS.items()
+        ]
 
     monkeypatch.setattr(hume_configs, "fetch_remote_configs", _fake_fetch)
     fake_client = MagicMock()

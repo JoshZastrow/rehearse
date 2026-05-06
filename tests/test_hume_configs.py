@@ -67,51 +67,53 @@ def _remote_from_persona(persona: HumePersonaConfig, *, config_id: str) -> Remot
 
 def test_plan_sync_creates_when_remote_empty():
     actions = plan_sync(PERSONAS, remote_configs=[])
-    assert len(actions) == 1
-    assert isinstance(actions[0], Create)
-    assert actions[0].persona.persona_key == "default"
+    assert len(actions) == len(PERSONAS)
+    assert all(isinstance(a, Create) for a in actions)
+    assert any(a.persona.persona_key == "default" for a in actions)
 
 
 def test_plan_sync_noop_when_remote_matches():
-    snapshot = _remote_from_persona(PERSONAS["default"], config_id="cfg_123")
-    actions = plan_sync(PERSONAS, remote_configs=[snapshot])
-    assert len(actions) == 1
-    assert isinstance(actions[0], NoOp)
-    assert actions[0].config_id == "cfg_123"
+    snapshots = [_remote_from_persona(p, config_id=f"cfg_{k}") for k, p in PERSONAS.items()]
+    actions = plan_sync(PERSONAS, remote_configs=snapshots)
+    assert len(actions) == len(PERSONAS)
+    assert all(isinstance(a, NoOp) for a in actions)
+    default_action = next(a for a in actions if a.persona.persona_key == "default")
+    assert default_action.config_id == "cfg_default"
 
 
 def test_plan_sync_new_version_when_voice_drifts():
     snapshot = _remote_from_persona(PERSONAS["default"], config_id="cfg_123")
     snapshot.voice.name = "Different Voice"
     actions = plan_sync(PERSONAS, remote_configs=[snapshot])
-    assert len(actions) == 1
-    assert isinstance(actions[0], NewVersion)
-    assert actions[0].config_id == "cfg_123"
-    assert any("voice" in entry for entry in actions[0].diff)
+    default_action = next(a for a in actions if a.persona.persona_key == "default")
+    assert isinstance(default_action, NewVersion)
+    assert default_action.config_id == "cfg_123"
+    assert any("voice" in entry for entry in default_action.diff)
 
 
 def test_plan_sync_new_version_when_prompt_drifts():
     snapshot = _remote_from_persona(PERSONAS["default"], config_id="cfg_123")
     snapshot.prompt_text = snapshot.prompt_text + "\nextra line"
     actions = plan_sync(PERSONAS, remote_configs=[snapshot])
-    assert isinstance(actions[0], NewVersion)
-    assert any("prompt_text" in entry for entry in actions[0].diff)
+    default_action = next(a for a in actions if a.persona.persona_key == "default")
+    assert isinstance(default_action, NewVersion)
+    assert any("prompt_text" in entry for entry in default_action.diff)
 
 
 def test_plan_sync_new_version_when_timeout_drifts():
     snapshot = _remote_from_persona(PERSONAS["default"], config_id="cfg_123")
     snapshot.timeouts.max_duration_secs = 240
     actions = plan_sync(PERSONAS, remote_configs=[snapshot])
-    assert isinstance(actions[0], NewVersion)
-    assert any("timeouts" in entry for entry in actions[0].diff)
+    default_action = next(a for a in actions if a.persona.persona_key == "default")
+    assert isinstance(default_action, NewVersion)
+    assert any("timeouts" in entry for entry in default_action.diff)
 
 
 def test_plan_sync_ignores_unmatched_remote_configs():
     other = _remote_from_persona(PERSONAS["default"], config_id="cfg_999")
     other.display_name = "Some Unrelated Config"
     actions = plan_sync(PERSONAS, remote_configs=[other])
-    assert len(actions) == 1
-    assert isinstance(actions[0], Create)
+    assert all(isinstance(a, Create) for a in actions)
 
 
 def test_select_config_id_reads_mapping(tmp_path: Path):
@@ -129,3 +131,26 @@ def test_select_config_id_falls_back_when_key_missing(tmp_path: Path):
     path = tmp_path / "mapping.json"
     path.write_text(json.dumps({"other": "cfg_xyz"}))
     assert select_config_id("default", mapping_path=path, fallback="env_id") == "env_id"
+
+
+def test_relationship_coach_persona_is_registered():
+    assert "relationship_coach" in PERSONAS
+    persona = PERSONAS["relationship_coach"]
+    assert persona.persona_key == "relationship_coach"
+    assert persona.display_name == "Rehearse Coach (relationship)"
+    assert persona.routing_description != ""
+    assert "relationship" in persona.routing_description.lower()
+
+
+def test_default_persona_has_routing_description():
+    persona = PERSONAS["default"]
+    assert persona.routing_description != ""
+    desc = persona.routing_description.lower()
+    assert "general" in desc or "any" in desc
+
+
+def test_relationship_prompt_extends_default_with_framing():
+    persona = PERSONAS["relationship_coach"]
+    default_prompt = PERSONAS["default"].prompt_text
+    assert default_prompt in persona.prompt_text
+    assert "relationship coach" in persona.prompt_text.lower()

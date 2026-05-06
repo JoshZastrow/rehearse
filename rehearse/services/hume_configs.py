@@ -96,6 +96,7 @@ class HumePersonaConfig(BaseModel):
 
     persona_key: str
     display_name: str
+    routing_description: str
     evi_version: str = "4-mini"
     voice: HumeVoice
     language_model: HumeLanguageModel
@@ -137,10 +138,20 @@ _DEFAULT_PROMPT = (  # noqa: E501
 )
 
 
+_RELATIONSHIP_PROMPT = (
+    "You're acting as a relationship coach. The caller is rehearsing a "
+    "conversation with a romantic partner.\n\n" + _DEFAULT_PROMPT
+)
+
+
 PERSONAS: dict[str, HumePersonaConfig] = {
     "default": HumePersonaConfig(
         persona_key="default",
         display_name="Rehearse Coach (default)",
+        routing_description=(
+            "General conversation rehearsal — work conversations, family, "
+            "negotiations, pitches, anything that isn't romantic."
+        ),
         evi_version="4-mini",
         voice=HumeVoice(name="Inspiring Woman", provider="HUME_AI"),
         language_model=HumeLanguageModel(
@@ -149,6 +160,36 @@ PERSONAS: dict[str, HumePersonaConfig] = {
         ),
         prompt_text=_DEFAULT_PROMPT,
         on_new_chat=HumeEventMessage(enabled=True, text="Hey there, what's on the mind?"),
+        on_max_duration_timeout=HumeEventMessage(enabled=True, text=None),
+        on_inactivity_timeout=HumeEventMessage(enabled=False, text=None),
+        timeouts=HumeTimeouts(max_duration_secs=300, inactivity_secs=122),
+        turn_detection=HumeTurnDetection(
+            end_of_turn_silence_ms=500,
+            prefix_padding_ms=300,
+            speech_detection_threshold=0.4,
+        ),
+        interruption_min_ms=800,
+        nudges_enabled=True,
+        nudges_interval_secs=8,
+        builtin_tools=["web_search", "hang_up"],
+    ),
+    "relationship_coach": HumePersonaConfig(
+        persona_key="relationship_coach",
+        display_name="Rehearse Coach (relationship)",
+        routing_description=(
+            "Romantic relationships, partners, dating, breakups, "
+            "intimacy issues, marriage, divorce."
+        ),
+        evi_version="4-mini",
+        voice=HumeVoice(name="Inspiring Woman", provider="HUME_AI"),
+        language_model=HumeLanguageModel(
+            provider="ANTHROPIC",
+            model="claude-sonnet-4-20250514",
+        ),
+        prompt_text=_RELATIONSHIP_PROMPT,
+        on_new_chat=HumeEventMessage(
+            enabled=True, text="Hey, glad you called. What's going on?"
+        ),
         on_max_duration_timeout=HumeEventMessage(enabled=True, text=None),
         on_inactivity_timeout=HumeEventMessage(enabled=False, text=None),
         timeouts=HumeTimeouts(max_duration_secs=300, inactivity_secs=122),
