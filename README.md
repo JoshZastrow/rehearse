@@ -70,6 +70,24 @@ Single FastAPI service: SMS triggers an outbound call, runs an owned Twilio Medi
 
 Spec: [`docs/specs/v2026-04-28-runtime-workstream.md`](docs/specs/v2026-04-28-runtime-workstream.md), [`docs/specs/v2026-04-28-drop-pipecat.md`](docs/specs/v2026-04-28-drop-pipecat.md), with historical detail in [`docs/specs/v2026-04-27-runtime.md`](docs/specs/v2026-04-27-runtime.md).
 
+#### Hume EVI configs (`rehearse-hume`)
+
+Voice, greeting copy, prompt, timeouts, turn detection, nudges, and interruption thresholds are declared in `rehearse/services/hume_configs.py` (`PERSONAS` registry) and reconciled against the live Hume workspace via the `rehearse-hume` CLI.
+
+Run `rehearse-hume diff` or `sync` whenever you change a persona — the workspace stays in lock-step with the repo, so iteration on voice/prompt/etc. is a code change + one command, not a console click trail.
+
+```bash
+uv run rehearse-hume diff   # show planned actions; exit 1 if drift
+uv run rehearse-hume sync   # apply create/new-version actions; write sessions/.hume_configs.json
+```
+
+**When to run:**
+- Before placing a call after editing `PERSONAS` (voice swap, prompt tweak, timeout change).
+- In CI on PRs that touch `rehearse/services/hume_configs.py` (use `diff` as a gate — exit 1 means the workspace will drift if the PR lands).
+- Once after pulling a teammate's change to `PERSONAS`, so your local workspace matches.
+
+**First-run migration:** Hume's existing console-edited config is named e.g. `"Your smart companion (5/1/2026, ...)"`. Either rename it in the console to match the registry's `display_name` (`"Rehearse Coach (default)"`) before the first `sync`, or accept that `sync` will create a second config alongside it. Spec: [`docs/specs/v2026-05-06-hume-config-as-code.md`](docs/specs/v2026-05-06-hume-config-as-code.md).
+
 ### ML data pipeline & training — future
 
 Consumes frozen sessions from the runtime + scored runs from the harness; produces training corpora.
