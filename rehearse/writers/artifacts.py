@@ -7,9 +7,10 @@ basic telemetry.
 
 from __future__ import annotations
 
-import io
-import wave
+import asyncio
 from collections.abc import AsyncIterator, Callable
+from pathlib import Path
+from typing import BinaryIO
 
 from rehearse.frames import AudioChunk, Frame, ProsodyEvent, TranscriptDelta
 from rehearse.session import utcnow
@@ -94,22 +95,36 @@ class ProsodyWriter:
 
 
 class AudioRecorder:
-    """Collect audio chunks and write the full call recording to `audio.wav`."""
+    """Stream audio chunks to `audio.wav` as the call runs."""
 
-    def __init__(self, session_id: str, store: LocalFilesystemStore) -> None:
+    def __init__(
+        self,
+        session_id: str,
+        store: LocalFilesystemStore,
+        *,
+        sample_rate: int = 16_000,
+    ) -> None:
         """Store the session id and artifact store used for audio writes."""
         self._session_id = session_id
         self._store = store
+        self._sample_rate = sample_rate
 
     async def run(self, frames: AsyncIterator[Frame]) -> None:
-        """Consume audio frames and write one final WAV when the stream ends."""
-        await _register_artifact(self._store, self._session_id, "audio", "audio.wav")
-        chunks: list[bytes] = []
-        async for frame in frames:
-            if isinstance(frame, AudioChunk):
-                chunks.append(frame.pcm16_16k)
-        wav_bytes = _pcm16_to_wav(b"".join(chunks), sample_rate=16_000)
-        await self._store.write(self._session_id, "audio.wav", wav_bytes)
+        """Stream audio frames into a WAV on disk, closing it when the stream ends."""
+        path = self._store.session_dir(self._session_id) / "audio.wav"
+        writer = await asyncio.to_thread(
+            StreamingWavWriter.open, path, self._sample_rate
+        )
+        await self._store.update_session(
+            self._session_id,
+            lambda session: _add_artifact_path(session, key="audio", file_name="audio.wav"),
+        )
+        try:
+            async for frame in frames:
+                if isinstance(frame, AudioChunk):
+                    await asyncio.to_thread(writer.write, frame.pcm16_16k)
+        finally:
+            await asyncio.to_thread(writer.close)
 
 
 class TelemetryLogger:
@@ -174,12 +189,67 @@ def _add_artifact_path(session: Session, *, key: str, file_name: str) -> Session
     return session
 
 
-def _pcm16_to_wav(pcm16: bytes, *, sample_rate: int) -> bytes:
-    """Wrap raw PCM16 mono audio bytes in a small WAV container."""
-    buffer = io.BytesIO()
-    with wave.open(buffer, "wb") as wav_file:
-        wav_file.setnchannels(1)
-        wav_file.setsampwidth(2)
-        wav_file.setframerate(sample_rate)
-        wav_file.writeframes(pcm16)
-    return buffer.getvalue()
+class StreamingWavWriter:
+    """Append PCM16 mono audio to a WAV file, keeping the header valid as it grows.
+
+    The WAV header is rewritten after every chunk write so a process killed
+    mid-call leaves a playable (truncated) file on disk.
+    """
+
+    _CHANNELS = 1
+    _SAMPWIDTH = 2
+
+    def __init__(self, path: Path, sample_rate: int, file: BinaryIO) -> None:
+        """Bind a sample rate and an already-open binary file handle."""
+        self._path = path
+        self._sample_rate = sample_rate
+        self._file = file
+        self._data_bytes = 0
+
+    @classmethod
+    def open(cls, path: Path, sample_rate: int) -> StreamingWavWriter:
+        """Create the file with a zero-length WAV header and return the writer."""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        file = open(path, "wb")
+        file.write(_wav_header(0, sample_rate, cls._CHANNELS, cls._SAMPWIDTH))
+        file.flush()
+        return cls(path, sample_rate, file)
+
+    def write(self, pcm16: bytes) -> None:
+        """Append PCM16 bytes and rewrite the header sizes so the file stays valid."""
+        if not pcm16 or self._file.closed:
+            return
+        self._file.write(pcm16)
+        self._data_bytes += len(pcm16)
+        self._file.seek(4)
+        self._file.write((36 + self._data_bytes).to_bytes(4, "little"))
+        self._file.seek(40)
+        self._file.write(self._data_bytes.to_bytes(4, "little"))
+        self._file.seek(0, 2)
+        self._file.flush()
+
+    def close(self) -> None:
+        """Close the underlying file handle if it is still open."""
+        if not self._file.closed:
+            self._file.close()
+
+
+def _wav_header(data_size: int, sample_rate: int, channels: int, sampwidth: int) -> bytes:
+    """Return a 44-byte canonical PCM WAV header for the given data length."""
+    byte_rate = sample_rate * channels * sampwidth
+    block_align = channels * sampwidth
+    return (
+        b"RIFF"
+        + (36 + data_size).to_bytes(4, "little")
+        + b"WAVE"
+        + b"fmt "
+        + (16).to_bytes(4, "little")
+        + (1).to_bytes(2, "little")
+        + channels.to_bytes(2, "little")
+        + sample_rate.to_bytes(4, "little")
+        + byte_rate.to_bytes(4, "little")
+        + block_align.to_bytes(2, "little")
+        + (sampwidth * 8).to_bytes(2, "little")
+        + b"data"
+        + data_size.to_bytes(4, "little")
+    )

@@ -112,6 +112,78 @@ async def test_audio_recorder_writes_wav_and_manifest(writer_store: LocalFilesys
 
 
 @pytest.mark.asyncio
+async def test_audio_recorder_keeps_wav_playable_when_stream_aborts(
+    writer_store: LocalFilesystemStore,
+) -> None:
+    session_id = writer_store._test_session_id  # type: ignore[attr-defined]
+    writer = AudioRecorder(session_id, writer_store)
+
+    async def _aborting_frames():
+        yield AudioChunk(
+            session_id=session_id,
+            speaker=Speaker.USER,
+            pcm16_16k=b"\x10\x00\x20\x00",
+            ts=0.0,
+        )
+        yield AudioChunk(
+            session_id=session_id,
+            speaker=Speaker.COACH,
+            pcm16_16k=b"\x30\x00\x40\x00",
+            ts=0.05,
+        )
+        raise RuntimeError("simulated mid-call crash")
+
+    with pytest.raises(RuntimeError, match="simulated mid-call crash"):
+        await writer.run(_aborting_frames())
+
+    wav_path = writer_store.session_dir(session_id) / "audio.wav"
+    with wave.open(str(wav_path), "rb") as wav_file:
+        assert wav_file.getframerate() == 16_000
+        assert wav_file.getnchannels() == 1
+        assert wav_file.readframes(wav_file.getnframes()) == (
+            b"\x10\x00\x20\x00\x30\x00\x40\x00"
+        )
+
+
+@pytest.mark.asyncio
+async def test_audio_recorder_header_valid_after_each_chunk(
+    writer_store: LocalFilesystemStore,
+) -> None:
+    session_id = writer_store._test_session_id  # type: ignore[attr-defined]
+    wav_path = writer_store.session_dir(session_id) / "audio.wav"
+    writer = AudioRecorder(session_id, writer_store)
+    snapshots: list[bytes] = []
+
+    async def _snapshotting_frames():
+        yield AudioChunk(
+            session_id=session_id,
+            speaker=Speaker.USER,
+            pcm16_16k=b"\xaa\x00\xbb\x00\xcc\x00\xdd\x00",
+            ts=0.0,
+        )
+        snapshots.append(wav_path.read_bytes())
+        yield AudioChunk(
+            session_id=session_id,
+            speaker=Speaker.COACH,
+            pcm16_16k=b"\xee\x00\xff\x00",
+            ts=0.05,
+        )
+        snapshots.append(wav_path.read_bytes())
+
+    await writer.run(_snapshotting_frames())
+
+    from io import BytesIO
+
+    assert len(snapshots) == 2
+    for snapshot in snapshots:
+        with wave.open(BytesIO(snapshot), "rb") as wav_file:
+            assert wav_file.getframerate() == 16_000
+            assert wav_file.getnchannels() == 1
+            wav_file.readframes(wav_file.getnframes())
+    assert len(snapshots[0]) < len(snapshots[1])
+
+
+@pytest.mark.asyncio
 async def test_telemetry_logger_writes_assistant_events_only(
     writer_store: LocalFilesystemStore,
 ) -> None:
