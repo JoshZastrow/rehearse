@@ -78,7 +78,6 @@ async def test_run_diff_returns_zero_when_in_sync(tmp_path: Path, monkeypatch, c
             language_model=PERSONAS["default"].language_model.model_copy(),
             prompt_text=PERSONAS["default"].prompt_text,
             on_new_chat=PERSONAS["default"].on_new_chat.model_copy(),
-            on_resume_chat=PERSONAS["default"].on_resume_chat.model_copy(),
             on_max_duration_timeout=PERSONAS["default"].on_max_duration_timeout.model_copy(),
             on_inactivity_timeout=PERSONAS["default"].on_inactivity_timeout.model_copy(),
             timeouts=PERSONAS["default"].timeouts.model_copy(),
@@ -107,6 +106,8 @@ async def test_run_diff_returns_one_when_drifted(monkeypatch, capsys):
     fake_client = MagicMock()
     exit_code = await run_diff(fake_client)
     assert exit_code == 1
+    captured = capsys.readouterr()
+    assert "CREATE" in captured.out
 
 
 @pytest.mark.asyncio

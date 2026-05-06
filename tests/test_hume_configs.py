@@ -46,7 +46,6 @@ def _remote_from_persona(persona: HumePersonaConfig, *, config_id: str) -> Remot
         language_model=persona.language_model.model_copy(),
         prompt_text=persona.prompt_text,
         on_new_chat=persona.on_new_chat.model_copy() if persona.on_new_chat else None,
-        on_resume_chat=persona.on_resume_chat.model_copy() if persona.on_resume_chat else None,
         on_max_duration_timeout=(
             persona.on_max_duration_timeout.model_copy()
             if persona.on_max_duration_timeout

@@ -15,6 +15,7 @@ Example:
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -24,7 +25,9 @@ from hume.empathic_voice.types.posted_builtin_tool import PostedBuiltinTool
 from hume.empathic_voice.types.posted_config_prompt_spec import PostedConfigPromptSpec
 from hume.empathic_voice.types.posted_event_message_spec import PostedEventMessageSpec
 from hume.empathic_voice.types.posted_event_message_specs import PostedEventMessageSpecs
+from hume.empathic_voice.types.posted_interruption_spec import PostedInterruptionSpec
 from hume.empathic_voice.types.posted_language_model import PostedLanguageModel
+from hume.empathic_voice.types.posted_nudge_spec import PostedNudgeSpec
 from hume.empathic_voice.types.posted_timeout_specs import PostedTimeoutSpecs
 from hume.empathic_voice.types.posted_timeout_specs_inactivity import (
     PostedTimeoutSpecsInactivity,
@@ -98,7 +101,6 @@ class HumePersonaConfig(BaseModel):
     language_model: HumeLanguageModel
     prompt_text: str
     on_new_chat: HumeEventMessage | None = None
-    on_resume_chat: HumeEventMessage | None = None
     on_max_duration_timeout: HumeEventMessage | None = None
     on_inactivity_timeout: HumeEventMessage | None = None
     timeouts: HumeTimeouts = HumeTimeouts()
@@ -147,7 +149,6 @@ PERSONAS: dict[str, HumePersonaConfig] = {
         ),
         prompt_text=_DEFAULT_PROMPT,
         on_new_chat=HumeEventMessage(enabled=True, text="Hey there, what's on the mind?"),
-        on_resume_chat=HumeEventMessage(enabled=True, text="Still there?"),
         on_max_duration_timeout=HumeEventMessage(enabled=True, text=None),
         on_inactivity_timeout=HumeEventMessage(enabled=False, text=None),
         timeouts=HumeTimeouts(max_duration_secs=300, inactivity_secs=122),
@@ -181,7 +182,6 @@ class RemoteConfigSnapshot(BaseModel):
     language_model: HumeLanguageModel
     prompt_text: str
     on_new_chat: HumeEventMessage | None = None
-    on_resume_chat: HumeEventMessage | None = None
     on_max_duration_timeout: HumeEventMessage | None = None
     on_inactivity_timeout: HumeEventMessage | None = None
     timeouts: HumeTimeouts
@@ -225,7 +225,6 @@ _COMPARED_FIELDS: tuple[str, ...] = (
     "language_model",
     "prompt_text",
     "on_new_chat",
-    "on_resume_chat",
     "on_max_duration_timeout",
     "on_inactivity_timeout",
     "timeouts",
@@ -306,7 +305,16 @@ async def apply_sync(
 
     Returns the persona_key -> config_id mapping that was persisted.
     """
+    # Seed from any previously-persisted mapping so partial-failure runs
+    # preserve already-known persona ids.
     mapping: dict[str, str] = {}
+    if mapping_path.exists():
+        try:
+            existing = json.loads(mapping_path.read_text())
+            mapping = {k: v for k, v in existing.items() if k != "synced_at"}
+        except json.JSONDecodeError:
+            pass
+
     for action in actions:
         if isinstance(action, Create):
             kwargs = _to_create_kwargs(action.persona)
@@ -320,9 +328,12 @@ async def apply_sync(
             mapping[action.persona.persona_key] = action.config_id
         elif isinstance(action, NoOp):
             mapping[action.persona.persona_key] = action.config_id
+
     payload = {**mapping, "synced_at": datetime.now(UTC).isoformat()}
     mapping_path.parent.mkdir(parents=True, exist_ok=True)
-    mapping_path.write_text(json.dumps(payload, indent=2))
+    tmp_path = mapping_path.with_suffix(mapping_path.suffix + ".tmp")
+    tmp_path.write_text(json.dumps(payload, indent=2))
+    os.replace(tmp_path, mapping_path)
     return mapping
 
 
@@ -337,6 +348,8 @@ def _to_create_kwargs(persona: HumePersonaConfig) -> dict[str, Any]:
         "event_messages": _render_event_messages(persona),
         "timeouts": _render_timeouts(persona.timeouts),
         "turn_detection": _render_turn_detection(persona.turn_detection),
+        "nudges": _render_nudges(persona),
+        "interruption": _render_interruption(persona),
         "builtin_tools": _render_builtin_tools(persona.builtin_tools),
     }
 
@@ -393,6 +406,17 @@ def _render_turn_detection(td: HumeTurnDetection) -> PostedTurnDetectionSpec:
     )
 
 
+def _render_nudges(persona: HumePersonaConfig) -> PostedNudgeSpec:
+    return PostedNudgeSpec(
+        enabled=persona.nudges_enabled,
+        interval_secs=persona.nudges_interval_secs,
+    )
+
+
+def _render_interruption(persona: HumePersonaConfig) -> PostedInterruptionSpec:
+    return PostedInterruptionSpec(min_interruption_ms=persona.interruption_min_ms)
+
+
 def _render_builtin_tools(names: list[str]) -> list[PostedBuiltinTool]:
     return [PostedBuiltinTool(name=name) for name in names]
 
@@ -403,7 +427,7 @@ async def fetch_remote_configs(client: Any) -> list[RemoteConfigSnapshot]:
     Hume's `list_configs` returns one entry per config-name (latest version).
     """
     snapshots: list[RemoteConfigSnapshot] = []
-    pager = await client.empathic_voice.configs.list_configs()
+    pager = await client.empathic_voice.configs.list_configs(restrict_to_most_recent=True)
     async for cfg in pager:
         snapshots.append(_snapshot_from_remote(cfg))
     return snapshots
@@ -414,12 +438,12 @@ def _snapshot_from_remote(cfg: Any) -> RemoteConfigSnapshot:
     voice = HumeVoice(
         name=getattr(cfg.voice, "name", None) if cfg.voice else None,
         id=getattr(cfg.voice, "id", None) if cfg.voice else None,
-        provider=getattr(cfg.voice, "provider", "HUME_AI") if cfg.voice else "HUME_AI",
+        provider=cfg.voice.provider if cfg.voice else "HUME_AI",
     )
     lm = HumeLanguageModel(
-        provider=getattr(cfg.language_model, "model_provider", "ANTHROPIC"),
-        model=getattr(cfg.language_model, "model_resource", None),
-        temperature=getattr(cfg.language_model, "temperature", None),
+        provider=cfg.language_model.model_provider,
+        model=cfg.language_model.model_resource,
+        temperature=cfg.language_model.temperature,
     )
     em = cfg.event_messages
     prompt_text = getattr(cfg.prompt, "text", "") if cfg.prompt else ""
@@ -436,7 +460,6 @@ def _snapshot_from_remote(cfg: Any) -> RemoteConfigSnapshot:
         language_model=lm,
         prompt_text=prompt_text,
         on_new_chat=_event(em.on_new_chat) if em else None,
-        on_resume_chat=_event(getattr(em, "on_resume_chat", None)) if em else None,
         on_max_duration_timeout=_event(em.on_max_duration_timeout) if em else None,
         on_inactivity_timeout=_event(em.on_inactivity_timeout) if em else None,
         timeouts=timeouts,
@@ -446,8 +469,8 @@ def _snapshot_from_remote(cfg: Any) -> RemoteConfigSnapshot:
             speech_detection_threshold=td.speech_detection_threshold,
         ),
         interruption_min_ms=cfg.interruption.min_interruption_ms,
-        nudges_enabled=getattr(cfg.nudges, "enabled", False) if cfg.nudges else False,
-        nudges_interval_secs=getattr(cfg.nudges, "interval_secs", 0) if cfg.nudges else 0,
+        nudges_enabled=cfg.nudges.enabled if cfg.nudges is not None else False,
+        nudges_interval_secs=cfg.nudges.interval_secs if cfg.nudges is not None else 0,
         builtin_tools=[t.name for t in (cfg.builtin_tools or [])],
     )
 

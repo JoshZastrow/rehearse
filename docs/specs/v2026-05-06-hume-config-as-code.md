@@ -63,7 +63,6 @@ class HumePersonaConfig(BaseModel):
     language_model: HumeLanguageModel
     prompt_text: str
     on_new_chat: HumeEventMessage | None = None
-    on_resume_chat: HumeEventMessage | None = None
     on_max_duration_timeout: HumeEventMessage | None = None
     on_inactivity_timeout: HumeEventMessage | None = None
     timeouts: HumeTimeouts = HumeTimeouts()
@@ -84,7 +83,6 @@ config (id `1259711b-0cec-43f4-a729-fea57e20cd32`):
 - language_model: provider `ANTHROPIC`, model `claude-sonnet-4-20250514`
 - prompt_text: the existing 4-paragraph coaching brief, verbatim
 - on_new_chat: enabled, text `"Hey there, what's on the mind?"`
-- on_resume_chat: enabled, text `"Still there?"`
 - on_max_duration_timeout: enabled, text `None`
 - on_inactivity_timeout: disabled
 - timeouts: defaults (300s max, 122s inactivity)
@@ -194,3 +192,7 @@ No live-Hume integration test in v1.
   persona key actually changes which config is used.
 - Persona inference from intake/session metadata.
 - Tests against a live Hume sandbox.
+
+## Implementation note: `on_resume_chat` removed
+
+During implementation we found that the Hume `PostedEventMessageSpecs` type does not expose `on_resume_chat` for writes — the field is absent from the SDK's `model_fields`. Comparing it would cause infinite drift (the plan detects a mismatch but the POST never includes the field, so Hume never reflects it back). `on_resume_chat` has been removed from `HumePersonaConfig`, `RemoteConfigSnapshot`, `_COMPARED_FIELDS`, the default persona seed, and the test fixtures.
