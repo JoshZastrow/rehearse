@@ -1,8 +1,9 @@
-"""`audio-fixture` environment — produces per-turn audio artifacts from a payload.
+"""`audio-fixture` environment — produces per-turn audio + timing from a payload.
 
-Useful for smoke-testing audio judges (`AffectPerceptionJudgeScorer`,
-`DeliveryJudgeScorer`) without standing up a full sandbox or live phone
-runtime. The example payload describes the trajectory shape:
+Useful for smoke-testing voice scorers (`AffectPerceptionJudgeScorer`,
+`DeliveryJudgeScorer`, `NaturalnessScorer`) without standing up a full
+sandbox or live phone runtime. The example payload describes the
+trajectory shape:
 
     {
         "transcript": [
@@ -12,16 +13,20 @@ runtime. The example payload describes the trajectory shape:
         ],
         "user_audio_durations_s": [0.5, 0.5, ...],   # per user turn
         "coach_audio_durations_s": [0.6, 0.6, ...],  # per coach turn
+        "silence_between_turns_s": 0.0,              # optional pad between turns
     }
 
 The environment writes:
     {run_dir}/transcript.jsonl
     {run_dir}/audio/user/turn_<N>.wav   (silent PCM16 WAVs)
     {run_dir}/audio/coach/turn_<N>.wav
+    {run_dir}/timing.jsonl              (per-turn audio_start/audio_end events)
 
 Audio is synthesized as silent WAVs of the requested durations so the
-fixture has no external asset dependencies. For real audio, swap to a
-proper sandbox environment.
+fixture has no external asset dependencies. Timing events are computed
+sequentially: each turn starts when the previous turn ends (plus any
+configured silence pad). For real audio + true timing data, use a
+sandbox or production-replay environment.
 """
 
 from __future__ import annotations
@@ -36,10 +41,10 @@ from rehearse.eval.protocols import BenchmarkExample, RolloutResult
 
 
 class AudioFixtureEnvironment:
-    """Synthesize per-turn audio artifacts from an example payload."""
+    """Synthesize per-turn audio artifacts + timing.jsonl from an example payload."""
 
     name = "audio-fixture"
-    version = "v0"
+    version = "v1"
 
     def __init__(self, model_slots: dict[str, str] | None = None) -> None:
         self.model_slots = model_slots or {}
@@ -56,6 +61,9 @@ class AudioFixtureEnvironment:
         transcript = example.payload.get("transcript") or []
         user_durations = example.payload.get("user_audio_durations_s") or []
         coach_durations = example.payload.get("coach_audio_durations_s") or []
+        silence_between_s = float(
+            example.payload.get("silence_between_turns_s", 0.0) or 0.0
+        )
 
         # Write transcript.jsonl.
         transcript_path = run_dir / "transcript.jsonl"
@@ -67,6 +75,19 @@ class AudioFixtureEnvironment:
         # Synthesize per-turn audio for each role.
         _write_per_turn_audio(run_dir / "audio" / "user", user_durations)
         _write_per_turn_audio(run_dir / "audio" / "coach", coach_durations)
+
+        # Generate timing.jsonl by sequencing transcript turns against the
+        # corresponding audio durations.
+        timing_events = _timing_from_transcript(
+            transcript=transcript,
+            user_durations_s=user_durations,
+            coach_durations_s=coach_durations,
+            silence_between_s=silence_between_s,
+        )
+        if timing_events:
+            (run_dir / "timing.jsonl").write_text(
+                "\n".join(json.dumps(e) for e in timing_events) + "\n"
+            )
 
         completed = datetime.now()
         return RolloutResult(
@@ -104,3 +125,66 @@ def _silent_wav(path: Path, *, duration_s: float, sample_rate: int = 16_000) -> 
         wav.setsampwidth(2)
         wav.setframerate(sample_rate)
         wav.writeframes(b"\x00\x00" * n_samples)
+
+
+def _timing_from_transcript(
+    *,
+    transcript: list[dict[str, Any]],
+    user_durations_s: list[float],
+    coach_durations_s: list[float],
+    silence_between_s: float = 0.0,
+) -> list[dict[str, Any]]:
+    """Sequence transcript turns into timing events using per-role durations.
+
+    The Nth user transcript frame consumes user_durations_s[role_turn_idx];
+    the Nth coach frame consumes coach_durations_s[role_turn_idx]. Turns
+    are placed back-to-back on the timeline, with `silence_between_s`
+    inserted between consecutive turns. Frames for which no duration is
+    configured are skipped (no audio, no timing event).
+    """
+    events: list[dict[str, Any]] = []
+    role_turn_idx = {"user": 0, "coach": 0}
+    user_idx = 0
+    coach_idx = 0
+    t_ms = 0
+    silence_ms = int(silence_between_s * 1000)
+
+    for frame in transcript:
+        role = frame.get("speaker")
+        if role not in ("user", "coach"):
+            continue
+        if role == "user":
+            if user_idx >= len(user_durations_s):
+                continue
+            dur_ms = int(float(user_durations_s[user_idx]) * 1000)
+            user_idx += 1
+        else:
+            if coach_idx >= len(coach_durations_s):
+                continue
+            dur_ms = int(float(coach_durations_s[coach_idx]) * 1000)
+            coach_idx += 1
+
+        turn_index = role_turn_idx[role]
+        role_turn_idx[role] += 1
+
+        events.append(
+            {
+                "turn_index": turn_index,
+                "role": role,
+                "event": "audio_start",
+                "t_ms": t_ms,
+            }
+        )
+        t_ms += dur_ms
+        events.append(
+            {
+                "turn_index": turn_index,
+                "role": role,
+                "event": "audio_end",
+                "t_ms": t_ms,
+                "duration_ms": dur_ms,
+            }
+        )
+        t_ms += silence_ms
+
+    return events

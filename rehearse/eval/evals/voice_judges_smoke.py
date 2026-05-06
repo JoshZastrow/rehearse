@@ -1,19 +1,22 @@
-"""voice-judges-smoke — runnable CI smoke for the audio judges (Spec 2).
+"""voice-judges-smoke — runnable CI smoke for the voice scoring stack.
+
+Exercises the full text + audio + timing scoring pipeline end-to-end
+without needing live API keys, real audio files, or provider credit.
 
 Composes:
-  - `VoiceJudgesSmokeDataset`: 1 example with fixture transcript + per-turn
-    audio durations.
-  - `audio-fixture` environment: synthesizes silent per-turn WAVs.
-  - Scoring plan: `AffectPerceptionJudgeScorer` + `DeliveryJudgeScorer`,
-    backed by `StubAudioJudge` by default (deterministic 0.5 scores);
-    set `REHEARSE_AUDIO_JUDGE=live` to use a real Gemini-backed judge
-    instead. `live` mode requires `GEMINI_API_KEY` and a funded project.
+  - `VoiceJudgesSmokeDataset`: 1 example with fixture transcript +
+    per-turn audio durations + `silence_between_turns_s` padding.
+  - `audio-fixture` environment: synthesizes silent per-turn WAVs and
+    a `timing.jsonl` derived from the durations.
+  - Scoring plan:
+      * `AffectPerceptionJudgeScorer` (Spec 2)
+      * `DeliveryJudgeScorer` (Spec 2)
+      * `NaturalnessScorer` (Spec 4) — deterministic, no judge
 
-The point of this eval: prove the audio-judge plumbing works
-end-to-end without needing live API keys, real audio files, or
-provider credit. For real voice scoring against real audio, use a
-sandbox-shaped eval (Spec 2's second half) or wire these scorers into
-your own scoring plan.
+Audio judges back onto `StubAudioJudge` by default (deterministic 0.5
+scores). Set `REHEARSE_AUDIO_JUDGE=live` to use a real Gemini-backed
+judge instead — that requires `GEMINI_API_KEY` and a funded project.
+The naturalness scorer is always live (deterministic arithmetic).
 """
 
 from __future__ import annotations
@@ -26,6 +29,7 @@ from rehearse.eval.protocols import BenchmarkExample, Scorer
 from rehearse.eval.scorers.affect_perception_judge import AffectPerceptionJudgeScorer
 from rehearse.eval.scorers.audio_judge import AudioJudge, StubAudioJudge
 from rehearse.eval.scorers.delivery_judge import DeliveryJudgeScorer
+from rehearse.eval.scorers.naturalness import NaturalnessScorer
 
 
 class VoiceJudgesSmokeEval:
@@ -70,6 +74,7 @@ class VoiceJudgesSmokeEval:
         return [
             AffectPerceptionJudgeScorer(judge=affect_judge),
             DeliveryJudgeScorer(judge=delivery_judge),
+            NaturalnessScorer(),
         ]
 
     def rollout_timeout_s(self) -> int:

@@ -49,8 +49,13 @@ class VoiceJudgesSmokeDataset:
                         },
                     ],
                     # Per-turn audio durations (seconds) — synthesized as silent WAVs.
-                    "user_audio_durations_s": [1.2, 0.9],
-                    "coach_audio_durations_s": [1.0, 1.4],
+                    # Sized so naturalness sub-metrics land in their ideal bands:
+                    #   coach turn 0: 9 words / 3.6s ≈ 150 wpm
+                    #   coach turn 1: 12 words / 4.8s = 150 wpm
+                    "user_audio_durations_s": [2.5, 1.8],
+                    "coach_audio_durations_s": [3.6, 4.8],
+                    # Pad between turns so silence_after_user falls in [1.5, 4.0]s.
+                    "silence_between_turns_s": 2.0,
                 },
                 expected={"opening_emotion": "anxious"},
             ),

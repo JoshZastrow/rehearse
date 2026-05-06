@@ -5,6 +5,7 @@ from rehearse.eval.scorers.content_judge import ContentJudgeScorer
 from rehearse.eval.scorers.delivery_judge import DeliveryJudgeScorer
 from rehearse.eval.scorers.deterministic import MMERecognitionScorer
 from rehearse.eval.scorers.llm_judge import LLMJudge, LLMJudgeError, TrajectoryJudgeScorer
+from rehearse.eval.scorers.naturalness import NaturalnessScorer
 
 __all__ = [
     "AffectPerceptionJudgeScorer",
@@ -16,6 +17,7 @@ __all__ = [
     "LLMJudge",
     "LLMJudgeError",
     "MMERecognitionScorer",
+    "NaturalnessScorer",
     "StubAudioJudge",
     "TrajectoryJudgeScorer",
 ]

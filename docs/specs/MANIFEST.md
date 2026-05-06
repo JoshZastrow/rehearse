@@ -33,6 +33,13 @@ the phase you are building.
 | [`v2026-04-27-runtime.md`](v2026-04-27-runtime.md) | `acknowledged` | `implementation` | Runtime phases R1-R7 | Read with the Drop Pipecat amendment. Sections C3, C5, and C7 are no longer authoritative. |
 | [`v2026-04-28-drop-pipecat.md`](v2026-04-28-drop-pipecat.md) | `acknowledged` | `amendment` | Runtime phases R2-R7, eval simulated transport | Authoritative replacement for Pipecat-shaped runtime pieces. |
 | [`v2026-04-28-hume-evi-bridge.md`](v2026-04-28-hume-evi-bridge.md) | `superseded` | `historical` | Runtime R2 decision history | Kept only to explain the bridge decision. Do not implement from it. |
+| [`v2026-04-28-runtime-workstream.md`](v2026-04-28-runtime-workstream.md) | `done` | `implementation` | Runtime workstream end-to-end integration | Verified end-to-end 2026-05-01. Reference for runtime wiring and bus/storage contracts. |
+| [`v2026-05-01-consent-and-outcome-capture.md`](v2026-05-01-consent-and-outcome-capture.md) | `acknowledged` | `implementation` | Consent capture + inline end-of-call outcome | Amended 2026-05-05 to capture outcome inline rather than via deferred SMS. Gates production-replay eval. |
+| [`v2026-05-05-multimodal-trajectory-rubric-rlaif.md`](v2026-05-05-multimodal-trajectory-rubric-rlaif.md) | `acknowledged` | `amendment` | Eval rubric + runtime BoN + RLAIF data shape | Amends 04-29 §6.3, §7. Introduces multimodal rubric, runtime Best-of-N, naturalness + stability metrics. Decomposed into the 05-06 roadmap. |
+| [`v2026-05-06-eval-system-roadmap.md`](v2026-05-06-eval-system-roadmap.md) | `wip` | `implementation` | Eval system sequencing | Roadmap that decomposes the 05-05 spec into mini-specs. **Shipped**: Mini-spec 0 (DeepEval adapter, commit 55c916c), Mini-spec 1 (schema + content judge + aggregator, commit fc34cbe), Mini-spec 2 first half (audio judges + voice-judges-smoke), Mini-spec 4 first half (NaturalnessScorer + fixture-emitted timing.jsonl). **Open**: Mini-spec 2 second half (sandbox TTS for real audio), Mini-spec 4 second half (live runtime timing instrumentation on the bus), Mini-spec 3 (calibration + voice rating UI), Mini-spec 5 (production replay), Mini-spec 6 (runtime BoN), Mini-spec 7 (preference pairs), Mini-spec 8 (stability). |
+| [`v2026-05-06-expressiveness-evaluation.md`](v2026-05-06-expressiveness-evaluation.md) | `acknowledged` | `amendment` | Expressiveness measurement under `delivery_quality` | Options-stage spec for the vibe-check problem the 05-05 rubric folds into a single audio-judge dimension. Pending decision on primary signal shape (pairwise vs anchored multi-dim). |
+| [`v2026-05-06-hume-config-as-code.md`](v2026-05-06-hume-config-as-code.md) | `acknowledged` | `implementation` | Hume EVI persona/config management | Move Hume EVI configs from dashboard to versioned code. Touches `rehearse/services/hume_evi.py`, `rehearse/config.py`. |
+| [`v2026-05-06-time-aware-clm.md`](v2026-05-06-time-aware-clm.md) | `done` | `implementation` | Per-turn time card injection into CLM | Shipped via commits 8601f1c → a54d91b. TimeCard built and rendered as a second cached system block on every CLM turn. |
 
 ## Workstream Map
 
@@ -41,8 +48,11 @@ the phase you are building.
 | Eval harness maintenance | `v2026-04-27-eval-harness.md` | `v2026-04-28-hume-evi-bridge.md` |
 | Audio-native eval work | `v2026-04-27-eval-harness.md`, `v2026-04-28-mme-emotion-and-audio-targets.md` | `v2026-04-28-hume-evi-bridge.md` |
 | RL-style sandbox eval work | `v2026-04-27-eval-harness.md`, `v2026-04-29-mme-seeded-rl-sandbox-eval.md` | `v2026-04-28-hume-evi-bridge.md` |
+| Multimodal eval + RLAIF | `v2026-05-05-multimodal-trajectory-rubric-rlaif.md`, `v2026-05-06-eval-system-roadmap.md`, `v2026-05-06-expressiveness-evaluation.md` | `v2026-04-28-hume-evi-bridge.md` |
 | Runtime R1 | `v2026-04-27-runtime.md` | `v2026-04-28-hume-evi-bridge.md` |
-| Runtime R2-R7 | `v2026-04-27-runtime.md`, `v2026-04-28-drop-pipecat.md` | `v2026-04-28-hume-evi-bridge.md`; superseded runtime sections C3, C5, C7 |
+| Runtime R2-R7 | `v2026-04-27-runtime.md`, `v2026-04-28-drop-pipecat.md`, `v2026-04-28-runtime-workstream.md` | `v2026-04-28-hume-evi-bridge.md`; superseded runtime sections C3, C5, C7 |
+| CLM / persona / Hume config | `v2026-05-06-hume-config-as-code.md`, `v2026-05-06-time-aware-clm.md` | `v2026-04-28-hume-evi-bridge.md` |
+| Consent + production data capture | `v2026-05-01-consent-and-outcome-capture.md`, `v2026-04-28-runtime-workstream.md` | `v2026-04-28-hume-evi-bridge.md` |
 | ML data pipeline | `../../SPEC.md` | No dedicated spec yet. Write one before implementation. |
 
 ## Update Rules

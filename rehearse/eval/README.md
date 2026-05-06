@@ -155,6 +155,39 @@ uv run pytest tests/eval/
 Tests cover protocol conformance, runner end-to-end, subprocess isolation, the
 MME-Emotion dataset/eval shape, and the deterministic recognition scorer.
 
+## Naturalness Scorer (Spec 4 — sandbox half)
+
+Deterministic timing-derived voice metrics. No LLM, no calibration ρ;
+pinned thresholds versioned via `thresholds_version`.
+
+| Sub-metric | Reads | Bands |
+|---|---|---|
+| `naturalness.interruption_rate` | `timing.jsonl` | 0.0 events/turn ideal · ≤0.2 acceptable · >0.5 pathological |
+| `naturalness.silence_after_affect` | `timing.jsonl` | 1.5–4.0s ideal · 1.0–1.5s or 4.0–6.0s acceptable · else pathological |
+| `naturalness.speech_rate_band` | `timing.jsonl` + `transcript.jsonl` | 130–170 wpm ideal · 100–200 acceptable · else pathological |
+
+Backchannels under 250ms of overlap don't count as interruption.
+`silence_after_affect` is computed over all user turns in v0; the
+audio-judge-flagged refinement waits on Spec 2's affect flags
+threading into timing data.
+
+### timing.jsonl shape
+
+One JSON object per turn boundary event:
+
+```json
+{"turn_index": 0, "role": "user", "event": "audio_start", "t_ms": 0}
+{"turn_index": 0, "role": "user", "event": "audio_end", "t_ms": 2000, "duration_ms": 2000}
+{"turn_index": 0, "role": "coach", "event": "audio_start", "t_ms": 4500}
+{"turn_index": 0, "role": "coach", "event": "audio_end", "t_ms": 6000, "duration_ms": 1500}
+```
+
+The `audio-fixture` environment generates this file from per-role
+audio durations on the example payload (sequential, with optional
+`silence_between_turns_s` padding). Sandbox + production runtime
+emission of `timing.jsonl` from the live audio bus is the remaining
+half of Spec 4 (a separate runtime change).
+
 ## Audio Judges (Spec 2 — partial)
 
 Two multimodal-LLM judges that score the *voice* side of a coaching call.
