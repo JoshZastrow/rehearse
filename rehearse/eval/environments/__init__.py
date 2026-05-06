@@ -10,6 +10,7 @@ from collections.abc import Callable
 
 from rehearse.eval.environments.audio_fixture import AudioFixtureEnvironment
 from rehearse.eval.environments.multimodal_llm import MultimodalLLMEnvironment
+from rehearse.eval.environments.production_replay import ProductionReplayEnvironment
 from rehearse.eval.environments.voice_agent_sandbox import VoiceAgentSandboxEnvironment
 from rehearse.eval.protocols import Environment
 from rehearse.eval.targets.echo import EchoTarget
@@ -23,6 +24,7 @@ ENVIRONMENTS: dict[str, EnvironmentFactory] = {
     "multimodal-llm": lambda slots: MultimodalLLMEnvironment(model_slots=slots),
     "voice-agent-sandbox": lambda slots: VoiceAgentSandboxEnvironment(model_slots=slots),
     "audio-fixture": lambda slots: AudioFixtureEnvironment(model_slots=slots),
+    "production-replay": lambda slots: ProductionReplayEnvironment(model_slots=slots),
 }
 
 

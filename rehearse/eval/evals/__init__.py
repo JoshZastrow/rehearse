@@ -12,6 +12,7 @@ from rehearse.eval.evals.coach_dialogue_smoke import CoachDialogueSmokeEval
 from rehearse.eval.evals.mme_emotion import MMEEmotionEval
 from rehearse.eval.evals.mme_sandbox_rollout import MMESandboxRolloutEval
 from rehearse.eval.evals.noop import NoopEval
+from rehearse.eval.evals.production_voice_replay import ProductionVoiceReplayEval
 from rehearse.eval.evals.voice_agent_smoke import VoiceAgentSmokeEval
 from rehearse.eval.evals.voice_judges_smoke import VoiceJudgesSmokeEval
 from rehearse.eval.protocols import Eval
@@ -23,6 +24,7 @@ EVALS: dict[str, Callable[[], Eval]] = {
     "coach-dialogue-smoke": CoachDialogueSmokeEval,
     "mme-sandbox-rollout": MMESandboxRolloutEval,
     "voice-judges-smoke": VoiceJudgesSmokeEval,
+    "production-voice-replay": ProductionVoiceReplayEval,
 }
 
 

@@ -23,7 +23,7 @@ from rehearse.eval.scorers.llm_judge import TrajectoryJudgeScorer
 class MMESandboxRolloutEval:
     name = "mme-sandbox-rollout"
     version = "v0"
-    supported_environments = frozenset({"voice-agent-sandbox"})
+    supported_environments = frozenset({"voice-agent-sandbox", "production-replay"})
     preferred_environment = "voice-agent-sandbox"
 
     def __init__(self) -> None:
