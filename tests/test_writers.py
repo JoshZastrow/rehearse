@@ -264,6 +264,122 @@ async def test_timing_writer_segments_turns_and_persists(
 
 
 @pytest.mark.asyncio
+async def test_timing_writer_output_round_trips_through_naturalness_scorer(
+    writer_store: LocalFilesystemStore,
+) -> None:
+    """End-to-end: TimingWriter output is consumable by NaturalnessScorer.
+
+    Drives the writer with a realistic two-turn user/coach exchange,
+    then writes a matching transcript.jsonl and runs NaturalnessScorer
+    over the resulting artifacts dir. Confirms the file shape contract
+    between the live-runtime writer and the offline scorer without
+    needing a real call.
+    """
+    from datetime import datetime
+
+    from rehearse.eval.protocols import BenchmarkExample, RolloutResult
+    from rehearse.eval.scorers.naturalness import NaturalnessScorer
+
+    session_id = writer_store._test_session_id  # type: ignore[attr-defined]
+
+    # Wall-clock readings (s): user speaks 0.0-2.0, coach replies 2.5-4.5,
+    # user speaks again 5.5-7.0, coach replies 7.7-9.5. No interruptions;
+    # ~600ms+ silence between user end and coach start.
+    ticks = iter(
+        [
+            0.0, 0.5, 1.0, 1.5, 2.0,           # user turn 0 (5 chunks)
+            2.5, 3.0, 3.5, 4.0, 4.5,           # coach turn 0
+            5.5, 6.0, 6.5, 7.0,                # user turn 1
+            7.7, 8.2, 8.7, 9.2, 9.5,           # coach turn 1
+        ]
+    )
+    writer = TimingWriter(
+        session_id,
+        writer_store,
+        silence_threshold_ms=600,
+        clock=lambda: next(ticks),
+    )
+
+    # 500ms PCM16 chunk: 16000 * 0.5 * 2 = 16000 bytes.
+    chunk_500ms = b"\x00\x00" * 8000
+    chunk_300ms = b"\x00\x00" * 4800  # last coach chunk slightly shorter
+
+    def _u() -> AudioChunk:
+        return AudioChunk(
+            session_id=session_id, speaker=Speaker.USER, pcm16_16k=chunk_500ms, ts=0.0
+        )
+
+    def _c(short: bool = False) -> AudioChunk:
+        return AudioChunk(
+            session_id=session_id,
+            speaker=Speaker.COACH,
+            pcm16_16k=chunk_300ms if short else chunk_500ms,
+            ts=0.0,
+        )
+
+    frames = [
+        _u(), _u(), _u(), _u(), _u(),                          # user turn 0
+        _c(), _c(), _c(), _c(), _c(),                          # coach turn 0
+        _u(), _u(), _u(), _u(),                                # user turn 1
+        _c(), _c(), _c(), _c(), _c(short=True),                # coach turn 1
+    ]
+    await writer.run(_iter_frames(frames))
+
+    # Realistic coach transcript so speech_rate_band can compute wpm.
+    coach_text = "I hear you, and I am with you here as we work through this together"
+    transcript_path = writer_store.session_dir(session_id) / "transcript.jsonl"
+    transcript_path.write_text(
+        "\n".join(
+            json.dumps(row)
+            for row in [
+                {"speaker": "user", "text": "I am really stressed about this call"},
+                {"speaker": "coach", "text": coach_text},
+                {"speaker": "user", "text": "what should I open with"},
+                {"speaker": "coach", "text": coach_text},
+            ]
+        )
+        + "\n"
+    )
+
+    artifacts_dir = writer_store.session_dir(session_id)
+    rollout = RolloutResult(
+        example_id="rt-1",
+        target_name="rt",
+        target_version="v0",
+        status="ok",
+        started_at=datetime(2026, 5, 6, 12, 0, 0),
+        completed_at=datetime(2026, 5, 6, 12, 0, 10),
+        duration_ms=10_000,
+        artifacts_dir=artifacts_dir,
+    )
+
+    rows = await NaturalnessScorer().score(
+        BenchmarkExample(id="rt-1", benchmark="b", payload={}),
+        rollout,
+        run_id="rt-run",
+    )
+
+    by_dim = {row.dimension: row for row in rows}
+    assert set(by_dim) == {
+        "naturalness.interruption_rate",
+        "naturalness.silence_after_affect",
+        "naturalness.speech_rate_band",
+    }
+    # No flags — writer-emitted timing.jsonl is well-formed and complete.
+    for row in rows:
+        assert "timing_missing" not in row.flags, row
+
+    # No coach starts overlap user turns → ideal interruption_rate.
+    assert by_dim["naturalness.interruption_rate"].value == 1.0
+    # User-end → coach-start gaps are 500ms and 700ms (mean 600ms): below the
+    # 1.0s acceptable lower bound → pathological band, value 0.0.
+    assert by_dim["naturalness.silence_after_affect"].value == 0.0
+    # Speech-rate-band is computed; non-zero rationale string proves the wpm
+    # math ran against the writer-emitted coach intervals.
+    assert "wpm" in by_dim["naturalness.speech_rate_band"].rationale
+
+
+@pytest.mark.asyncio
 async def test_telemetry_logger_writes_assistant_events_only(
     writer_store: LocalFilesystemStore,
 ) -> None:
