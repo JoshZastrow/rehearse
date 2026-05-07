@@ -11,10 +11,12 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 import structlog
+from anthropic import AsyncAnthropic
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from rehearse.agents import build_clm_responder, mount_clm_routes
+from rehearse.agents.clm import validate_anthropic_credentials
 from rehearse.config import RuntimeConfig
 from rehearse.finalize_sweeper import FinalizeSweeper
 from rehearse.session import SessionOrchestrator
@@ -61,7 +63,12 @@ def create_app(config: RuntimeConfig | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
-        """Run the finalize sweeper for the duration of the FastAPI app."""
+        """Validate provider credentials, then run background tasks for the app."""
+        if config.anthropic_api_key:
+            await validate_anthropic_credentials(
+                AsyncAnthropic(api_key=config.anthropic_api_key),
+                config.anthropic_model,
+            )
         if config.finalize_sweep_enabled:
             sweeper.start()
         try:

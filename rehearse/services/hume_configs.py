@@ -144,13 +144,16 @@ _RELATIONSHIP_PROMPT = (
 )
 
 
-# Hume's `CUSTOM_LANGUAGE_MODEL` provider requires `model_resource` to be the
-# OpenAI-compatible chat-completions URL it should call on every assistant
-# turn. Each environment has its own URL (and its own Hume workspace mapping
-# in `sessions/.hume_configs.json`), so this is read from env at registry-load
-# time rather than baked into source.
-_CLM_BASE_URL = os.environ.get("BASE_URL", "https://localhost.invalid").rstrip("/")
-_CLM_URL = f"{_CLM_BASE_URL}/chat/completions"
+# Hume's `CUSTOM_LANGUAGE_MODEL` provider requires `model_resource` to be
+# the full OpenAI-compatible chat-completions URL ending in
+# `/chat/completions`. (The API explicitly rejects bare base URLs with
+# "model_resource is not valid".) Each environment has its own URL (and its
+# own Hume workspace mapping in `sessions/.hume_configs.json`), so this is
+# read from env at registry-load time rather than baked into source.
+_CLM_URL = (
+    os.environ.get("BASE_URL", "https://localhost.invalid").rstrip("/")
+    + "/chat/completions"
+)
 
 
 PERSONAS: dict[str, HumePersonaConfig] = {

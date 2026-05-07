@@ -13,10 +13,19 @@ from collections.abc import AsyncIterator, Callable, Iterable
 from datetime import datetime
 from typing import Any, Protocol
 
+import anthropic
+import structlog
 from anthropic import AsyncAnthropic
 from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
+
+log = structlog.get_logger(__name__)
+
+# Spoken when the LLM fails mid-call. Plain language, neutral, short. The
+# point is to keep the SSE stream well-formed so Hume's session stays alive
+# rather than dropping with a clean 1000 OK close.
+CLM_FALLBACK_LINE = "Sorry, I had a brief glitch — what were you saying?"
 
 from rehearse.agents.timecard import build_time_card, render_time_card
 from rehearse.config import RuntimeConfig
@@ -135,16 +144,58 @@ class AnthropicCLMResponder:
             if card is not None:
                 system_blocks.append({"type": "text", "text": render_time_card(card)})
 
-        async with self._client.messages.stream(
-            model=self._model,
-            max_tokens=512,
-            temperature=0.4,
-            system=system_blocks,
-            messages=messages,
-        ) as stream:
-            async for text in stream.text_stream:
-                if text:
-                    yield text
+        # Any failure inside the Anthropic call (auth, rate limit, network,
+        # mid-stream provider error) yields a deterministic fallback line.
+        # Letting the exception bubble up would close the SSE stream after
+        # the preamble chunk only — Hume sees a malformed reply and ends the
+        # session. A short fallback keeps the call alive while we recover.
+        try:
+            async with self._client.messages.stream(
+                model=self._model,
+                max_tokens=512,
+                temperature=0.4,
+                system=system_blocks,
+                messages=messages,
+            ) as stream:
+                async for text in stream.text_stream:
+                    if text:
+                        yield text
+        except Exception as exc:
+            log.warning(
+                "clm.anthropic_error",
+                session_id=session_id,
+                role=role,
+                error=str(exc),
+                error_type=type(exc).__name__,
+            )
+            yield CLM_FALLBACK_LINE
+
+
+async def validate_anthropic_credentials(client: AsyncAnthropic, model: str) -> None:
+    """Send a cheap token-count request to verify the key works at startup.
+
+    Anthropic's `messages.count_tokens` does not consume model credits and
+    raises `AuthenticationError` for an invalid key. Boot fails loudly here
+    rather than silently killing every CLM turn during a live call. Other
+    transient errors (network, 5xx) are logged and tolerated — the runtime
+    can still boot, the in-call fallback line absorbs them.
+    """
+    try:
+        await client.messages.count_tokens(
+            model=model,
+            messages=[{"role": "user", "content": "ping"}],
+        )
+    except anthropic.AuthenticationError as exc:
+        raise RuntimeError(
+            f"Anthropic authentication failed for model {model!r}: {exc}. "
+            "Check ANTHROPIC_API_KEY in the environment."
+        ) from exc
+    except Exception as exc:
+        log.warning(
+            "clm.anthropic_validation_skipped",
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
 
 
 def build_clm_responder(config: RuntimeConfig) -> CLMResponder:

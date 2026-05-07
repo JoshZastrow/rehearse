@@ -477,3 +477,109 @@ async def test_anthropic_responder_uses_feedback_prompt_for_feedback_coach_role(
     static_prompt = kwargs["system"][0]["text"]
     assert "debriefing" in static_prompt.lower()
     assert "drop any character" in static_prompt.lower()
+
+
+class _FailingMessages:
+    """Pretend client.messages.stream that raises before yielding any text."""
+
+    def __init__(self, exc: Exception) -> None:
+        self._exc = exc
+
+    def stream(self, **_kwargs):
+        raise self._exc
+
+
+class _FailingClient:
+    def __init__(self, exc: Exception) -> None:
+        self.messages = _FailingMessages(exc)
+
+
+def _make_auth_error():
+    """Build a real anthropic.AuthenticationError that the SDK won't choke on."""
+    import anthropic
+    import httpx
+
+    req = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    resp = httpx.Response(401, request=req)
+    return anthropic.AuthenticationError(
+        message="invalid x-api-key", response=resp, body=None
+    )
+
+
+@pytest.mark.asyncio
+async def test_anthropic_responder_yields_fallback_on_provider_error(tmp_path):
+    """Anthropic 401/5xx must surface as a fallback line, not a broken stream."""
+    from rehearse.agents.clm import CLM_FALLBACK_LINE
+
+    store = LocalFilesystemStore(root=tmp_path, public_base_url="https://example.test")
+    responder = AnthropicCLMResponder(api_key="bogus", model="claude-test", store=store)
+    responder._client = _FailingClient(  # type: ignore[attr-defined]
+        _make_auth_error()
+    )
+
+    request = CLMChatRequest(messages=[CLMMessage(role="user", content="hi")])
+    chunks: list[str] = []
+    async for chunk in responder.stream_reply(
+        session_id=None, role="coach", request=request
+    ):
+        chunks.append(chunk)
+
+    assert chunks == [CLM_FALLBACK_LINE]
+
+
+@pytest.mark.asyncio
+async def test_validate_anthropic_credentials_raises_on_bad_key():
+    """Startup validation must convert AuthenticationError to a loud RuntimeError."""
+    from rehearse.agents.clm import validate_anthropic_credentials
+
+    class _FakeMessagesAuthErr:
+        async def count_tokens(self, **_kwargs):
+            raise _make_auth_error()
+
+    class _FakeClient:
+        def __init__(self):
+            self.messages = _FakeMessagesAuthErr()
+
+    with pytest.raises(RuntimeError, match="Anthropic authentication failed"):
+        await validate_anthropic_credentials(_FakeClient(), "claude-test")  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_validate_anthropic_credentials_tolerates_transient_errors():
+    """A network blip at boot should warn, not block the app from starting."""
+    from rehearse.agents.clm import validate_anthropic_credentials
+
+    class _FakeMessagesNetErr:
+        async def count_tokens(self, **_kwargs):
+            raise ConnectionError("dns resolve failed")
+
+    class _FakeClient:
+        def __init__(self):
+            self.messages = _FakeMessagesNetErr()
+
+    # Must not raise.
+    await validate_anthropic_credentials(_FakeClient(), "claude-test")  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_validate_anthropic_credentials_passes_on_success():
+    """A clean count_tokens response means the key works."""
+    from rehearse.agents.clm import validate_anthropic_credentials
+
+    seen: dict = {}
+
+    class _FakeMessagesOk:
+        async def count_tokens(self, **kwargs):
+            seen.update(kwargs)
+
+            class _Ok:
+                input_tokens = 1
+
+            return _Ok()
+
+    class _FakeClient:
+        def __init__(self):
+            self.messages = _FakeMessagesOk()
+
+    await validate_anthropic_credentials(_FakeClient(), "claude-test")  # type: ignore[arg-type]
+    assert seen["model"] == "claude-test"
