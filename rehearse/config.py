@@ -45,7 +45,10 @@ class RuntimeConfig:
     def from_env(cls, *, load_dotenv_file: bool = True) -> RuntimeConfig:
         """Build a runtime config from environment variables and return it."""
         if load_dotenv_file:
-            load_dotenv()
+            # `override=True` so `.env` is authoritative for this project. A
+            # stale `ANTHROPIC_API_KEY` exported in the shell silently
+            # shadowing an updated `.env` value cost us a real-call outage.
+            load_dotenv(override=True)
 
         required = {
             "TWILIO_ACCOUNT_SID": os.environ.get("TWILIO_ACCOUNT_SID"),
