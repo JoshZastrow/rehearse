@@ -185,7 +185,9 @@ PERSONAS: dict[str, HumePersonaConfig] = {
         interruption_min_ms=800,
         nudges_enabled=True,
         nudges_interval_secs=8,
-        builtin_tools=["web_search", "hang_up"],
+        # Hume rejects builtin_tools on CUSTOM_LANGUAGE_MODEL configs. Any
+        # tool surface for custom-LM personas would live on our CLM webhook.
+        builtin_tools=[],
     ),
     "relationship_coach": HumePersonaConfig(
         persona_key="relationship_coach",
@@ -215,7 +217,9 @@ PERSONAS: dict[str, HumePersonaConfig] = {
         interruption_min_ms=800,
         nudges_enabled=True,
         nudges_interval_secs=8,
-        builtin_tools=["web_search", "hang_up"],
+        # Hume rejects builtin_tools on CUSTOM_LANGUAGE_MODEL configs. Any
+        # tool surface for custom-LM personas would live on our CLM webhook.
+        builtin_tools=[],
     ),
 }
 
@@ -426,11 +430,13 @@ async def apply_sync(
 def _to_create_kwargs(persona: HumePersonaConfig) -> dict[str, Any]:
     """Render a persona into kwargs for `configs.create_config`.
 
-    Hume rejects `prompt` on configs that use `CUSTOM_LANGUAGE_MODEL` because
-    the system prompt is owned by the custom-LM endpoint per turn. For those
-    personas the registry's `prompt_text` is treated as in-code documentation
-    only and is not posted.
+    Hume rejects `prompt` and `builtin_tools` on configs that use
+    `CUSTOM_LANGUAGE_MODEL` because the system prompt and any tool surface
+    are owned by the custom-LM endpoint per turn. For those personas the
+    registry's `prompt_text` and `builtin_tools` are treated as in-code
+    documentation only and are not posted.
     """
+    is_custom_lm = persona.language_model.provider == "CUSTOM_LANGUAGE_MODEL"
     kwargs: dict[str, Any] = {
         "evi_version": persona.evi_version,
         "name": persona.display_name,
@@ -443,7 +449,7 @@ def _to_create_kwargs(persona: HumePersonaConfig) -> dict[str, Any]:
         "interruption": _render_interruption(persona),
         "builtin_tools": _render_builtin_tools(persona.builtin_tools),
     }
-    if persona.language_model.provider != "CUSTOM_LANGUAGE_MODEL":
+    if not is_custom_lm:
         kwargs["prompt"] = PostedConfigPromptSpec(text=persona.prompt_text)
     return kwargs
 
