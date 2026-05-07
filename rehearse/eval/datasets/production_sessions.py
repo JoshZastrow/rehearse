@@ -13,12 +13,24 @@ never be used to score data that will train a model.
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Iterable
 from pathlib import Path
 
 from rehearse.eval.protocols import BenchmarkExample
 
 DEFAULT_SESSIONS_ROOT = Path("sessions")
+
+
+def _consent_required_default() -> bool:
+    """Allow operator dogfood via `REHEARSE_REQUIRE_CONSENT=0`.
+
+    Default is `True`. Setting the env var to `0`/`false`/`no` bypasses
+    the consent gate so pre-consent-flow sessions can be scored locally.
+    Never use in any pipeline whose output trains a model.
+    """
+    raw = os.environ.get("REHEARSE_REQUIRE_CONSENT", "1").lower()
+    return raw not in ("0", "false", "no", "off")
 
 
 class ProductionSessionsDataset:
@@ -29,11 +41,13 @@ class ProductionSessionsDataset:
         self,
         sessions_root: Path | str = DEFAULT_SESSIONS_ROOT,
         *,
-        require_consent: bool = True,
+        require_consent: bool | None = None,
         session_ids: list[str] | None = None,
     ) -> None:
         self._root = Path(sessions_root)
-        self._require_consent = require_consent
+        self._require_consent = (
+            _consent_required_default() if require_consent is None else require_consent
+        )
         self._session_ids = session_ids
 
     def load(self) -> Iterable[BenchmarkExample]:
@@ -51,6 +65,10 @@ class ProductionSessionsDataset:
             transcript = session_dir / "transcript.jsonl"
             audio = session_dir / "audio.wav"
             if not (session_json.exists() and transcript.exists() and audio.exists()):
+                continue
+            # Skip bundles whose transcript never got written to (early
+            # disconnect, etc.) — they have no scoreable content.
+            if transcript.stat().st_size == 0:
                 continue
             try:
                 manifest = json.loads(session_json.read_text())

@@ -56,6 +56,15 @@ def test_dataset_filters_unconsented_by_default(tmp_path: Path) -> None:
     assert [e.id for e in examples] == ["granted-1"]
 
 
+def test_dataset_consent_gate_bypassed_via_env(tmp_path: Path, monkeypatch) -> None:
+    _make_session(tmp_path, "granted-1", consent="granted")
+    _make_session(tmp_path, "pending-1", consent="pending")
+
+    monkeypatch.setenv("REHEARSE_REQUIRE_CONSENT", "0")
+    examples = list(ProductionSessionsDataset(sessions_root=tmp_path).load())
+    assert sorted(e.id for e in examples) == ["granted-1", "pending-1"]
+
+
 def test_dataset_can_skip_consent_gate(tmp_path: Path) -> None:
     _make_session(tmp_path, "granted-1", consent="granted")
     _make_session(tmp_path, "pending-1", consent="pending")
@@ -76,6 +85,15 @@ def test_dataset_skips_incomplete_bundles(tmp_path: Path) -> None:
     bad.mkdir()
     (bad / "session.json").write_text('{"consent":"granted"}')
     (bad / "transcript.jsonl").write_text("")
+
+    examples = list(ProductionSessionsDataset(sessions_root=tmp_path).load())
+    assert [e.id for e in examples] == ["ok"]
+
+
+def test_dataset_skips_empty_transcripts(tmp_path: Path) -> None:
+    _make_session(tmp_path, "ok", consent="granted")
+    empty = _make_session(tmp_path, "early-disconnect", consent="granted")
+    (empty / "transcript.jsonl").write_text("")
 
     examples = list(ProductionSessionsDataset(sessions_root=tmp_path).load())
     assert [e.id for e in examples] == ["ok"]
