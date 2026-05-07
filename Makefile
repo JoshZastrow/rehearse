@@ -11,7 +11,7 @@ eval-list: ## list evals, datasets, environments
 eval-voice-replay: ## score 3 production sessions with stub judges (free)
 	uv run rehearse-eval run --eval production-voice-replay --limit 3
 
-eval-voice-replay-live: ## score 3 production sessions with real Gemini judges (needs GEMINI_API_KEY)
+eval-voice-replay-live: ## score 3 production sessions with real Gemini judges (default: 2.5-flash; override REHEARSE_AUDIO_JUDGE_MODEL=gemini-2.5-pro for stronger judge)
 	REHEARSE_AUDIO_JUDGE=live uv run rehearse-eval run --eval production-voice-replay --limit 3
 
 eval-voice-replay-dogfood: ## score 3 sessions ignoring the consent gate (operator-only, never for training data)

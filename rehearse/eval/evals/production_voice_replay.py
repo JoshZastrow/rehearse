@@ -40,8 +40,8 @@ class ProductionVoiceReplayEval:
     def scoring_plan(self) -> list[Scorer]:
         live = os.environ.get("REHEARSE_AUDIO_JUDGE", "").lower() == "live"
         if live:
-            affect_judge: AudioJudge | StubAudioJudge = AudioJudge(model="gemini-2.5-pro")
-            delivery_judge: AudioJudge | StubAudioJudge = AudioJudge(model="gemini-2.5-pro")
+            affect_judge: AudioJudge | StubAudioJudge = AudioJudge()
+            delivery_judge: AudioJudge | StubAudioJudge = AudioJudge()
         else:
             affect_judge = StubAudioJudge(
                 response={

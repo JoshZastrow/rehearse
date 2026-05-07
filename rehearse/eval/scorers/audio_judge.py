@@ -28,7 +28,17 @@ from pathlib import Path
 from typing import Any, Protocol
 
 _JSON_BLOCK = re.compile(r"\{.*\}", re.DOTALL)
-_DEFAULT_MODEL = "gemini-2.5-pro"
+_FALLBACK_MODEL = "gemini-2.5-flash"
+
+
+def _default_model() -> str:
+    """Resolve the default judge model at call time.
+
+    Defaults to the Flash tier — ~10–20× cheaper than Pro, still
+    audio-capable. Override per-run via `REHEARSE_AUDIO_JUDGE_MODEL=<id>`
+    (e.g. `gemini-2.5-pro`, `gemini-2.5-flash-lite`, `gemini-2.0-flash`).
+    """
+    return os.environ.get("REHEARSE_AUDIO_JUDGE_MODEL", _FALLBACK_MODEL)
 
 
 class AudioJudgeError(RuntimeError):
@@ -58,10 +68,10 @@ class AudioJudge:
     def __init__(
         self,
         *,
-        model: str = _DEFAULT_MODEL,
+        model: str | None = None,
         client: _AudioClient | None = None,
     ) -> None:
-        self.model = model
+        self.model = model or _default_model()
         self._client = client
 
     async def judge(
