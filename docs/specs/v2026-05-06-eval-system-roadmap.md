@@ -337,8 +337,25 @@ converts the speech to scalars (it does *not* interpret reasoning).
 
 ## 8. Mini-spec 4 — Timing Instrumentation + Naturalness Scorer
 
+**Status**: shipped (commits eaa8a7d + 7efc820, 2026-05-06).
 **Wave**: A (parallel with Spec 1). **Estimated size**: 2 weeks. **Risk**:
 medium (touches runtime audio path).
+
+Shipped artifacts:
+- `NaturalnessScorer` at `rehearse/eval/scorers/naturalness.py` (three
+  banded sub-metrics, `thresholds_version = "naturalness-v1"`).
+- Fixture-emitted `timing.jsonl` via `audio-fixture` environment.
+- Live-runtime `TimingWriter` at `rehearse/writers/artifacts.py:130`
+  segments per-speaker `AudioChunk` frames into turns (gap >
+  `silence_threshold_ms` closes a turn) and appends
+  `{turn_index, role, event, t_ms[, duration_ms]}` rows to
+  `timing.jsonl`. Wired into `rehearse/telephony.py` alongside the
+  other writers.
+- Round-trip integration test
+  (`tests/test_writers.py::test_timing_writer_output_round_trips_through_naturalness_scorer`)
+  drives the writer with synthetic frames and reads the result back
+  through `NaturalnessScorer` — confirms file-shape contract without
+  needing a live call.
 
 ### Outcome
 Every rollout — sandbox and production — emits `timing.jsonl`. A
