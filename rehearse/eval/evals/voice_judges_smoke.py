@@ -4,7 +4,9 @@ Exercises the full text + audio + timing scoring pipeline end-to-end
 without needing live API keys, real audio files, or provider credit.
 
 Composes:
-  - `VoiceJudgesSmokeDataset`: 1 example with fixture transcript +
+  - `VoiceJudgesSmokeDataset`: 5 examples spanning the valence × arousal
+    grid (anxious-avoidant, flat-withdrawn, escalating-frustrated,
+    relieved-content, excited-eager) with fixture transcripts +
     per-turn audio durations + `silence_between_turns_s` padding.
   - `audio-fixture` environment: synthesizes silent per-turn WAVs and
     a `timing.jsonl` derived from the durations.
@@ -30,6 +32,7 @@ from rehearse.eval.scorers.affect_perception_judge import AffectPerceptionJudgeS
 from rehearse.eval.scorers.audio_judge import AudioJudge, StubAudioJudge
 from rehearse.eval.scorers.delivery_judge import DeliveryJudgeScorer
 from rehearse.eval.scorers.naturalness import NaturalnessScorer
+from rehearse.eval.scorers.stability import StabilityScorer
 
 
 class VoiceJudgesSmokeEval:
@@ -76,6 +79,10 @@ class VoiceJudgesSmokeEval:
             DeliveryJudgeScorer(judge=delivery_judge),
             NaturalnessScorer(),
         ]
+
+    def meta_scoring_plan(self) -> list:
+        """Stability is diagnostic-only — emits rows only when reps > 1."""
+        return [StabilityScorer()]
 
     def rollout_timeout_s(self) -> int:
         return 60

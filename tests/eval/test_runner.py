@@ -50,3 +50,75 @@ async def test_unsupported_environment_rejected(tmp_path: Path):
     config = RunConfig(eval_name="noop", environment="raw-llm", runs_root=tmp_path)
     with pytest.raises(ValueError, match="does not support environment"):
         await execute_run(config)
+
+
+async def test_repetitions_runs_each_example_n_times_with_distinct_seeds(
+    tmp_path: Path,
+):
+    """With reps=3 and 2 examples, the runner must produce 6 rollouts; per
+    rep the rng_seed varies so downstream environments can produce
+    differentiated outputs."""
+    from rehearse.eval.evals import get_eval
+    from rehearse.eval.executors import InProcessExecutor
+    from rehearse.eval.protocols import RolloutResult
+
+    seen_seeds: list[int] = []
+    real_executor = InProcessExecutor()
+
+    class _SeedTrackingExecutor:
+        async def submit(self, **kwargs) -> RolloutResult:
+            seen_seeds.append(kwargs["rng_seed"])
+            return await real_executor.submit(**kwargs)
+
+    config = RunConfig(
+        eval_name="noop",
+        environment="echo",
+        repetitions=3,
+        runs_root=tmp_path,
+    )
+    outcome = await execute_run(config, executor=_SeedTrackingExecutor())
+
+    eval_spec = get_eval("noop")
+    n_examples = len(list(eval_spec.load()))
+    assert outcome.n_examples == n_examples  # examples, not rollouts
+    assert len(seen_seeds) == n_examples * 3
+    assert len(set(seen_seeds)) == n_examples * 3  # all distinct
+
+    # results.jsonl gets one row per (rollout, scorer); no meta-scorer attached.
+    lines = (outcome.run_dir / "results.jsonl").read_text().splitlines()
+    assert len(lines) == n_examples * 3
+
+
+async def test_meta_scoring_plan_invoked_with_grouped_rollouts(tmp_path: Path):
+    """An eval that exposes `meta_scoring_plan()` gets its meta-scorer called
+    once per example with all repetitions of that example grouped."""
+    from rehearse.eval.evals import EVALS
+    from rehearse.eval.evals.noop import NoopEval
+    from rehearse.eval.scorers.stability import StabilityScorer
+
+    class _NoopWithStability(NoopEval):
+        def meta_scoring_plan(self):  # noqa: D401
+            return [StabilityScorer()]
+
+    EVALS["noop-stability"] = _NoopWithStability
+    _NoopWithStability.supported_environments = frozenset({"echo"})
+    try:
+        config = RunConfig(
+            eval_name="noop-stability",
+            environment="echo",
+            repetitions=3,
+            runs_root=tmp_path,
+        )
+        outcome = await execute_run(config)
+
+        # Stability of identical 1.0 noop_scores → 1.0 per dimension.
+        assert outcome.aggregate_scores["stability.noop_score"] == 1.0
+    finally:
+        del EVALS["noop-stability"]
+
+
+async def test_repetitions_must_be_at_least_one():
+    import pytest
+
+    with pytest.raises(ValueError, match="repetitions"):
+        RunConfig(eval_name="noop", repetitions=0)

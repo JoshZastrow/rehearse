@@ -26,7 +26,7 @@ from uuid import uuid4
 from rehearse.eval.environments import get_environment
 from rehearse.eval.evals import get_eval
 from rehearse.eval.executors import LocalSubprocessExecutor
-from rehearse.eval.protocols import BenchmarkExample, Executor, RolloutResult
+from rehearse.eval.protocols import BenchmarkExample, Executor, MetaScorer, RolloutResult
 from rehearse.types import EvalRun, RubricScore
 
 
@@ -44,6 +44,7 @@ class RunConfig:
         model_slots: dict[str, str] | None = None,
         tag: str | None = None,
         runs_root: Path = Path("evals/runs"),
+        repetitions: int = 1,
     ) -> None:
         self.eval_name = eval_name or benchmark
         self.environment = environment or target
@@ -53,6 +54,9 @@ class RunConfig:
         self.model_slots = model_slots
         self.tag = tag
         self.runs_root = runs_root
+        if repetitions < 1:
+            raise ValueError("repetitions must be >= 1")
+        self.repetitions = repetitions
         if not self.eval_name:
             raise ValueError("RunConfig requires eval_name (or deprecated benchmark)")
 
@@ -64,6 +68,7 @@ class RunConfig:
     model_slots: dict[str, str] | None = None
     tag: str | None = None
     runs_root: Path = Path("evals/runs")
+    repetitions: int = 1
 
 
 @dataclass
@@ -104,28 +109,40 @@ async def execute_run(config: RunConfig, executor: Executor | None = None) -> Ru
     timeout_s = eval_spec.rollout_timeout_s()
     semaphore = asyncio.Semaphore(config.concurrency)
 
-    async def run_one(idx: int, ex: BenchmarkExample) -> RolloutResult:
+    reps = config.repetitions
+
+    async def run_one(idx: int, rep: int, ex: BenchmarkExample) -> RolloutResult:
         async with semaphore:
+            session_subdir = ex.id if reps == 1 else f"{ex.id}/rep-{rep}"
             return await executor.submit(
                 target_name=environment.name,
                 target_version=environment.version,
                 model_slots=model_slots,
                 example=ex,
-                run_dir=run_dir / "sessions" / ex.id,
+                run_dir=run_dir / "sessions" / session_subdir,
                 timeout_s=timeout_s,
-                rng_seed=config.seed + idx,
+                rng_seed=config.seed + idx * reps + rep,
             )
 
+    plan: list[tuple[int, int, BenchmarkExample]] = [
+        (i, rep, ex) for i, ex in enumerate(examples) for rep in range(reps)
+    ]
     rollouts: list[RolloutResult] = await asyncio.gather(
-        *(run_one(i, ex) for i, ex in enumerate(examples))
+        *(run_one(i, rep, ex) for i, rep, ex in plan)
     )
+    rollouts_by_example: dict[str, list[RolloutResult]] = defaultdict(list)
+    for (_, _, ex), ro in zip(plan, rollouts, strict=True):
+        rollouts_by_example[ex.id].append(ro)
 
     scorers = eval_spec.scoring_plan()
     all_scores: list[RubricScore] = []
-    for ex, ro in zip(examples, rollouts, strict=True):
+    per_rollout_scores: list[list[RubricScore]] = []
+    for (_, _, ex), ro in zip(plan, rollouts, strict=True):
         if ro.status != "ok":
-            (run_dir / "failures" / ex.id).mkdir(parents=True, exist_ok=True)
-            (run_dir / "failures" / ex.id / "error.txt").write_text(ro.error or "")
+            failure_dir = run_dir / "failures" / ex.id
+            failure_dir.mkdir(parents=True, exist_ok=True)
+            (failure_dir / "error.txt").write_text(ro.error or "")
+        rollout_scores: list[RubricScore] = []
         for scorer in scorers:
             try:
                 scores = await scorer.score(ex, ro, run_id=run_id)
@@ -140,7 +157,37 @@ async def execute_run(config: RunConfig, executor: Executor | None = None) -> Ru
                         rationale=f"scorer {scorer.name} crashed: {exc}",
                     )
                 ]
-            all_scores.extend(scores)
+            rollout_scores.extend(scores)
+        per_rollout_scores.append(rollout_scores)
+        all_scores.extend(rollout_scores)
+
+    meta_scorers = _meta_scoring_plan(eval_spec)
+    if meta_scorers:
+        # Group per_rollout_scores by example_id, preserving rollout order.
+        scores_by_example: dict[str, list[list[RubricScore]]] = defaultdict(list)
+        for (_, _, ex), rscores in zip(plan, per_rollout_scores, strict=True):
+            scores_by_example[ex.id].append(rscores)
+        for ex in examples:
+            ex_rollouts = rollouts_by_example[ex.id]
+            ex_per_rollout = scores_by_example[ex.id]
+            for meta in meta_scorers:
+                try:
+                    meta_rows = await meta.score_meta(
+                        ex, ex_rollouts, ex_per_rollout, run_id=run_id
+                    )
+                except Exception as exc:
+                    meta_rows = [
+                        RubricScore(
+                            run_id=run_id,
+                            example_id=ex.id,
+                            dimension=f"meta.{meta.name}",
+                            value=0.0,
+                            scorer="deterministic",
+                            modality="meta",
+                            rationale=f"meta-scorer {meta.name} crashed: {exc}",
+                        )
+                    ]
+                all_scores.extend(meta_rows)
 
     completed_at = datetime.now()
 
@@ -189,6 +236,18 @@ async def execute_run(config: RunConfig, executor: Executor | None = None) -> Ru
     )
 
 
+def _meta_scoring_plan(eval_spec) -> list[MetaScorer]:
+    """Read optional `meta_scoring_plan()` off an Eval; default to empty.
+
+    Kept off the `Eval` Protocol so existing evals stay protocol-conformant
+    without a no-op override.
+    """
+    factory = getattr(eval_spec, "meta_scoring_plan", None)
+    if factory is None:
+        return []
+    return list(factory())
+
+
 def _new_run_id() -> str:
     ts = datetime.now().strftime("%Y%m%dT%H%M%S")
     return f"{ts}-{uuid4().hex[:8]}"
@@ -225,6 +284,7 @@ def _render_summary(
         f"- Environment: **{environment_name}**",
         f"- Examples: {len(examples)} (ok={n_ok}, error={n_err}, timeout={n_to})",
         f"- Concurrency: {config.concurrency}",
+        f"- Repetitions: {config.repetitions}",
         f"- Seed: {config.seed}",
         f"- Started: {started_at.isoformat(timespec='seconds')}",
         f"- Duration: {duration_s:.1f}s",

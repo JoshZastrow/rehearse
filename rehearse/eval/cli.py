@@ -73,6 +73,15 @@ def _build_parser() -> argparse.ArgumentParser:
     run.add_argument("--concurrency", type=int, default=4)
     run.add_argument("--seed", type=int, default=0)
     run.add_argument(
+        "--repetitions",
+        type=int,
+        default=1,
+        help=(
+            "run each example N times with distinct rng_seeds; meta-scorers "
+            "(e.g. stability) consume the grouped rollouts"
+        ),
+    )
+    run.add_argument(
         "--model-slot",
         action="append",
         default=[],
@@ -157,6 +166,7 @@ def main(argv: list[str] | None = None) -> int:
             model_slots=model_slots,
             tag=args.tag,
             runs_root=args.runs_root,
+            repetitions=args.repetitions,
         )
         executor = InProcessExecutor(on_event=_print_event) if args.verbose else None
         outcome = asyncio.run(execute_run(config, executor=executor))
