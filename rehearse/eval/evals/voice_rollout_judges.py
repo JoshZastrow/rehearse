@@ -30,13 +30,15 @@ from collections.abc import Iterable
 
 from rehearse.eval.datasets.voice_rollout_judges import VoiceRolloutJudgesDataset
 from rehearse.eval.protocols import BenchmarkExample, Scorer
-from rehearse.eval.scorers.affect_perception_judge import AffectPerceptionJudgeScorer
 from rehearse.eval.scorers.aggregate import AggregateScorer
 from rehearse.eval.scorers.audio_judge import AudioJudge
 from rehearse.eval.scorers.composite import CompositeScorer
-from rehearse.eval.scorers.content_judge import ContentJudgeScorer
-from rehearse.eval.scorers.delivery_judge import DeliveryJudgeScorer
 from rehearse.eval.scorers.naturalness import NaturalnessScorer
+from rehearse.eval.scorers.strict_audio_judges import (
+    StrictAffectPerceptionJudgeScorer,
+    StrictDeliveryJudgeScorer,
+)
+from rehearse.eval.scorers.strict_content_judge import StrictContentJudgeScorer
 
 
 _DEFAULT_WEIGHTS: dict[str, float] = {
@@ -63,9 +65,9 @@ class VoiceRolloutJudgesEval:
 
     def scoring_plan(self) -> list[Scorer]:
         children: list[Scorer] = [
-            ContentJudgeScorer(),
-            AffectPerceptionJudgeScorer(judge=AudioJudge()),
-            DeliveryJudgeScorer(judge=AudioJudge()),
+            StrictContentJudgeScorer(),
+            StrictAffectPerceptionJudgeScorer(judge=AudioJudge()),
+            StrictDeliveryJudgeScorer(judge=AudioJudge()),
             NaturalnessScorer(),
         ]
         aggregator = AggregateScorer(weights=_DEFAULT_WEIGHTS)
