@@ -15,6 +15,7 @@ from rehearse.eval.evals.noop import NoopEval
 from rehearse.eval.evals.production_voice_replay import ProductionVoiceReplayEval
 from rehearse.eval.evals.voice_agent_smoke import VoiceAgentSmokeEval
 from rehearse.eval.evals.voice_judges_smoke import VoiceJudgesSmokeEval
+from rehearse.eval.evals.voice_rollout_judges import VoiceRolloutJudgesEval
 from rehearse.eval.protocols import Eval
 
 EVALS: dict[str, Callable[[], Eval]] = {
@@ -25,6 +26,7 @@ EVALS: dict[str, Callable[[], Eval]] = {
     "mme-sandbox-rollout": MMESandboxRolloutEval,
     "voice-judges-smoke": VoiceJudgesSmokeEval,
     "production-voice-replay": ProductionVoiceReplayEval,
+    "voice-rollout-judges": VoiceRolloutJudgesEval,
 }
 
 
