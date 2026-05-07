@@ -25,7 +25,8 @@ def test_default_persona_is_registered():
     assert persona.voice.name == "Inspiring Woman"
     assert persona.voice.provider == "HUME_AI"
     assert persona.language_model.provider == "CUSTOM_LANGUAGE_MODEL"
-    assert persona.language_model.model is None
+    assert persona.language_model.model is not None
+    assert persona.language_model.model.endswith("/chat/completions")
     assert persona.timeouts.max_duration_secs == 300
     assert "web_search" in persona.builtin_tools
 
@@ -103,10 +104,34 @@ def test_plan_sync_new_version_when_voice_drifts():
     assert any("voice" in entry for entry in default_action.diff)
 
 
-def test_plan_sync_new_version_when_prompt_drifts():
-    snapshot = _remote_from_persona(PERSONAS["default"], config_id="cfg_123")
-    snapshot.prompt_text = snapshot.prompt_text + "\nextra line"
+def test_plan_sync_ignores_prompt_drift_for_custom_lm_personas():
+    """Custom-LM personas don't post prompt_text to Hume, so the field always
+    looks empty on the remote side. Comparing it would create a permanent
+    drift loop. Verify the diff skips prompt_text for those personas.
+    """
+    persona = PERSONAS["default"]
+    assert persona.language_model.provider == "CUSTOM_LANGUAGE_MODEL"
+    snapshot = _remote_from_persona(persona, config_id="cfg_123")
+    snapshot.prompt_text = ""  # what Hume actually returns for custom-LM configs
     actions = plan_sync(PERSONAS, remote_configs=[snapshot])
+    default_action = next(a for a in actions if a.persona.persona_key == "default")
+    assert isinstance(default_action, NoOp)
+
+
+def test_plan_sync_new_version_when_prompt_drifts_for_native_lm():
+    """Personas that DO post prompt_text (any non-custom provider) must still
+    surface prompt drift as NEW_VERSION.
+    """
+    persona = PERSONAS["default"].model_copy(
+        update={
+            "language_model": PERSONAS["default"].language_model.model_copy(
+                update={"provider": "ANTHROPIC", "model": "claude-sonnet-4"}
+            )
+        }
+    )
+    snapshot = _remote_from_persona(persona, config_id="cfg_123")
+    snapshot.prompt_text = snapshot.prompt_text + "\nextra line"
+    actions = plan_sync({"default": persona}, remote_configs=[snapshot])
     default_action = next(a for a in actions if a.persona.persona_key == "default")
     assert isinstance(default_action, NewVersion)
     assert any("prompt_text" in entry for entry in default_action.diff)

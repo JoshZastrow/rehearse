@@ -144,6 +144,15 @@ _RELATIONSHIP_PROMPT = (
 )
 
 
+# Hume's `CUSTOM_LANGUAGE_MODEL` provider requires `model_resource` to be the
+# OpenAI-compatible chat-completions URL it should call on every assistant
+# turn. Each environment has its own URL (and its own Hume workspace mapping
+# in `sessions/.hume_configs.json`), so this is read from env at registry-load
+# time rather than baked into source.
+_CLM_BASE_URL = os.environ.get("BASE_URL", "https://localhost.invalid").rstrip("/")
+_CLM_URL = f"{_CLM_BASE_URL}/chat/completions"
+
+
 PERSONAS: dict[str, HumePersonaConfig] = {
     "default": HumePersonaConfig(
         persona_key="default",
@@ -161,7 +170,7 @@ PERSONAS: dict[str, HumePersonaConfig] = {
         # docs/specs/v2026-05-06-persona-config-swap.md.
         language_model=HumeLanguageModel(
             provider="CUSTOM_LANGUAGE_MODEL",
-            model=None,
+            model=_CLM_URL,
         ),
         prompt_text=_DEFAULT_PROMPT,
         on_new_chat=HumeEventMessage(enabled=True, text="Hey there, what's on the mind?"),
@@ -189,7 +198,7 @@ PERSONAS: dict[str, HumePersonaConfig] = {
         voice=HumeVoice(name="Inspiring Woman", provider="HUME_AI"),
         language_model=HumeLanguageModel(
             provider="CUSTOM_LANGUAGE_MODEL",
-            model=None,
+            model=_CLM_URL,
         ),
         prompt_text=_RELATIONSHIP_PROMPT,
         on_new_chat=HumeEventMessage(
@@ -310,12 +319,43 @@ def plan_sync(
 
 
 def _diff_fields(persona: HumePersonaConfig, snap: RemoteConfigSnapshot) -> list[str]:
-    """Return the list of compared field names that differ between two configs."""
+    """Return the list of compared field names that differ between two configs.
+
+    Custom-LM personas don't post `prompt_text` to Hume, so the remote always
+    reports it empty. Skip the field for those personas to avoid permanent
+    drift in the diff output.
+    """
+    skip = (
+        {"prompt_text"}
+        if persona.language_model.provider == "CUSTOM_LANGUAGE_MODEL"
+        else set()
+    )
     diffs: list[str] = []
     for name in _COMPARED_FIELDS:
+        if name in skip:
+            continue
+        if name == "voice":
+            if not _voice_logically_equal(persona.voice, snap.voice):
+                diffs.append(name)
+            continue
         if getattr(persona, name) != getattr(snap, name):
             diffs.append(name)
     return diffs
+
+
+def _voice_logically_equal(local: HumeVoice, remote: HumeVoice) -> bool:
+    """Compare voices, ignoring the canonical id Hume injects when posting by name.
+
+    A persona declared as `HumeVoice(name="X", provider="HUME_AI")` (no id)
+    matches a remote response that has the same name and provider plus a
+    canonical id assigned by Hume. If the local config declares an explicit
+    id, both name and id must match.
+    """
+    if local.provider != remote.provider:
+        return False
+    if local.id is not None:
+        return local.id == remote.id and local.name == remote.name
+    return local.name == remote.name
 
 
 MAPPING_PATH_DEFAULT = Path("sessions/.hume_configs.json")
@@ -384,13 +424,18 @@ async def apply_sync(
 
 
 def _to_create_kwargs(persona: HumePersonaConfig) -> dict[str, Any]:
-    """Render a persona into kwargs for `configs.create_config`."""
-    return {
+    """Render a persona into kwargs for `configs.create_config`.
+
+    Hume rejects `prompt` on configs that use `CUSTOM_LANGUAGE_MODEL` because
+    the system prompt is owned by the custom-LM endpoint per turn. For those
+    personas the registry's `prompt_text` is treated as in-code documentation
+    only and is not posted.
+    """
+    kwargs: dict[str, Any] = {
         "evi_version": persona.evi_version,
         "name": persona.display_name,
         "voice": _render_voice(persona.voice),
         "language_model": _render_language_model(persona.language_model),
-        "prompt": PostedConfigPromptSpec(text=persona.prompt_text),
         "event_messages": _render_event_messages(persona),
         "timeouts": _render_timeouts(persona.timeouts),
         "turn_detection": _render_turn_detection(persona.turn_detection),
@@ -398,6 +443,9 @@ def _to_create_kwargs(persona: HumePersonaConfig) -> dict[str, Any]:
         "interruption": _render_interruption(persona),
         "builtin_tools": _render_builtin_tools(persona.builtin_tools),
     }
+    if persona.language_model.provider != "CUSTOM_LANGUAGE_MODEL":
+        kwargs["prompt"] = PostedConfigPromptSpec(text=persona.prompt_text)
+    return kwargs
 
 
 def _to_version_kwargs(persona: HumePersonaConfig) -> dict[str, Any]:
