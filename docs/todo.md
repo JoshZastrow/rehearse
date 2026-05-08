@@ -18,6 +18,12 @@ training loop the pitch depends on.
 
 ---
 
+## Runtime-Eval Alignment (2026-05-07 DX review)
+
+- [ ] **Pre-Phase 1 audit**: Before extracting `RuntimeHost`, document all global state, event loop assumptions, and Twilio lifecycle hooks in `telephony.py:mount_twilio_routes` that the extraction must preserve. (~1 hour; prevents a prod incident.)
+
+---
+
 ## Tomorrow's massive action plan
 
 - [ ] Refill the AI scoring credits (yesterday's run hit a quota wall before producing results).
