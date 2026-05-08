@@ -43,7 +43,7 @@ valid PCM16.
 
 ---
 
-## 2. Hume reconnect with backoff
+## 2. Hume reconnect with backoff — **shipped**
 
 **Severity:** P2 — one-shot reconnect already exists; sustained disruption
 ends the call.
@@ -61,6 +61,15 @@ call open forever (e.g. 15 seconds — under the Hume 5-min cap with margin).
 
 **Acceptance:** unit test with a `connect_fn` that fails twice then succeeds
 should produce one continuous event loop without an `EndOfCall(error)` frame.
+
+**Shipped:** `HumeEVIClient` now takes `reconnect_backoff_schedule_s`
+(default `(0.1, 0.5, 2.0, 5.0)`) and `reconnect_budget_s` (default 15s).
+A successful event after reconnect re-arms both counters so a later
+disruption gets a full retry window. Tests:
+`test_reconnect_within_budget_recovers_without_end_of_call`,
+`test_reconnect_state_resets_after_successful_event`,
+`test_reconnect_budget_caps_total_window`,
+`test_reconnect_schedule_exhausted_emits_end_of_call`.
 
 ---
 
@@ -93,7 +102,7 @@ test) and confirm the session still finalizes within `max_duration + grace`.
 
 ---
 
-## 4. Persist `SessionHandle` across restarts
+## 4. Persist `SessionHandle` across restarts — **shipped**
 
 **Severity:** P2 — restart loses in-flight calls. Acceptable in dev, not in
 prod.
@@ -113,6 +122,14 @@ naturally with item 3.
 
 **Acceptance:** kill the server mid-call, restart, verify the session is
 marked failed and any partial artifacts are still readable in the viewer.
+
+**Shipped:** `FinalizeSweeper.recover_orphans()` enumerates all
+`in_progress` sessions with no live handle and finalizes them as
+`failed` (synthesis still runs against partial artifacts via the
+existing `SessionOrchestrator.finalize` path). Wired into the FastAPI
+lifespan startup before the periodic sweeper starts. Tests:
+`test_recover_orphans_finalizes_in_progress_without_handles`,
+`test_recover_orphans_skips_session_with_active_handle`.
 
 ---
 
