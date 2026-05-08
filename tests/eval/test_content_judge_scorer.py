@@ -135,8 +135,14 @@ async def test_content_judge_zeroes_when_transcript_missing(tmp_path: Path) -> N
     assert rows[0].value == 0.0
 
 
-def test_content_judge_default_metric_is_geval() -> None:
-    """Constructor without `metric` builds a real DeepEval G-Eval metric."""
+def test_content_judge_default_metric_is_geval(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Constructor without `metric` builds a real DeepEval G-Eval metric.
+
+    DeepEval validates the API key during model construction, so we provide a
+    stub `ANTHROPIC_API_KEY` here. The test only checks the default factory
+    wires up a `GEval` instance — no API calls are made.
+    """
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-stub")
     scorer = ContentJudgeScorer()
     from deepeval.metrics import GEval
 

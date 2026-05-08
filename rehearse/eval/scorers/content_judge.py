@@ -50,10 +50,16 @@ _DEFAULT_CRITERIA = (
 def _build_default_geval(prompt_version: str) -> BaseMetric:
     """Construct the default G-Eval metric for content quality.
 
+    Uses DeepEval's `AnthropicModel` so the default judge is Claude (Sonnet)
+    rather than OpenAI's GPT. The codebase standardizes on Anthropic for text
+    judges; passing OpenAI here would force every CI/dev environment to set
+    `OPENAI_API_KEY` for what is otherwise an Anthropic-only stack.
+
     Imported lazily so the module loads even when DeepEval isn't fully
     initialized (e.g. during test collection without API keys).
     """
     from deepeval.metrics import GEval
+    from deepeval.models import AnthropicModel
     from deepeval.test_case import MultiTurnParams
 
     return GEval(
@@ -61,6 +67,7 @@ def _build_default_geval(prompt_version: str) -> BaseMetric:
         criteria=_DEFAULT_CRITERIA,
         evaluation_params=[MultiTurnParams.CONTENT, MultiTurnParams.ROLE],
         threshold=0.5,
+        model=AnthropicModel(model="claude-sonnet-4-5"),
     )
 
 

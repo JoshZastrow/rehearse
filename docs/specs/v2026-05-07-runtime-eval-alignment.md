@@ -195,6 +195,12 @@ Persisted to `evals/runs/{run_id}/sessions/{example_id}/customer_driver.json`.
 
 **The customer sends the first frame in every phase. The runtime does not send a greeting.** This matches the behavior of `ScriptedCustomerAgent` and the live Twilio path (the caller dials in; the IVR prompts). An `LLMCustomerDriver` implementation that waits for a runtime greeting will deadlock.
 
+**Phase transition events**: `RuntimeHost` sends a `control` event on every phase change:
+```python
+{"kind": "control", "payload": {"event": "phase_transition", "phase": "PRACTICE"}}
+```
+`LLMCustomerDriver` receives these events and switches its active prompt immediately. **Do not poll `runtime_phase()`** — receive the control event instead. This is event-driven, not polling, and consistent with the existing `ScriptedCustomerAgent` control event handling.
+
 #### What it does, turn by turn (v1: `LLMCustomerDriver`)
 
 1. Subscribes to phase transitions on the transport (or polls `runtime_phase()`).
@@ -276,6 +282,62 @@ The v1 reward signal is **content + intake fidelity**, both of which are computa
 
 Both paths are explicitly deferred. Re-introducing audio is a strict superset of v1 — the transport, host, and customer driver are designed so that adding `kind="audio"` events later does not change the v1 surface.
 
+### 5.6 FrameBus bridge inside RuntimeHost
+
+`RuntimeHost` uses `FrameBus` internally for fan-out to writer tasks. The `RuntimeTransport` is the external boundary. The bridge works as follows:
+
+```
+RuntimeTransport (external)           FrameBus (internal)
+────────────────────────────          ──────────────────────────────
+transport.receive() → text frame  →  bus.publish(TranscriptDelta(
+                                         role="user",
+                                         text=frame.payload["text"],
+                                         session_id=...))
+
+bus.subscribe() → TranscriptDelta  →  transport.send("text",
+  (role="assistant")                     {"text": delta.text,
+                                          "role": "assistant"})
+```
+
+`RuntimeHost.run()` spawns one reader loop (transport → bus) and one writer loop (bus → transport). All existing FrameBus subscribers (IntakeProcessor, PhaseProcessor, TranscriptWriter, etc.) attach to the internal bus unchanged — they never see the transport directly.
+
+For `TwilioBridgeTransport`, the bridge is inverted: audio from Twilio is already being transcribed by Hume EVI and arrives as `TranscriptDelta` events via Hume's websocket, not directly from the transport. The transport's `send()` method streams TTS audio back to Twilio.
+
+### 5.7 `CoachVoiceAdapter` — text-only vs audio coach
+
+In serving mode, the coach loop uses `HumeEVIClient` for TTS/voice output. In text-only eval mode, EVI is not available. `RuntimeHost` accepts a `CoachVoiceAdapter` that abstracts this:
+
+```python
+class CoachVoiceAdapter(Protocol):
+    async def respond(self, transcript: str, session_id: str) -> str:
+        """Call the CLM and return the coach's text response."""
+
+class TextOnlyCoachAdapter:
+    """Calls POST /chat/completions directly. No audio. Used in eval mode."""
+
+class HumeCoachAdapter:
+    """Routes through HumeEVIClient. Used in serving mode."""
+```
+
+`RuntimeHost.__init__` accepts `coach: CoachVoiceAdapter`. `RuntimeSandboxEnvironment` passes `TextOnlyCoachAdapter`. `mount_twilio_routes` passes `HumeCoachAdapter`. The runtime core never directly imports from `HumeEVIClient` — it calls `coach.respond()`.
+
+### 5.8 `IntakeComplete` signal — happens-before guarantee
+
+`IntakeProcessor` emits an `IntakeComplete` frame on the FrameBus when it finishes writing `intake.json`. `PhaseProcessor` awaits this signal before emitting the `INTAKE→PRACTICE` transition. This guarantees the persona compiler reads a complete `intake.json`:
+
+```python
+# in frames.py
+class IntakeComplete(Strict):
+    session_id: str
+    intake_path: str   # absolute path to intake.json
+
+Frame = AudioChunk | TranscriptDelta | ProsodyEvent | PhaseSignal | EndOfCall | ConsentResolved | IntakeComplete
+```
+
+If `IntakeProcessor` fails (LLM error, timeout), it emits `IntakeComplete` with an `error` flag so `PhaseProcessor` can decide whether to proceed or abort.
+
+Add `test_intake_complete_happens_before_practice()` to `test_runtime_host.py`: verify that `intake.json` is written before the `phase_transition` control event for PRACTICE is sent to the customer.
+
 ### 5.5 Verifier addition
 
 One new scorer in v1 under `rehearse/eval/scorers/`:
@@ -301,26 +363,39 @@ Existing composite scorers (content, affect, delivery, naturalness) keep their c
 
 The runtime core is real in both columns; only the edges (transport and customer) differ. Re-introducing audio is purely additive — it does not change the v1 surface.
 
+**Runtime task scope in eval mode (v1)**:
+
+| Task | Eval (text-only) | Serving | Note |
+|---|---|---|---|
+| PhaseProcessor | real | real | drives phase transitions |
+| IntakeProcessor | real | real | requires ANTHROPIC_API_KEY |
+| persona compiler | real | real | requires ANTHROPIC_API_KEY |
+| coach loop | real (text frames) | real (audio) | outputs text in v1 |
+| TranscriptWriter | real | real | writes transcript.jsonl |
+| TimingWriter | real (phase events only) | real | writes phase_timing.json |
+| ConsentGate | **skipped** (consent=GRANTED) | real | outcome probe not wired in v1 |
+| OutcomeProbe | **skipped** (no outcome signal in v1) | real | skipped: no outcome.json in v1 eval |
+| PersonaSwapCoordinator | **skipped** (no mid-call swap in v1) | real | deferred to follow-up |
+| ProsodyWriter | **skipped** (no audio in v1) | real | prosody.jsonl not produced |
+| AudioRecorder | **skipped** (no audio in v1) | real | audio/ dir not populated |
+| TelemetryLogger | **skipped** (not needed for eval signal) | real | telemetry not needed in eval |
+
 **Stub mode definition**: When `HUME_API_KEY` is not set, `runtime-sandbox` runs in stub mode: Hume TTS and Hume EVI are skipped, and coach turns are produced as text frames only. `ANTHROPIC_API_KEY` is **always required** (IntakeProcessor + persona compile use it). There is no all-stub mode that requires no credentials — the eval's signal depends on real LLM calls for intake and persona.
 
-## 7. Migration path (v1 — 5 phases)
+## 7. Migration path (v1 — 4 phases)
 
-### Phase 1 — Extract `RuntimeHost` (no behavior change)
+### Phase 1+2 — Extract `RuntimeHost` + lift transport (single PR)
 
-1. Read `telephony.py:mount_twilio_routes` and identify the runtime-wiring block (bus + phase processor + intake processor + persona compiler + coach loop).
-2. Move that block into `rehearse/runtime.py` as `RuntimeHost`.
-3. `mount_twilio_routes` becomes a thin adapter: build `TwilioBridgeTransport`, call `RuntimeHost.run`.
-4. Existing tests under `tests/test_telephony_*.py` and `tests/test_phases.py` continue to pass unchanged.
+Phases 1 and 2 are merged because they both refactor the foundational audio layer. `TwilioStream` and `HumeEVIClient` are entangled in a single `async with` block in `telephony.py`; separating them requires the transport layer to exist first. Landing these together avoids a mid-refactor state where `RuntimeHost` exists but `transport.py` is still in `eval/`.
 
-Verification: `pytest tests/` green; manual smoke of one Twilio session.
+1. Move `rehearse/eval/transports.py` to `rehearse/transport.py`. Update all imports.
+2. Read `telephony.py:media_stream` and document the wiring block (FrameBus + tasks). See §5.6 for the FrameBus-Transport bridge pattern.
+3. Create `rehearse/runtime.py` as `RuntimeHost`. Wire the internal FrameBus, spawn the tasks listed as "real" in the §6 task scope table. Expose `current_phase` as a thread-safe property (asyncio single-thread — plain attribute is safe; document this assumption).
+4. Create `TwilioBridgeTransport` that owns the `TwilioStream` + `HumeEVIClient` context managers and the `_pump_assistant_audio` task. `RuntimeHost` receives the transport and does not know whether it's `InMemoryDuplexTransport` or `TwilioBridgeTransport`.
+5. `mount_twilio_routes` becomes a thin adapter: build `TwilioBridgeTransport`, call `RuntimeHost.run`.
+6. Existing tests under `tests/test_telephony_*.py` and `tests/test_phases.py` continue to pass unchanged.
 
-### Phase 2 — Lift transport to `rehearse/transport.py` (text-only)
-
-1. Move `rehearse/eval/transports.py` to `rehearse/transport.py`.
-2. Update imports across `rehearse/eval/` to point at the new location.
-3. No new transport types in v1 — `InMemoryDuplexTransport` and `TwilioBridgeTransport` are sufficient.
-
-Verification: existing `tests/test_telephony_r1.py` green; eval imports still resolve.
+Verification: `pytest tests/` green; manual smoke of one Twilio session; eval imports resolve.
 
 ### Phase 3 — Phase-aware `LLMCustomerDriver`
 
@@ -331,7 +406,7 @@ Verification: existing `tests/test_telephony_r1.py` green; eval imports still re
 
 Verification: unit test that a fixed `scenario` produces an `IntakeRecord` whose `situation`/`relationship`/`stakes` match expectation within tolerance.
 
-### Phase 4 — `runtime-sandbox` env + `IntakeFidelityScorer`
+### Phase 4 (was 4) — `runtime-sandbox` env + `IntakeFidelityScorer`
 
 1. New `rehearse/eval/environments/runtime_sandbox.py` per §5.4.
 2. Update `voice_rollout_judges.py` eval to point at `runtime-sandbox` (add to `supported_environments`, set `preferred_environment`).
@@ -377,6 +452,40 @@ rehearse/eval/README.md               [update: add CustomerDriver to "Adding Pie
                                        eval artifact paths on every PR]
 ```
 
+**Test specifications** (each test file must cover these behaviors):
+
+`tests/test_runtime_host.py`:
+- happy path: 3 phases complete, all 5 artifacts written
+- `RuntimePhaseTimeoutError` raised when INTAKE exceeds `phase_timeout_s`
+- FrameBus bridge: text frame received from transport → `TranscriptDelta(speaker=USER)` published on bus
+- phase transition control event emitted on bus → sent to customer via transport
+- `current_phase` property returns correct phase after each transition
+- transport closed mid-call → clean shutdown, no hanging coroutines
+
+`tests/test_llm_customer_phase_aware.py`:
+- customer sends first frame without awaiting any runtime message
+- `phase_transition` control event received → prompt switches to PRACTICE/FEEDBACK variant
+- hard turn cap: `customer_driver.json` shows turns_per_phase capped
+- end-of-call control event → driver returns `CustomerDriverResult` cleanly
+- `@pytest.mark.live_api`: LLM generates coherent INTAKE monologue from scenario fields
+
+`tests/test_runtime_sandbox_rollout.py`:
+- preflight: missing `ANTHROPIC_API_KEY` → raises immediately at init (before any rollout)
+- full gather: host + customer both complete, `artifacts_dir` contains all 5 files
+- gather does not deadlock with a well-behaved stub `CustomerDriver`
+- provenance block appears in `summary.md` output
+- `rehearse-eval run --environment voice-agent-sandbox` prints deprecation warning to stderr
+
+`tests/test_intake_fidelity_scorer.py`:
+- `intake.json` present, `expected.intake_relationship` matches → score ≥ 0.8
+- `intake.json` present, `expected.intake_relationship` mismatches → score ≤ 0.3
+- `intake.json` missing → `flags=["intake_missing"]`, score 0.0, reason describes missing phase
+- no `expected.intake_*` fields → scorer returns empty list (no signal)
+- deliberate `_infer_relationship` regression → score drops on affected scenario
+
+**Import regression test** (add to `tests/eval/test_protocols.py` or new `tests/test_transport_move.py`):
+- After Phase 1+2 lands, all `rehearse/eval/` imports resolve without importing from old `eval/transports.py` path
+
 **Makefile targets to add:**
 
 ```makefile
@@ -387,12 +496,7 @@ eval-voice-rollout-live: ## run voice-rollout-judges with real Gemini judges (ne
     REHEARSE_AUDIO_JUDGE=live uv run rehearse-eval run --eval voice-rollout-judges --limit 3
 ```
 
-**scorer error message requirement**: Any scorer that reads an artifact file must raise a `ScorerArtifactError` (not a raw `FileNotFoundError`) with message format:
-```
-{ScorerName}: {artifact}.json not found in {run_dir}.
-This means RuntimeHost did not complete the {phase} phase.
-Check failures/{example_id}/ for the error that stopped the rollout.
-```
+**Scorer missing-artifact pattern**: `IntakeFidelityScorer` follows the existing scorer convention (see `DeliveryJudgeScorer`, `NaturalnessScorer`). If `intake.json` is missing, return a `RubricScore` with `flags=["intake_missing"]` and `reason="intake.json not found — RuntimeHost did not complete INTAKE phase. Check failures/{example_id}/."`. Do not raise. Other scorers must still be able to run for the same example.
 
 ## 9. Acceptance criteria
 
@@ -431,10 +535,10 @@ These were in earlier drafts of this spec but are explicitly deferred so v1 is s
 | Review | Trigger | Why | Runs | Status | Findings |
 |--------|---------|-----|------|--------|----------|
 | CEO Review | `/plan-ceo-review` | Scope & strategy | 0 | — | — |
-| Outside Voice | `/plan-devex-review` | Independent 2nd opinion | 1 | issues_found | 6 findings (extraction risk, stub mode, Phase 4 sequencing, schema identity) — 3 accepted, 3 deferred |
-| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 0 | — | — |
+| Outside Voice | `/plan-devex-review` + `/plan-eng-review` | Independent 2nd opinion | 2 | issues_found | DX: 6 findings (3 accepted, 3 deferred); Eng: 3 findings (all accepted — CoachVoiceAdapter, IntakeComplete signal, InMemoryTransport routing verified) |
+| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 1 | CLEAR (PLAN) | 8 issues: 3 arch (FrameBus bridge, eval-mode scope, Phase 1+2 merge), 2 quality (control events, scorer pattern), 1 test spec (15 codepaths added), 2 cross-model (coach seam, happens-before) |
 | Design Review | `/plan-design-review` | UI/UX gaps | 0 | — | — |
 | DX Review | `/plan-devex-review` | Developer experience gaps | 1 | CLEAR | score: 4/10 → 8/10, TTHW: unknown → 5min |
 
 - **UNRESOLVED:** 0 decisions
-- **VERDICT:** DX CLEARED — eng review required before shipping
+- **VERDICT:** ENG CLEARED + DX CLEARED — ready to implement

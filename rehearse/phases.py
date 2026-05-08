@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from rehearse.bus import FrameBus
-from rehearse.frames import EndOfCall, Frame, PhaseSignal, TranscriptDelta
+from rehearse.frames import EndOfCall, Frame, IntakeComplete, PhaseSignal, TranscriptDelta
 from rehearse.session import utcnow
 from rehearse.storage import LocalFilesystemStore
 from rehearse.types import ConsentState, Phase, PhaseTiming, Session, Speaker
@@ -60,6 +60,7 @@ class PhaseProcessor:
         budgets: PhaseBudgets | None = None,
         clock: Callable[[], datetime] = utcnow,
         consent_getter: Callable[[], ConsentState] | None = None,
+        wait_for_intake_complete: bool = False,
     ) -> None:
         """Store the session id, manifest store, bus, and timing dependencies."""
         self._session_id = session_id
@@ -71,6 +72,10 @@ class PhaseProcessor:
         self._current_phase = Phase.INTAKE
         self._phase_started_at: datetime | None = None
         self._final_user_turns = 0
+        # When True, INTAKE→PRACTICE transition is gated on receiving IntakeComplete.
+        # Used by RuntimeHost to guarantee intake.json is written before persona compile.
+        self._wait_for_intake_complete = wait_for_intake_complete
+        self._intake_complete_received = not wait_for_intake_complete
 
     @property
     def current_phase(self) -> Phase:
@@ -101,6 +106,8 @@ class PhaseProcessor:
                 if self._consent_getter() == ConsentState.GRANTED:
                     self._final_user_turns += 1
                     await self._maybe_advance_for_cue(frame)
+            elif isinstance(frame, IntakeComplete):
+                self._intake_complete_received = True
             elif isinstance(frame, EndOfCall):
                 break
         await self._close_current_phase()
@@ -128,6 +135,8 @@ class PhaseProcessor:
             and self._consent_getter() != ConsentState.GRANTED
         ):
             return
+        if self._current_phase == Phase.INTAKE and not self._intake_complete_received:
+            return
         budget = timedelta(seconds=self._budgets.for_phase(self._current_phase))
         if self._clock() - self._phase_started_at < budget:
             return
@@ -141,6 +150,8 @@ class PhaseProcessor:
         text = frame.text.lower()
         if self._current_phase == Phase.INTAKE:
             if self._consent_getter() != ConsentState.GRANTED:
+                return
+            if not self._intake_complete_received:
                 return
             if self._final_user_turns >= 2 and _matches_any(text, _INTAKE_READY_CUES):
                 await self._transition(Phase.PRACTICE, reason="cue")

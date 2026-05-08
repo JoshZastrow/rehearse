@@ -69,6 +69,19 @@ class ConsentResolved(Strict):
     ts: float
 
 
+class IntakeComplete(Strict):
+    """Signal that IntakeProcessor finished writing intake.json.
+
+    PhaseProcessor awaits this before emitting INTAKE→PRACTICE so the persona
+    compiler is guaranteed to read a complete intake.json. On IntakeProcessor
+    failure, `error` is set and PhaseProcessor decides whether to proceed.
+    """
+
+    session_id: str
+    intake_path: str
+    error: str | None = None
+
+
 Frame: TypeAlias = (
     AudioChunk
     | TranscriptDelta
@@ -76,4 +89,5 @@ Frame: TypeAlias = (
     | PhaseSignal
     | EndOfCall
     | ConsentResolved
+    | IntakeComplete
 )

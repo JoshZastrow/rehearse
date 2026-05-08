@@ -10,7 +10,8 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Callable
 from datetime import datetime
 
-from rehearse.frames import Frame, PhaseSignal, TranscriptDelta
+from rehearse.bus import FrameBus
+from rehearse.frames import Frame, IntakeComplete, PhaseSignal, TranscriptDelta
 from rehearse.personas import build_intake_record, compile_character
 from rehearse.session import utcnow
 from rehearse.storage import LocalFilesystemStore
@@ -27,14 +28,17 @@ class IntakeProcessor:
         *,
         phase_getter: Callable[[], Phase],
         clock: Callable[[], datetime] = utcnow,
+        bus: FrameBus | None = None,
     ) -> None:
         """Store the session id, manifest store, and current-phase callback."""
         self._session_id = session_id
         self._store = store
         self._phase_getter = phase_getter
         self._clock = clock
+        self._bus = bus
         self._phase = Phase.INTAKE
         self._user_turns: list[str] = []
+        self._intake_complete_emitted = False
 
     async def run(self, frames: AsyncIterator[Frame]) -> None:
         """Consume bus frames and update intake/persona artifacts as phases change."""
@@ -49,14 +53,17 @@ class IntakeProcessor:
                 await self._persist_intake()
                 if len(self._user_turns) >= 2:
                     await self._compile_persona()
+                    await self._emit_intake_complete()
             elif isinstance(frame, PhaseSignal):
                 self._phase = frame.to_phase
                 if frame.to_phase == Phase.PRACTICE:
                     await self._compile_persona()
+                    await self._emit_intake_complete()
         if self._user_turns and (
             self._phase != Phase.INTAKE or self._phase_getter() != Phase.INTAKE
         ):
             await self._compile_persona()
+            await self._emit_intake_complete()
 
     async def _persist_intake(self) -> None:
         """Write the latest intake guess into the session manifest."""
@@ -81,6 +88,16 @@ class IntakeProcessor:
         await self._store.update_session(
             self._session_id,
             lambda session: _apply_persona(session, compiled_at=compiled_at),
+        )
+
+    async def _emit_intake_complete(self) -> None:
+        """Emit IntakeComplete on the bus once (idempotent) when a bus is configured."""
+        if self._bus is None or self._intake_complete_emitted:
+            return
+        self._intake_complete_emitted = True
+        intake_path = str(self._store.session_dir(self._session_id) / "intake.json")
+        await self._bus.publish(
+            IntakeComplete(session_id=self._session_id, intake_path=intake_path)
         )
 
 

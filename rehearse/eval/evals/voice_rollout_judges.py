@@ -33,6 +33,7 @@ from rehearse.eval.protocols import BenchmarkExample, Scorer
 from rehearse.eval.scorers.aggregate import AggregateScorer
 from rehearse.eval.scorers.audio_judge import AudioJudge
 from rehearse.eval.scorers.composite import CompositeScorer
+from rehearse.eval.scorers.intake_fidelity import IntakeFidelityScorer
 from rehearse.eval.scorers.naturalness import NaturalnessScorer
 from rehearse.eval.scorers.strict_audio_judges import (
     StrictAffectPerceptionJudgeScorer,
@@ -40,22 +41,23 @@ from rehearse.eval.scorers.strict_audio_judges import (
 )
 from rehearse.eval.scorers.strict_content_judge import StrictContentJudgeScorer
 
-
+# Existing weights scaled by 0.95 to make room for intake_fidelity at 0.05.
 _DEFAULT_WEIGHTS: dict[str, float] = {
-    "content_quality": 0.40,
-    "affect_perception": 0.35,
-    "delivery_quality": 0.15,
-    "naturalness.interruption_rate": 0.025,
-    "naturalness.silence_after_affect": 0.025,
-    "naturalness.speech_rate_band": 0.05,
+    "content_quality": 0.38,
+    "affect_perception": 0.3325,
+    "delivery_quality": 0.1425,
+    "naturalness.interruption_rate": 0.02375,
+    "naturalness.silence_after_affect": 0.02375,
+    "naturalness.speech_rate_band": 0.0475,
+    "intake_fidelity": 0.05,
 }
 
 
 class VoiceRolloutJudgesEval:
     name = "voice-rollout-judges"
     version = "v0"
-    supported_environments = frozenset({"live-rollout-audio"})
-    preferred_environment = "live-rollout-audio"
+    supported_environments = frozenset({"live-rollout-audio", "runtime-sandbox"})
+    preferred_environment = "runtime-sandbox"
 
     def __init__(self) -> None:
         self.dataset = VoiceRolloutJudgesDataset()
@@ -69,6 +71,7 @@ class VoiceRolloutJudgesEval:
             StrictAffectPerceptionJudgeScorer(judge=AudioJudge()),
             StrictDeliveryJudgeScorer(judge=AudioJudge()),
             NaturalnessScorer(),
+            IntakeFidelityScorer(),
         ]
         aggregator = AggregateScorer(weights=_DEFAULT_WEIGHTS)
         return [CompositeScorer(children=children, aggregator=aggregator)]
