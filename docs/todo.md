@@ -78,3 +78,10 @@ training loop the pitch depends on.
 
 Foundational pieces — naturalness measurement, varied test samples, replay
 system, and stability checks — are all shipped.
+
+## Runtime-Eval Alignment — Additional TODOs (2026-05-07 Eng Review)
+
+- [ ] **CoachVoiceAdapter live_api tests**: Add `@pytest.mark.live_api` tests for `TextOnlyCoachAdapter` (verifies CLM produces coherent coaching text) and adapter-switch invariant (switching to `HumeCoachAdapter` doesn't change RuntimeHost call sequence). ~30 min. Block: none.
+
+- [ ] **IntakeComplete signal verification**: After Phase 1+2 ships, manually verify that `IntakeProcessor` emits `IntakeComplete` on the FrameBus before `PhaseProcessor` transitions to PRACTICE. Check `test_intake_complete_happens_before_practice()` passes. Block: Phase 1+2.
+
