@@ -50,9 +50,19 @@ class HumeEVIClient:
         session_id: str,
         persona_key: str = "default",
         connect_fn: Callable[..., Any] | None = None,
-        reconnect_backoff_s: float = 0.1,
+        reconnect_backoff_s: float = 0.1,  # legacy, retained for backwards-compat
+        reconnect_backoff_schedule_s: tuple[float, ...] | None = None,
+        reconnect_budget_s: float = 15.0,
     ) -> None:
-        """Store connection settings and test seams for one Hume session."""
+        """Store connection settings and test seams for one Hume session.
+
+        Reconnect policy: when the websocket fails mid-stream, retry against
+        the `reconnect_backoff_schedule_s` (default 0.1, 0.5, 2.0, 5.0 — four
+        attempts spanning ~7.6s of sleep), bounded by `reconnect_budget_s`
+        (default 15s) of total wall-clock from the first failure. Only after
+        the budget is exhausted do we publish `EndOfCall(reason="error")`.
+        Successful events received after a reconnect re-arm both counters.
+        """
         self._api_key = api_key
         self._fallback_config_id = config_id
         self._persona_key = persona_key
@@ -62,6 +72,14 @@ class HumeEVIClient:
             connect_fn or AsyncHumeClient(api_key=api_key).empathic_voice.chat.connect
         )
         self._reconnect_backoff_s = reconnect_backoff_s
+        self._reconnect_backoff_schedule_s = (
+            reconnect_backoff_schedule_s
+            if reconnect_backoff_schedule_s is not None
+            else (0.1, 0.5, 2.0, 5.0)
+        )
+        self._reconnect_budget_s = reconnect_budget_s
+        self._reconnect_attempt = 0
+        self._reconnect_started_at: float | None = None
         self._stack: AsyncExitStack | None = None
         self._socket: Any = None
         self._started_at = time.monotonic()
@@ -105,18 +123,22 @@ class HumeEVIClient:
         await self._socket.send_assistant_input(AssistantInput(text=text))
 
     async def run_event_loop(self) -> None:
-        """Read Hume events until the socket closes and publish runtime frames."""
+        """Read Hume events until the socket closes and publish runtime frames.
 
-        attempts = 0
+        On websocket or connect-time failures, walk the configured backoff
+        schedule within the reconnect budget. A successful event arrival
+        resets both the attempt counter and the budget anchor so a later
+        disruption gets a full retry window.
+        """
         while True:
             try:
                 assert self._socket is not None
                 async for event in self._socket:
+                    self._reset_reconnect_state()
                     await self._handle_event(event)
                 return
             except Exception:
-                attempts += 1
-                if attempts > 1:
+                if not await self._try_backoff_reconnect():
                     await self._flush_pending_coach(self._elapsed_s())
                     await self._bus.publish(
                         EndOfCall(
@@ -126,8 +148,40 @@ class HumeEVIClient:
                         )
                     )
                     return
-                await asyncio.sleep(self._reconnect_backoff_s)
-                await self._reconnect()
+
+    def _reset_reconnect_state(self) -> None:
+        """Re-arm the reconnect counters after at least one successful event."""
+        self._reconnect_attempt = 0
+        self._reconnect_started_at = None
+
+    async def _try_backoff_reconnect(self) -> bool:
+        """Sleep + reconnect within the configured budget.
+
+        Returns True if a reconnect attempt was scheduled (the outer loop
+        should keep iterating, even if the reconnect itself raises — the
+        next iteration will re-enter this method). Returns False when the
+        schedule is exhausted or the budget is spent and the caller should
+        publish EndOfCall(error).
+        """
+        now = time.monotonic()
+        if self._reconnect_started_at is None:
+            self._reconnect_started_at = now
+        elapsed = now - self._reconnect_started_at
+        if elapsed >= self._reconnect_budget_s:
+            return False
+        if self._reconnect_attempt >= len(self._reconnect_backoff_schedule_s):
+            return False
+        scheduled_delay = self._reconnect_backoff_schedule_s[self._reconnect_attempt]
+        delay = min(scheduled_delay, max(0.0, self._reconnect_budget_s - elapsed))
+        self._reconnect_attempt += 1
+        await asyncio.sleep(delay)
+        try:
+            await self._reconnect()
+        except Exception:
+            # The next outer-loop iteration will trip the assert and call
+            # this method again — that's the retry. Stay in the budget.
+            self._socket = None
+        return True
 
     async def swap_config(self, config_id: str, system_prompt: str | None = None) -> None:
         """Swap the active Hume config during a call when that feature exists."""
