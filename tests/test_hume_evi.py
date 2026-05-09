@@ -288,7 +288,8 @@ async def test_hume_client_swap_config_not_implemented() -> None:
 
 
 @pytest.mark.asyncio
-async def test_hume_client_reconnects_once_then_emits_end_of_call() -> None:
+async def test_reconnect_schedule_exhausted_emits_end_of_call() -> None:
+    """All retries fail → publishes EndOfCall(error) only after schedule exhausted."""
     first = FakeHumeSocket([RuntimeError("socket drop")])
     second = FakeHumeSocket(
         [
@@ -304,7 +305,121 @@ async def test_hume_client_reconnects_once_then_emits_end_of_call() -> None:
         bus=bus,
         session_id="s1",
         connect_fn=_connect_factory([first, second]),
-        reconnect_backoff_s=0.0,
+        reconnect_backoff_schedule_s=(0.0,),
+        reconnect_budget_s=1.0,
+    )
+
+    async with client:
+        consume = asyncio.create_task(_drain(bus))
+        await asyncio.sleep(0)
+        await client.run_event_loop()
+        await bus.aclose()
+        frames = await consume
+
+    assert isinstance(frames[-1], EndOfCall)
+    assert frames[-1].reason == "error"
+
+
+@pytest.mark.asyncio
+async def test_reconnect_within_budget_recovers_without_end_of_call() -> None:
+    """connect_fn that fails twice then succeeds yields one continuous loop."""
+    first = FakeHumeSocket([RuntimeError("blip 1")])
+    second = FakeHumeSocket([RuntimeError("blip 2")])
+    third = FakeHumeSocket([])  # clean close
+    bus = FrameBus("s1")
+    client = HumeEVIClient(
+        api_key="api",
+        config_id="cfg",
+        bus=bus,
+        session_id="s1",
+        connect_fn=_connect_factory([first, second, third]),
+        reconnect_backoff_schedule_s=(0.0, 0.0, 0.0, 0.0),
+        reconnect_budget_s=2.0,
+    )
+
+    async with client:
+        consume = asyncio.create_task(_drain(bus))
+        await asyncio.sleep(0)
+        await client.run_event_loop()
+        await bus.aclose()
+        frames = await consume
+
+    error_frames = [f for f in frames if isinstance(f, EndOfCall) and f.reason == "error"]
+    assert error_frames == []
+
+
+@pytest.mark.asyncio
+async def test_reconnect_state_resets_after_successful_event() -> None:
+    """A successful event after reconnect re-arms the budget for later failures.
+
+    Sequence: socket A fails → reconnect to B → B yields one valid event,
+    then fails → reconnect to C → C closes cleanly. Without reset, B's
+    failure would count as attempt #2 against A's budget; with reset it's
+    a fresh attempt. With a 1-entry schedule both reconnects must succeed
+    independently or this test would fall through to EndOfCall.
+    """
+    first = FakeHumeSocket([RuntimeError("disconnect 1")])
+    second = FakeHumeSocket(
+        [
+            UserMessage.model_validate(
+                {
+                    "type": "user_message",
+                    "from_text": False,
+                    "interim": False,
+                    "message": {"role": "user", "content": "after first reconnect"},
+                    "models": {
+                        "prosody": {
+                            "scores": {
+                                "Anger": 0.0,
+                                "Joy": 0.5,
+                                **{name: 0.0 for name in _OTHER_EMOTIONS},
+                            }
+                        }
+                    },
+                    "time": {"begin": 0, "end": 100},
+                }
+            ),
+            RuntimeError("disconnect 2"),
+        ]
+    )
+    third = FakeHumeSocket([])
+    bus = FrameBus("s1")
+    client = HumeEVIClient(
+        api_key="api",
+        config_id="cfg",
+        bus=bus,
+        session_id="s1",
+        connect_fn=_connect_factory([first, second, third]),
+        reconnect_backoff_schedule_s=(0.0,),
+        reconnect_budget_s=1.0,
+    )
+
+    async with client:
+        consume = asyncio.create_task(_drain(bus))
+        await asyncio.sleep(0)
+        await client.run_event_loop()
+        await bus.aclose()
+        frames = await consume
+
+    error_frames = [f for f in frames if isinstance(f, EndOfCall) and f.reason == "error"]
+    assert error_frames == []
+    transcripts = [f for f in frames if isinstance(f, TranscriptDelta)]
+    assert any(f.text == "after first reconnect" for f in transcripts)
+
+
+@pytest.mark.asyncio
+async def test_reconnect_budget_caps_total_window() -> None:
+    """Budget exhaustion ends reconnect attempts even if schedule has slots left."""
+    sockets = [FakeHumeSocket([RuntimeError("fail")]) for _ in range(10)]
+    bus = FrameBus("s1")
+    client = HumeEVIClient(
+        api_key="api",
+        config_id="cfg",
+        bus=bus,
+        session_id="s1",
+        connect_fn=_connect_factory(sockets),
+        reconnect_backoff_schedule_s=(0.05, 0.05, 0.05, 0.05),
+        reconnect_budget_s=0.06,
     )
 
     async with client:

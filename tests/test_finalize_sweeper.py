@@ -120,6 +120,59 @@ async def test_sweep_skips_session_with_active_handle(store: LocalFilesystemStor
 
 
 @pytest.mark.asyncio
+async def test_recover_orphans_finalizes_in_progress_without_handles(
+    store: LocalFilesystemStore,
+) -> None:
+    """After a process restart no handles exist; every in-progress session is orphaned."""
+    orchestrator = SessionOrchestrator(store=store)
+    now = datetime.now(UTC)
+    fresh_id = await _seed_session(store, created_at=now - timedelta(seconds=10))
+    older_id = await _seed_session(store, created_at=now - timedelta(seconds=120))
+    done_id = await _seed_session(
+        store,
+        created_at=now - timedelta(seconds=600),
+        completion_status="complete",
+    )
+
+    sweeper = FinalizeSweeper(
+        orchestrator, store, max_call_seconds=300, grace_seconds=60
+    )
+    recovered = await sweeper.recover_orphans()
+
+    assert sorted(recovered) == sorted([fresh_id, older_id])
+    fresh_manifest = json.loads((store.session_dir(fresh_id) / "session.json").read_text())
+    older_manifest = json.loads((store.session_dir(older_id) / "session.json").read_text())
+    done_manifest = json.loads((store.session_dir(done_id) / "session.json").read_text())
+    assert fresh_manifest["completion_status"] == "failed"
+    assert older_manifest["completion_status"] == "failed"
+    assert done_manifest["completion_status"] == "complete"
+
+
+@pytest.mark.asyncio
+async def test_recover_orphans_skips_session_with_active_handle(
+    store: LocalFilesystemStore,
+) -> None:
+    """If an in-process call still owns a handle, recovery must not finalize it."""
+    orchestrator = SessionOrchestrator(store=store)
+    now = datetime.now(UTC)
+    handle = await orchestrator.start(
+        TriggerEvent(
+            from_number="+15551234567",
+            body="hi",
+            received_at=now,
+        )
+    )
+
+    sweeper = FinalizeSweeper(
+        orchestrator, store, max_call_seconds=300, grace_seconds=60
+    )
+    recovered = await sweeper.recover_orphans()
+
+    assert recovered == []
+    assert orchestrator.get(handle.session_id) is not None
+
+
+@pytest.mark.asyncio
 async def test_finalize_is_idempotent(store: LocalFilesystemStore) -> None:
     """A late Twilio status callback after sweeper already finalized must no-op."""
     orchestrator = SessionOrchestrator(store=store)

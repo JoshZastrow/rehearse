@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import suppress
+
+import anyio
 from typing import Protocol
 
 import structlog
@@ -309,25 +311,30 @@ def mount_twilio_routes(
                             )
                         )
                 finally:
-                    await bus.aclose()
-                    assistant_task.cancel()
-                    hume_task.cancel()
-                    with suppress(asyncio.CancelledError):
-                        await assistant_task
-                    with suppress(asyncio.CancelledError):
-                        await hume_task
-                    await consent_task
-                    await outcome_task
-                    await phase_task
-                    await intake_task
-                    await persona_swap_task
-                    await transcript_task
-                    await prosody_task
-                    await audio_task
-                    await timing_task
-                    await telemetry_task
-                    if consent_state["declined"]:
-                        await orchestrator.finalize(session_id, "partial")
+                    # Shield cleanup from external cancellation (e.g. starlette
+                    # TestClient closes the anyio CancelScope immediately after
+                    # the WebSocket disconnects, which would interrupt I/O in
+                    # progress and leave session artifacts unwritten).
+                    with anyio.CancelScope(shield=True):
+                        await bus.aclose()
+                        assistant_task.cancel()
+                        hume_task.cancel()
+                        with suppress(asyncio.CancelledError):
+                            await assistant_task
+                        with suppress(asyncio.CancelledError):
+                            await hume_task
+                        await consent_task
+                        await outcome_task
+                        await phase_task
+                        await intake_task
+                        await persona_swap_task
+                        await transcript_task
+                        await prosody_task
+                        await audio_task
+                        await timing_task
+                        await telemetry_task
+                        if consent_state["declined"]:
+                            await orchestrator.finalize(session_id, "partial")
         except WebSocketDisconnect:
             log.info("media.disconnect", session_id=session_id)
 

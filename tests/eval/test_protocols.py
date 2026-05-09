@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 from rehearse.eval.datasets import DATASETS, get_dataset
 from rehearse.eval.environments import ENVIRONMENTS, get_environment
 from rehearse.eval.evals import EVALS, get_eval
@@ -27,11 +29,14 @@ def test_every_dataset_satisfies_protocol():
 
 
 def test_every_environment_satisfies_protocol():
-    for name in ENVIRONMENTS:
-        environment = get_environment(name, model_slots={})
-        assert isinstance(environment, Environment), f"{name} is not an Environment"
-        assert environment.name == name
-        assert isinstance(environment.version, str) and environment.version
+    # Some environments (runtime-sandbox) raise at __init__ without API keys.
+    # Provide a stub key so the protocol check can instantiate them.
+    with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-stub"}):
+        for name in ENVIRONMENTS:
+            environment = get_environment(name, model_slots={})
+            assert isinstance(environment, Environment), f"{name} is not an Environment"
+            assert environment.name == name
+            assert isinstance(environment.version, str) and environment.version
 
 
 def test_unknown_eval_raises():

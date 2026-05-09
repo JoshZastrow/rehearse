@@ -273,6 +273,8 @@ def _render_summary(
     started_at: datetime,
     completed_at: datetime,
 ) -> str:
+    import os
+
     duration_s = (completed_at - started_at).total_seconds()
     n_ok = sum(1 for r in rollouts if r.status == "ok")
     n_err = sum(1 for r in rollouts if r.status == "error")
@@ -296,6 +298,26 @@ def _render_summary(
     ]
     for dim, mean in sorted(aggregates.items()):
         lines.append(f"| `{dim}` | {mean:.3f} |")
+
+    if environment_name == "runtime-sandbox":
+        anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
+        hume_key = os.environ.get("HUME_API_KEY")
+        tts_status = "real (post-hoc)" if hume_key else "stubbed (silent WAV)"
+        audio_status = "real (Gemini multimodal)" if hume_key else "degraded (audio_missing)"
+        coach_key_status = "ANTHROPIC_API_KEY set" if anthropic_key else "ANTHROPIC_API_KEY missing"
+        lines.extend([
+            "",
+            "## Runtime provenance",
+            "",
+            "```",
+            "RuntimeHost          real",
+            "IntakeProcessor      real (deterministic)",
+            "PersonaCompiler      real (deterministic)",
+            f"CoachVoice           real (TextOnlyCoachAdapter, {coach_key_status})",
+            f"Hume TTS             {tts_status}",
+            f"Audio judges         {audio_status}",
+            "```",
+        ])
 
     if n_err or n_to:
         lines.extend(["", "## Failures", ""])

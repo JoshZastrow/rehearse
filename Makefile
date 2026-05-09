@@ -1,4 +1,4 @@
-.PHONY: help eval-list eval-voice-replay eval-voice-replay-live eval-voice-replay-dogfood eval-voice-smoke eval-voice-smoke-live nightly-stability test lint
+.PHONY: help eval-list eval-voice-replay eval-voice-replay-live eval-voice-replay-dogfood eval-voice-smoke eval-voice-smoke-live eval-voice-rollout eval-voice-rollout-live nightly-stability test lint
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk -F':.*?## ' '{printf "  %-28s %s\n", $$1, $$2}'
@@ -26,6 +26,12 @@ eval-voice-smoke: ## run the fixture-audio smoke eval with stub judges
 
 eval-voice-smoke-live: ## fixture smoke with real TTS + Gemini judges (needs HUME_API_KEY + GEMINI_API_KEY)
 	REHEARSE_AUDIO_JUDGE=live uv run rehearse-eval run --eval voice-judges-smoke
+
+eval-voice-rollout: ## runtime-sandbox rollout with stub TTS (needs ANTHROPIC_API_KEY only)
+	uv run rehearse-eval run --eval voice-rollout-judges --limit 3
+
+eval-voice-rollout-live: ## runtime-sandbox rollout with real Hume TTS + audio judges (needs HUME_API_KEY + ANTHROPIC_API_KEY + GOOGLE_API_KEY)
+	REHEARSE_AUDIO_JUDGE=live uv run rehearse-eval run --eval voice-rollout-judges --limit 3
 
 nightly-stability: ## diagnostic stability run — voice-judges-smoke × repetitions=5 (Spec 8)
 	uv run rehearse-eval run --eval voice-judges-smoke --repetitions 5

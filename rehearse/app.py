@@ -70,6 +70,16 @@ def create_app(config: RuntimeConfig | None = None) -> FastAPI:
                 config.anthropic_model,
             )
         if config.finalize_sweep_enabled:
+            # Crash recovery: any session still `in_progress` on disk has no
+            # in-memory handle (we just started), so its Twilio stream is
+            # gone. Finalize-as-failed before the periodic sweeper takes over.
+            recovered = await sweeper.recover_orphans()
+            if recovered:
+                structlog.get_logger(__name__).info(
+                    "finalize_sweeper.recovered_on_startup",
+                    count=len(recovered),
+                    session_ids=recovered,
+                )
             sweeper.start()
         try:
             yield

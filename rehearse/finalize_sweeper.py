@@ -107,6 +107,34 @@ class FinalizeSweeper:
             finalized.append(session_id)
         return finalized
 
+    async def recover_orphans(self) -> list[str]:
+        """Finalize every in-progress session with no live handle as `failed`.
+
+        Intended for one-shot startup recovery after a process restart: the
+        in-memory `SessionHandle` dict is empty, so any session still marked
+        `in_progress` on disk lost its Twilio media stream when the process
+        died. Synthesis still runs against whatever audio + transcript
+        landed before the crash. Distinct from `sweep_once`, which respects
+        a wall-clock age cutoff and finalizes as `partial`.
+        """
+        recovered: list[str] = []
+        async for session_id in self._store.list_sessions():
+            session = await self._read_session(session_id)
+            if session is None:
+                continue
+            if session.completion_status != "in_progress":
+                continue
+            if self._orchestrator.get(session_id) is not None:
+                continue
+            log.warning(
+                "finalize_sweeper.recover_orphan",
+                session_id=session_id,
+                created_at=session.created_at.isoformat(),
+            )
+            await self._orchestrator.finalize(session_id, "failed")
+            recovered.append(session_id)
+        return recovered
+
     async def _read_session(self, session_id: str) -> Session | None:
         """Load one session manifest from disk, returning None on read errors."""
         try:
