@@ -42,7 +42,7 @@ class TransportEvent:
 
 
 @runtime_checkable
-class RuntimeDuplexEndpoint(Protocol):
+class TwoWayChannel(Protocol):
     """One side of a duplex runtime transport."""
 
     side: TransportSide
@@ -105,8 +105,8 @@ class InMemoryTransportEndpoint:
         await self._owner.close()
 
 
-class InMemoryDuplexTransport:
-    """Duplex transport pair connecting a customer sandbox to a runtime sandbox.
+class InMemoryTwoWayChannel:
+    """In-memory two-way channel pair connecting a synthetic caller to a runtime.
 
     Optionally invokes ``on_event`` for every event that crosses the boundary.
     Used by --verbose to stream turns to stdout during a rollout. The hook
@@ -149,4 +149,32 @@ class InMemoryDuplexTransport:
 
 
 # Public alias used by RuntimeHost and spec §5.2.
-RuntimeTransport = RuntimeDuplexEndpoint
+Channel = TwoWayChannel
+RuntimeTransport = TwoWayChannel  # legacy alias; prefer Channel.
+
+
+# ---------------------------------------------------------------------------
+# Deprecation shims: telecom-jargon names re-exported with DeprecationWarning.
+# Old names will be removed in the eval-system PR after this one (Phase 5).
+# ---------------------------------------------------------------------------
+
+_DEPRECATED_NAMES: dict[str, str] = {
+    "InMemoryDuplexTransport": "InMemoryTwoWayChannel",
+    "RuntimeDuplexEndpoint": "TwoWayChannel",
+}
+
+
+def __getattr__(name: str):
+    """Module-level __getattr__ for soft-deprecated names (PEP 562)."""
+    if name in _DEPRECATED_NAMES:
+        import warnings
+
+        new = _DEPRECATED_NAMES[name]
+        warnings.warn(
+            f"{name} is deprecated; use {new}. "
+            "The old name will be removed in the next eval-system release.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return globals()[new]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

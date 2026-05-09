@@ -6,6 +6,7 @@ Subcommands:
   list-environments   print registered environment names
   run                 execute an eval against an environment
   show               print summary.md for a run_id
+  watch              tail scores.jsonl and render a live aggregate table
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ from rehearse.eval.executors import InProcessExecutor
 from rehearse.eval.providers import list_providers
 from rehearse.eval.runner import RunConfig, execute_run
 from rehearse.eval.transports import TransportEvent
+from rehearse.eval.watch import watch as run_watch
 
 
 def _print_event(event: TransportEvent) -> None:
@@ -104,6 +106,22 @@ def _build_parser() -> argparse.ArgumentParser:
     show.add_argument("run_id")
     show.add_argument("--runs-root", default="evals/runs", type=Path)
 
+    watch = sub.add_parser(
+        "watch",
+        help="tail scores.jsonl for a run and render a live aggregate table",
+    )
+    watch_target = watch.add_mutually_exclusive_group(required=True)
+    watch_target.add_argument(
+        "--run-id",
+        help="resolve <runs_root>/<run_id> as the run dir",
+    )
+    watch_target.add_argument(
+        "--run-dir",
+        type=Path,
+        help="explicit run directory containing scores.jsonl",
+    )
+    watch.add_argument("--runs-root", default="evals/runs", type=Path)
+
     return parser
 
 
@@ -137,6 +155,10 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         print(path.read_text())
         return 0
+
+    if args.cmd == "watch":
+        run_dir = args.run_dir or (args.runs_root / args.run_id)
+        return run_watch(run_dir)
 
     if args.cmd == "run":
         eval_spec = get_eval(args.eval_name)

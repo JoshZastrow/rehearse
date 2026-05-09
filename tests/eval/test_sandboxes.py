@@ -14,7 +14,7 @@ from rehearse.eval.sandboxes import (
     SandboxLifecycleError,
     VoiceAgentSandbox,
 )
-from rehearse.eval.transports import RuntimeDuplexEndpoint, TransportClosedError
+from rehearse.eval.transports import TwoWayChannel, TransportClosedError
 
 
 class RecordingCustomerAgent:
@@ -24,13 +24,13 @@ class RecordingCustomerAgent:
     def __init__(self) -> None:
         self.start_calls: list[tuple[SandboxHandle, BenchmarkExample]] = []
         self.close_calls = 0
-        self.transport: RuntimeDuplexEndpoint | None = None
+        self.transport: TwoWayChannel | None = None
 
     async def start(
         self,
         handle: SandboxHandle,
         example: BenchmarkExample,
-        transport: RuntimeDuplexEndpoint | None = None,
+        transport: TwoWayChannel | None = None,
     ) -> None:
         self.start_calls.append((handle, example))
         self.transport = transport
@@ -46,13 +46,13 @@ class RecordingVoiceRuntime:
     def __init__(self) -> None:
         self.start_calls: list[tuple[SandboxHandle, BenchmarkExample]] = []
         self.close_calls = 0
-        self.transport: RuntimeDuplexEndpoint | None = None
+        self.transport: TwoWayChannel | None = None
 
     async def start(
         self,
         handle: SandboxHandle,
         example: BenchmarkExample,
-        transport: RuntimeDuplexEndpoint | None = None,
+        transport: TwoWayChannel | None = None,
     ) -> None:
         self.start_calls.append((handle, example))
         self.transport = transport

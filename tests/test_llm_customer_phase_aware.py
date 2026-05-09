@@ -1,4 +1,4 @@
-"""Verify LLMCustomerDriver: phase switching, turn cap, end-of-call, init protocol."""
+"""Verify SyntheticCaller: phase switching, turn cap, end-of-call, init protocol."""
 
 from __future__ import annotations
 
@@ -9,9 +9,9 @@ from typing import Any
 
 import pytest
 
-from rehearse.eval.customers import CustomerDriverResult
-from rehearse.eval.customers.llm_customer import LLMCustomerDriver, _MAX_TURNS
-from rehearse.transport import InMemoryDuplexTransport
+from rehearse.eval.customers import CallerResult
+from rehearse.eval.customers.llm_customer import SyntheticCaller, _MAX_TURNS
+from rehearse.transport import InMemoryTwoWayChannel
 from rehearse.types import Phase
 
 
@@ -52,8 +52,8 @@ class _StubClient:
 def _make_driver(
     lines: list[str] | None = None,
     run_dir: Path | None = None,
-) -> LLMCustomerDriver:
-    return LLMCustomerDriver(
+) -> SyntheticCaller:
+    return SyntheticCaller(
         scenario={
             "situation": "salary negotiation",
             "goal": "get a 20% raise",
@@ -74,7 +74,7 @@ def _make_driver(
 async def test_customer_sends_first_without_waiting() -> None:
     """Driver sends the first turn without awaiting any runtime greeting."""
     driver = _make_driver(["Hello, I need help."])
-    transport = InMemoryDuplexTransport()
+    transport = InMemoryTwoWayChannel()
 
     sent_before_runtime: bool = False
 
@@ -103,7 +103,7 @@ async def test_customer_sends_first_without_waiting() -> None:
 async def test_phase_transition_triggers_prompt_switch() -> None:
     """On phase_transition control event, driver sends first turn of new phase."""
     driver = _make_driver(["Intake turn.", "Practice turn.", "Feedback turn."])
-    transport = InMemoryDuplexTransport()
+    transport = InMemoryTwoWayChannel()
 
     turns_received: list[str] = []
 
@@ -145,7 +145,7 @@ async def test_phase_transition_triggers_prompt_switch() -> None:
 async def test_hard_turn_cap_stops_driver() -> None:
     """Driver stops after _MAX_TURNS and sends customer_done."""
     driver = _make_driver()  # default stub returns "I hear you." indefinitely
-    transport = InMemoryDuplexTransport()
+    transport = InMemoryTwoWayChannel()
 
     events_from_customer: list[Any] = []
 
@@ -179,9 +179,9 @@ async def test_hard_turn_cap_stops_driver() -> None:
 
 @pytest.mark.asyncio
 async def test_end_of_call_exits_cleanly() -> None:
-    """driver.run() returns CustomerDriverResult on end_of_call."""
+    """driver.run() returns CallerResult on end_of_call."""
     driver = _make_driver(["Hello, I need help."])
-    transport = InMemoryDuplexTransport()
+    transport = InMemoryTwoWayChannel()
 
     async def _runtime() -> None:
         await asyncio.wait_for(transport.runtime.receive(), timeout=3.0)
@@ -192,7 +192,7 @@ async def test_end_of_call_exits_cleanly() -> None:
         _runtime(),
     )
 
-    assert isinstance(result, CustomerDriverResult)
+    assert isinstance(result, CallerResult)
     assert result.turns_sent >= 1
     assert result.error is None
 
@@ -206,7 +206,7 @@ async def test_end_of_call_exits_cleanly() -> None:
 async def test_customer_driver_json_written(tmp_path: Path) -> None:
     """Result JSON is persisted to run_dir when supplied."""
     driver = _make_driver(["Hello!"], run_dir=tmp_path)
-    transport = InMemoryDuplexTransport()
+    transport = InMemoryTwoWayChannel()
 
     async def _runtime() -> None:
         await asyncio.wait_for(transport.runtime.receive(), timeout=3.0)
@@ -221,5 +221,5 @@ async def test_customer_driver_json_written(tmp_path: Path) -> None:
     assert artifact.exists()
     import json
     data = json.loads(artifact.read_text())
-    assert data["driver"] == "llm-customer"
+    assert data["driver"] == "synthetic-caller"
     assert data["turns_sent"] >= 1

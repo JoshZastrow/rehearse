@@ -27,6 +27,8 @@ from rehearse.eval.environments import get_environment
 from rehearse.eval.evals import get_eval
 from rehearse.eval.executors import LocalSubprocessExecutor
 from rehearse.eval.protocols import BenchmarkExample, Executor, MetaScorer, RolloutResult
+from rehearse.eval.scorers.composite import supports_publish
+from rehearse.eval.score_stream import ScoreStreamWriter
 from rehearse.types import EvalRun, RubricScore
 
 
@@ -137,18 +139,26 @@ async def execute_run(config: RunConfig, executor: Executor | None = None) -> Ru
     scorers = eval_spec.scoring_plan()
     all_scores: list[RubricScore] = []
     per_rollout_scores: list[list[RubricScore]] = []
-    for (_, _, ex), ro in zip(plan, rollouts, strict=True):
-        if ro.status != "ok":
-            failure_dir = run_dir / "failures" / ex.id
-            failure_dir.mkdir(parents=True, exist_ok=True)
-            (failure_dir / "error.txt").write_text(ro.error or "")
-        rollout_scores: list[RubricScore] = []
-        for scorer in scorers:
-            try:
-                scores = await scorer.score(ex, ro, run_id=run_id)
-            except Exception as exc:
-                scores = [
-                    RubricScore(
+    with ScoreStreamWriter(run_dir) as stream:
+        publish = stream.publish
+        for (_, _, ex), ro in zip(plan, rollouts, strict=True):
+            if ro.status != "ok":
+                failure_dir = run_dir / "failures" / ex.id
+                failure_dir.mkdir(parents=True, exist_ok=True)
+                (failure_dir / "error.txt").write_text(ro.error or "")
+            rollout_scores: list[RubricScore] = []
+            for scorer in scorers:
+                try:
+                    if supports_publish(scorer):
+                        scores = await scorer.score(
+                            ex, ro, run_id=run_id, publish=publish
+                        )
+                    else:
+                        scores = await scorer.score(ex, ro, run_id=run_id)
+                        for s in scores:
+                            publish(s)
+                except Exception as exc:
+                    crash = RubricScore(
                         run_id=run_id,
                         example_id=ex.id,
                         dimension=scorer.dimension,
@@ -156,10 +166,11 @@ async def execute_run(config: RunConfig, executor: Executor | None = None) -> Ru
                         scorer="deterministic",
                         rationale=f"scorer {scorer.name} crashed: {exc}",
                     )
-                ]
-            rollout_scores.extend(scores)
-        per_rollout_scores.append(rollout_scores)
-        all_scores.extend(rollout_scores)
+                    publish(crash)
+                    scores = [crash]
+                rollout_scores.extend(scores)
+            per_rollout_scores.append(rollout_scores)
+            all_scores.extend(rollout_scores)
 
     meta_scorers = _meta_scoring_plan(eval_spec)
     if meta_scorers:

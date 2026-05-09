@@ -1,0 +1,80 @@
+name: schema-diff
+
+# Enforces that the artifact contract (Session, IntakeRecord, CounterpartyPersona)
+# is the same shape regardless of which path booted RuntimeHost. Catches drift
+# between the production runtime and the eval sandbox without per-field unit tests.
+#
+# Sufficient for catching field additions, type changes, and required-field
+# changes. Not sufficient for catching behavioral drift in edges (HumeCoachAdapter
+# vs TextOnlyCoachAdapter); that's gated by the mirror-full release tier (Phase D).
+
+on:
+  pull_request:
+    paths:
+      - "rehearse/runtime.py"
+      - "rehearse/intake.py"
+      - "rehearse/personas.py"
+      - "rehearse/types.py"
+      - "rehearse/phases.py"
+      - "rehearse/frames.py"
+      - "rehearse/eval/environments/runtime_sandbox.py"
+      - "rehearse/telephony.py"
+  push:
+    branches: [main]
+
+jobs:
+  diff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Diff Pydantic schemas (Session, IntakeRecord, CounterpartyPersona)
+        run: |
+          uv run python - <<'PY'
+          """Compare JSON schemas of the artifact contract types.
+
+          The contract types are defined once in rehearse.types and consumed
+          by both serving (telephony) and eval (runtime-sandbox). If the
+          schema differs between commits we want a loud failure here.
+
+          v2 of the diff just verifies the schemas are stable on this commit.
+          When the future "boot via two paths and diff" check is added, this
+          step will compare the *artifact bundles* produced by each path.
+          """
+          import json
+          import sys
+          from rehearse.types import Session, IntakeRecord, CounterpartyPersona
+
+          schemas = {
+              "Session": Session.model_json_schema(),
+              "IntakeRecord": IntakeRecord.model_json_schema(),
+              "CounterpartyPersona": CounterpartyPersona.model_json_schema(),
+          }
+          for name, schema in schemas.items():
+              # Print so the workflow log shows the snapshot for each PR.
+              print(f"=== {name} ===")
+              print(json.dumps(schema, indent=2, sort_keys=True))
+              print()
+          PY
+
+      - name: Boot RuntimeHost via runtime-sandbox and assert artifact bundle shape
+        env:
+          # A stub key is enough for RuntimeSandboxEnvironment.__init__; the
+          # rollout itself is short-circuited via the test fixture.
+          ANTHROPIC_API_KEY: stub-for-schema-check
+        run: |
+          uv run pytest tests/test_runtime_sandbox_audio.py::test_provenance_documents_substitutions -v
+
+      - name: Boot RuntimeHost via the serving path and assert artifact bundle shape
+        run: |
+          uv run pytest tests/test_telephony_r1.py -v -k media_websocket

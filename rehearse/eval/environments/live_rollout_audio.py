@@ -12,6 +12,9 @@ Pipeline:
      `audio/{user,coach}/turn_<N>.wav` and a `timing.jsonl` derived from
      the real audio durations.
 
+The audio + timing helpers live in `_audio.py` and are shared with
+`runtime-sandbox`.
+
 If no TTS provider is configured (`HUME_API_KEY` unset) the env falls
 back to silent WAVs sized by a per-turn duration heuristic, so the
 plumbing still exercises but the audio judges will degrade with
@@ -24,22 +27,20 @@ for coach turns. Optional per-example `coach_description` overrides.
 
 from __future__ import annotations
 
-import asyncio
 import json
-import wave
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
+from rehearse.eval.environments._audio import (
+    DEFAULT_COACH_DESCRIPTION,
+    read_transcript,
+    silent_audio,
+    synthesize_turns,
+    timing_from_frames,
+)
 from rehearse.eval.environments.voice_agent_sandbox import VoiceAgentSandboxEnvironment
 from rehearse.eval.protocols import BenchmarkExample, RolloutResult
 from rehearse.eval.tts_bridge import TTSProvider, get_default_provider
-
-
-_DEFAULT_COACH_DESCRIPTION = "warm, steady, present"
-# Rough fallback when no TTS is available — sized to put naturalness
-# bands near ideal so silent runs don't tank deterministic scoring.
-_FALLBACK_TURN_DURATION_S = 3.0
 
 
 class LiveRolloutAudioEnvironment:
@@ -93,29 +94,30 @@ class LiveRolloutAudioEnvironment:
                 error="sandbox produced no transcript.jsonl",
             )
 
-        frames = _read_transcript(transcript_path)
+        frames = read_transcript(transcript_path)
         scenario = example.payload.get("scenario") or {}
         user_desc = scenario.get("emotional_state") or "natural conversational tone"
         coach_desc = (
             example.payload.get("coach_description")
             or self.model_slots.get("coach_description")
-            or _DEFAULT_COACH_DESCRIPTION
+            or DEFAULT_COACH_DESCRIPTION
         )
         silence_between_s = float(
             example.payload.get("silence_between_turns_s", 1.5) or 1.5
         )
 
         if self._tts_provider is not None:
-            user_durations, coach_durations = await self._synthesize(
+            user_durations, coach_durations = await synthesize_turns(
                 run_dir=run_dir,
                 frames=frames,
                 user_description=user_desc,
                 coach_description=coach_desc,
+                provider=self._tts_provider,
             )
         else:
-            user_durations, coach_durations = self._silent_audio(run_dir, frames)
+            user_durations, coach_durations = silent_audio(run_dir, frames)
 
-        timing_events = _timing_from_frames(
+        timing_events = timing_from_frames(
             frames=frames,
             user_durations_s=user_durations,
             coach_durations_s=coach_durations,
@@ -146,130 +148,3 @@ class LiveRolloutAudioEnvironment:
             artifacts_dir=run_dir,
             payload=merged_payload,
         )
-
-    async def _synthesize(
-        self,
-        *,
-        run_dir: Path,
-        frames: list[dict[str, Any]],
-        user_description: str,
-        coach_description: str,
-    ) -> tuple[list[float], list[float]]:
-        assert self._tts_provider is not None
-        provider = self._tts_provider
-        plan: list[tuple[str, int, str, str]] = []
-        role_idx = {"user": 0, "coach": 0}
-        for f in frames:
-            role = f.get("speaker")
-            if role not in ("user", "coach"):
-                continue
-            text = (f.get("text") or "").strip()
-            desc = user_description if role == "user" else coach_description
-            plan.append((role, role_idx[role], text, desc))
-            role_idx[role] += 1
-
-        async def _one(role: str, idx: int, text: str, desc: str) -> tuple[str, int, float]:
-            out = run_dir / "audio" / role / f"turn_{idx}.wav"
-            if not text:
-                _silent_wav(out, duration_s=0.3)
-                return role, idx, 0.3
-            try:
-                duration = await provider.synthesize(
-                    text=text, out_path=out, description=desc
-                )
-                return role, idx, duration
-            except Exception:
-                _silent_wav(out, duration_s=_FALLBACK_TURN_DURATION_S)
-                return role, idx, _FALLBACK_TURN_DURATION_S
-
-        results = await asyncio.gather(*(_one(*args) for args in plan))
-        user: list[float] = []
-        coach: list[float] = []
-        for role, _idx, dur in results:
-            (user if role == "user" else coach).append(dur)
-        return user, coach
-
-    def _silent_audio(
-        self, run_dir: Path, frames: list[dict[str, Any]]
-    ) -> tuple[list[float], list[float]]:
-        user: list[float] = []
-        coach: list[float] = []
-        role_idx = {"user": 0, "coach": 0}
-        for f in frames:
-            role = f.get("speaker")
-            if role not in ("user", "coach"):
-                continue
-            text = (f.get("text") or "").strip()
-            est = max(1.0, len(text.split()) / 2.5)  # ~150 wpm
-            out = run_dir / "audio" / role / f"turn_{role_idx[role]}.wav"
-            _silent_wav(out, duration_s=est)
-            (user if role == "user" else coach).append(est)
-            role_idx[role] += 1
-        return user, coach
-
-
-def _read_transcript(path: Path) -> list[dict[str, Any]]:
-    out: list[dict[str, Any]] = []
-    for line in path.read_text().splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            out.append(json.loads(line))
-        except json.JSONDecodeError:
-            continue
-    return out
-
-
-def _silent_wav(path: Path, *, duration_s: float, sample_rate: int = 16_000) -> None:
-    n = max(1, int(duration_s * sample_rate))
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with wave.open(str(path), "wb") as wav:
-        wav.setnchannels(1)
-        wav.setsampwidth(2)
-        wav.setframerate(sample_rate)
-        wav.writeframes(b"\x00\x00" * n)
-
-
-def _timing_from_frames(
-    *,
-    frames: list[dict[str, Any]],
-    user_durations_s: list[float],
-    coach_durations_s: list[float],
-    silence_between_s: float,
-) -> list[dict[str, Any]]:
-    events: list[dict[str, Any]] = []
-    role_turn_idx = {"user": 0, "coach": 0}
-    user_idx = 0
-    coach_idx = 0
-    t_ms = 0
-    silence_ms = int(silence_between_s * 1000)
-    for f in frames:
-        role = f.get("speaker")
-        if role == "user":
-            if user_idx >= len(user_durations_s):
-                continue
-            dur_ms = int(float(user_durations_s[user_idx]) * 1000)
-            user_idx += 1
-        elif role == "coach":
-            if coach_idx >= len(coach_durations_s):
-                continue
-            dur_ms = int(float(coach_durations_s[coach_idx]) * 1000)
-            coach_idx += 1
-        else:
-            continue
-        turn_index = role_turn_idx[role]
-        role_turn_idx[role] += 1
-        events.append({"turn_index": turn_index, "role": role, "event": "audio_start", "t_ms": t_ms})
-        t_ms += dur_ms
-        events.append(
-            {
-                "turn_index": turn_index,
-                "role": role,
-                "event": "audio_end",
-                "t_ms": t_ms,
-                "duration_ms": dur_ms,
-            }
-        )
-        t_ms += silence_ms
-    return events

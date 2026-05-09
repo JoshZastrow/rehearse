@@ -9,7 +9,7 @@ from pathlib import Path
 
 from rehearse.eval.protocols import BenchmarkExample
 from rehearse.eval.sandboxes import CustomerAgentSandbox, SandboxHandle, VoiceAgentSandbox
-from rehearse.eval.transports import InMemoryDuplexTransport
+from rehearse.eval.transports import InMemoryTwoWayChannel
 
 
 @dataclass(frozen=True)
@@ -30,11 +30,11 @@ class SandboxConnection:
         *,
         customer: CustomerAgentSandbox,
         runtime: VoiceAgentSandbox,
-        transport: InMemoryDuplexTransport | None = None,
+        transport: InMemoryTwoWayChannel | None = None,
     ) -> None:
         self.customer = customer
         self.runtime = runtime
-        self.transport = transport or InMemoryDuplexTransport()
+        self.transport = transport or InMemoryTwoWayChannel()
         self.handles: SandboxConnectionHandles | None = None
 
     async def start(

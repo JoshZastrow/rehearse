@@ -7,7 +7,7 @@ turn-taking loop, and writes the artifact set to a `LocalFilesystemStore`.
 
 The host knows nothing about who is on the other end of `transport`. The
 abstraction is the same whether the remote side is a synthetic LLM customer
-(`InMemoryDuplexTransport`) or a live phone call (`TwilioBridgeTransport`).
+(`InMemoryTwoWayChannel`) or a live phone call (`TwilioPhoneBridge`).
 
 `CoachVoiceAdapter` abstracts how the coach loop generates responses. In eval
 mode `TextOnlyCoachAdapter` calls the Anthropic API directly (text-only). In
@@ -40,7 +40,7 @@ from rehearse.intake import IntakeProcessor
 from rehearse.phases import PhaseBudgets, PhaseProcessor
 from rehearse.session import utcnow
 from rehearse.storage import LocalFilesystemStore
-from rehearse.transport import InMemoryDuplexTransport, RuntimeTransport, TransportEvent
+from rehearse.transport import InMemoryTwoWayChannel, RuntimeTransport, TransportEvent
 from rehearse.types import ConsentState, Phase, Session, Speaker
 from rehearse.writers import TimingWriter, TranscriptWriter
 
@@ -148,8 +148,8 @@ class SessionArtifacts:
 class RuntimeHost:
     """Boot one rehearse session against a transport.
 
-    The same object is used in serving (with TwilioBridgeTransport + HumeCoachAdapter)
-    and in eval (with InMemoryDuplexTransport + TextOnlyCoachAdapter).
+    The same object is used in serving (with TwilioPhoneBridge + HumeCoachAdapter)
+    and in eval (with InMemoryTwoWayChannel + TextOnlyCoachAdapter).
     """
 
     def __init__(

@@ -1,8 +1,11 @@
-"""Phase-aware LLM customer driver for runtime-sandbox eval rollouts.
+"""Phase-aware LLM-driven synthetic caller for runtime-sandbox eval rollouts.
 
 Sends the first frame in each phase without waiting for a runtime greeting.
 Switches system prompts on receipt of phase_transition control events.
 Hard cap: 12 total turns.
+
+Old name `LLMCustomerDriver` is re-exported as a deprecation shim at the
+bottom of this module.
 """
 
 from __future__ import annotations
@@ -13,8 +16,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from rehearse.eval.customers import CustomerDriverResult
-from rehearse.transport import RuntimeDuplexEndpoint
+from rehearse.eval.customers import CallerResult
+from rehearse.transport import TwoWayChannel
 from rehearse.types import Phase
 
 # ---------------------------------------------------------------------------
@@ -67,15 +70,18 @@ _PHASE_PROMPTS: dict[Phase, str] = {
 _MAX_TURNS = 12
 
 
-class LLMCustomerDriver:
-    """Anthropic-powered customer driver with per-phase system prompts.
+class SyntheticCaller:
+    """Anthropic-powered synthetic caller with per-phase system prompts.
 
     Sends the first turn in each phase immediately without waiting for a
     runtime greeting. Switches system prompts on `phase_transition` control
     events. Stops after `_MAX_TURNS` total turns or on `end_of_call`.
+
+    Old name `LLMCustomerDriver` is exposed as a deprecation alias at the
+    bottom of this module.
     """
 
-    name = "llm-customer"
+    name = "synthetic-caller"
     version = "v1"
 
     def __init__(
@@ -136,9 +142,9 @@ class LLMCustomerDriver:
     async def run(
         self,
         *,
-        transport: RuntimeDuplexEndpoint,
+        transport: TwoWayChannel,
         runtime_phase: Callable[[], Phase],
-    ) -> CustomerDriverResult:
+    ) -> CallerResult:
         phase = Phase.INTAKE
         history: list[tuple[str, str]] = []
         turns_per_phase: dict[str, int] = {}
@@ -207,7 +213,7 @@ class LLMCustomerDriver:
         finally:
             await transport.send("control", payload={"event": "customer_done"})
 
-        result = CustomerDriverResult(
+        result = CallerResult(
             turns_sent=total_turns,
             turns_per_phase=turns_per_phase,
             error=error,
@@ -219,12 +225,31 @@ class LLMCustomerDriver:
         return result
 
 
-def _write_result(run_dir: Path, result: CustomerDriverResult) -> None:
+def _write_result(run_dir: Path, result: CallerResult) -> None:
     out = {
-        "driver": LLMCustomerDriver.name,
-        "version": LLMCustomerDriver.version,
+        "driver": SyntheticCaller.name,
+        "version": SyntheticCaller.version,
         "turns_sent": result.turns_sent,
         "turns_per_phase": result.turns_per_phase,
         "error": result.error,
     }
     (run_dir / "customer_driver.json").write_text(json.dumps(out, indent=2))
+
+
+# ---------------------------------------------------------------------------
+# Deprecation shim: old class name re-exported for one release cycle.
+# ---------------------------------------------------------------------------
+
+
+def __getattr__(name: str):
+    if name == "LLMCustomerDriver":
+        import warnings
+
+        warnings.warn(
+            "LLMCustomerDriver is deprecated; use SyntheticCaller. "
+            "The old name will be removed in the next eval-system release.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return SyntheticCaller
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
