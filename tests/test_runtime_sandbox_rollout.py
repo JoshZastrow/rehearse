@@ -17,14 +17,14 @@ from unittest.mock import patch
 
 import pytest
 
-from rehearse.eval.customers import CustomerDriverResult
+from rehearse.eval.customers import CallerResult
 from rehearse.eval.environments import get_environment
 from rehearse.eval.environments.runtime_sandbox import RuntimeSandboxEnvironment
 from rehearse.eval.protocols import BenchmarkExample
 from rehearse.phases import PhaseBudgets
 from rehearse.runtime import RuntimeHost, TextOnlyCoachAdapter
 from rehearse.storage import LocalFilesystemStore
-from rehearse.transport import InMemoryDuplexTransport, RuntimeDuplexEndpoint
+from rehearse.transport import InMemoryTwoWayChannel, TwoWayChannel
 from rehearse.types import Phase
 
 
@@ -70,9 +70,9 @@ class _ScriptedCustomerDriver:
     async def run(
         self,
         *,
-        transport: RuntimeDuplexEndpoint,
+        transport: TwoWayChannel,
         runtime_phase: Any,
-    ) -> CustomerDriverResult:
+    ) -> CallerResult:
         for turn in self._turns:
             await transport.send("text", payload={"text": turn})
             await asyncio.sleep(0.05)  # let host process turn
@@ -87,7 +87,7 @@ class _ScriptedCustomerDriver:
                 break
 
         await transport.send("control", payload={"event": "customer_done"})
-        return CustomerDriverResult(
+        return CallerResult(
             turns_sent=len(self._turns),
             turns_per_phase={"intake": len(self._turns)},
         )
@@ -142,7 +142,7 @@ async def test_full_rollout_produces_artifacts(tmp_path: Path) -> None:
     coach = _ScriptedCoach()
     host = RuntimeHost(store, coach, budgets=_ZERO_DWELL, phase_timeout_s=15.0)
     customer = _ScriptedCustomerDriver()
-    transport = InMemoryDuplexTransport()
+    transport = InMemoryTwoWayChannel()
 
     await asyncio.gather(
         host.run(session_id=session_id, transport=transport.runtime),
@@ -177,11 +177,11 @@ async def test_stub_customer_no_deadlock(tmp_path: Path) -> None:
     store = LocalFilesystemStore(tmp_path, public_base_url="http://localhost")
     coach = _ScriptedCoach()
     host = RuntimeHost(store, coach, budgets=_ZERO_DWELL, phase_timeout_s=5.0)
-    transport = InMemoryDuplexTransport()
+    transport = InMemoryTwoWayChannel()
 
-    async def _quick_customer() -> CustomerDriverResult:
+    async def _quick_customer() -> CallerResult:
         await transport.customer.send("control", payload={"event": "customer_done"})
-        return CustomerDriverResult(turns_sent=0, turns_per_phase={})
+        return CallerResult(turns_sent=0, turns_per_phase={})
 
     results = await asyncio.wait_for(
         asyncio.gather(

@@ -1,7 +1,7 @@
 """Sandboxed voice-agent environment.
 
 This is the no-Twilio eval entry point. It connects a simulated customer agent
-to a sandboxed voice-agent runtime through ``InMemoryDuplexTransport`` and lets
+to a sandboxed voice-agent runtime through ``InMemoryTwoWayChannel`` and lets
 the two agents run their own loops. The implementation is intentionally small
 today, but the boundary matches where a Hume-backed runtime adapter will plug in.
 """
@@ -23,8 +23,8 @@ from rehearse.eval.sandbox_agents import SandboxAgent, SandboxAgentRunner, Sandb
 from rehearse.eval.sandbox_connection import SandboxConnection
 from rehearse.eval.sandboxes import CustomerAgentSandbox, SandboxHandle, VoiceAgentSandbox
 from rehearse.eval.transports import (
-    InMemoryDuplexTransport,
-    RuntimeDuplexEndpoint,
+    InMemoryTwoWayChannel,
+    TwoWayChannel,
     TransportEvent,
 )
 from rehearse.types import ConsentState, Phase, Session, Speaker, TranscriptFrame
@@ -34,7 +34,7 @@ from rehearse.types import ConsentState, Phase, Session, Speaker, TranscriptFram
 class SandboxAgentContext:
     handle: SandboxHandle
     example: BenchmarkExample
-    transport: RuntimeDuplexEndpoint
+    transport: TwoWayChannel
 
 
 class ScriptedCustomerAgent:
@@ -366,7 +366,7 @@ class _AgentRuntimeAdapter:
         self,
         handle: SandboxHandle,
         example: BenchmarkExample,
-        transport: RuntimeDuplexEndpoint | None = None,
+        transport: TwoWayChannel | None = None,
     ) -> None:
         if transport is None:
             raise ValueError(f"{self.name} requires a runtime transport endpoint")
@@ -439,7 +439,7 @@ class VoiceAgentSandboxEnvironment:
                 runtime=voice_runtime,
                 model_slots=self.model_slots,
             ),
-            transport=InMemoryDuplexTransport(on_event=self.on_event),
+            transport=InMemoryTwoWayChannel(on_event=self.on_event),
         )
 
         try:

@@ -22,7 +22,7 @@ from typing import Literal, Protocol, runtime_checkable
 from uuid import uuid4
 
 from rehearse.eval.protocols import BenchmarkExample
-from rehearse.eval.transports import RuntimeDuplexEndpoint
+from rehearse.eval.transports import TwoWayChannel
 
 SandboxKind = Literal["voice-agent", "customer-agent"]
 SandboxStatus = Literal["not_started", "running", "closed"]
@@ -58,7 +58,7 @@ class VoiceAgentRuntime(Protocol):
         self,
         handle: SandboxHandle,
         example: BenchmarkExample,
-        transport: RuntimeDuplexEndpoint | None = None,
+        transport: TwoWayChannel | None = None,
     ) -> None: ...
 
     async def close(self) -> None: ...
@@ -75,7 +75,7 @@ class CustomerAgentRuntime(Protocol):
         self,
         handle: SandboxHandle,
         example: BenchmarkExample,
-        transport: RuntimeDuplexEndpoint | None = None,
+        transport: TwoWayChannel | None = None,
     ) -> None: ...
 
     async def close(self) -> None: ...
@@ -95,7 +95,7 @@ class NoopVoiceAgentRuntime:
         self,
         handle: SandboxHandle,
         example: BenchmarkExample,
-        transport: RuntimeDuplexEndpoint | None = None,
+        transport: TwoWayChannel | None = None,
     ) -> None:
         self.started = True
         self.closed = False
@@ -124,7 +124,7 @@ class ScriptedCustomerAgentRuntime:
         self,
         handle: SandboxHandle,
         example: BenchmarkExample,
-        transport: RuntimeDuplexEndpoint | None = None,
+        transport: TwoWayChannel | None = None,
     ) -> None:
         raw_script = example.payload.get("customer_script", [])
         self.script = [str(turn) for turn in raw_script] if isinstance(raw_script, list) else []
@@ -203,7 +203,7 @@ class VoiceAgentSandbox(_ManagedSandbox):
         example: BenchmarkExample,
         run_dir: Path,
         rng_seed: int,
-        transport: RuntimeDuplexEndpoint | None = None,
+        transport: TwoWayChannel | None = None,
     ) -> SandboxHandle:
         self._ensure_can_start()
         run_dir.mkdir(parents=True, exist_ok=True)
@@ -227,7 +227,7 @@ class VoiceAgentSandbox(_ManagedSandbox):
         example: BenchmarkExample,
         run_dir: Path,
         rng_seed: int,
-        transport: RuntimeDuplexEndpoint | None = None,
+        transport: TwoWayChannel | None = None,
     ) -> AsyncIterator[SandboxHandle]:
         handle = await self.start(
             example=example,
@@ -265,7 +265,7 @@ class CustomerAgentSandbox(_ManagedSandbox):
         example: BenchmarkExample,
         run_dir: Path,
         rng_seed: int,
-        transport: RuntimeDuplexEndpoint | None = None,
+        transport: TwoWayChannel | None = None,
     ) -> SandboxHandle:
         self._ensure_can_start()
         run_dir.mkdir(parents=True, exist_ok=True)
@@ -289,7 +289,7 @@ class CustomerAgentSandbox(_ManagedSandbox):
         example: BenchmarkExample,
         run_dir: Path,
         rng_seed: int,
-        transport: RuntimeDuplexEndpoint | None = None,
+        transport: TwoWayChannel | None = None,
     ) -> AsyncIterator[SandboxHandle]:
         handle = await self.start(
             example=example,

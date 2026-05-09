@@ -18,7 +18,7 @@ from rehearse.runtime import (
 )
 from rehearse.phases import PhaseBudgets
 from rehearse.storage import LocalFilesystemStore
-from rehearse.transport import InMemoryDuplexTransport, TransportEvent
+from rehearse.transport import InMemoryTwoWayChannel, TransportEvent
 from rehearse.types import ConsentState, Phase, Session
 
 
@@ -121,7 +121,7 @@ async def test_happy_path_all_artifacts_written(tmp_path: Path) -> None:
         ]
     )
     host, store = _make_host(tmp_path, coach)
-    transport = InMemoryDuplexTransport()
+    transport = InMemoryTwoWayChannel()
     session_id = "sess-happy-001"
 
     async def _customer() -> None:
@@ -178,7 +178,7 @@ async def test_phase_timeout_raises_and_cleans_up(tmp_path: Path) -> None:
     """A customer that sends nothing triggers RuntimePhaseTimeoutError."""
     coach = ScriptedCoach([])
     host, _ = _make_host(tmp_path, coach, phase_timeout_s=0.05)
-    transport = InMemoryDuplexTransport()
+    transport = InMemoryTwoWayChannel()
 
     with pytest.raises(RuntimePhaseTimeoutError):
         await host.run(session_id="sess-timeout", transport=transport.runtime)
@@ -201,7 +201,7 @@ async def test_intake_complete_before_phase_transition_control(tmp_path: Path) -
         ]
     )
     host, store = _make_host(tmp_path, coach)
-    transport = InMemoryDuplexTransport()
+    transport = InMemoryTwoWayChannel()
     session_id = "sess-happens-before"
 
     intake_present_at_control: bool = False
@@ -246,7 +246,7 @@ async def test_current_phase_tracks_transitions(tmp_path: Path) -> None:
         ["Tell me more.", "I see.", "Let's start!", "Nice try.", "Good work!"]
     )
     host, _ = _make_host(tmp_path, coach)
-    transport = InMemoryDuplexTransport()
+    transport = InMemoryTwoWayChannel()
     session_id = "sess-phase-prop"
 
     observed_at_start: Phase | None = None
@@ -288,7 +288,7 @@ async def test_mid_run_crash_leaves_partial_artifacts(tmp_path: Path) -> None:
     """A coach crash after the first turn leaves session.json but no intake.json."""
     coach = CrashingCoach(crash_on=2)
     host, store = _make_host(tmp_path, coach)
-    transport = InMemoryDuplexTransport()
+    transport = InMemoryTwoWayChannel()
     session_id = "sess-crash"
 
     async def _customer() -> None:
@@ -320,7 +320,7 @@ async def test_early_hangup_exits_cleanly(tmp_path: Path) -> None:
     """Customer sending customer_done immediately produces a valid partial session."""
     coach = ScriptedCoach([])
     host, store = _make_host(tmp_path, coach)
-    transport = InMemoryDuplexTransport()
+    transport = InMemoryTwoWayChannel()
     session_id = "sess-early-done"
 
     async def _customer() -> None:
