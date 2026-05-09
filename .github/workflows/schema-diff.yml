@@ -77,4 +77,4 @@ jobs:
 
       - name: Boot RuntimeHost via the serving path and assert artifact bundle shape
         run: |
-          uv run pytest tests/test_telephony.py -v -k media_websocket
+          uv run pytest tests/test_telephony_r1.py -v -k media_websocket
