@@ -21,6 +21,7 @@ import structlog
 
 from rehearse.bus import FrameBus
 from rehearse.frames import ConsentResolved, EndOfCall, Frame, TranscriptDelta
+from rehearse.participants import SpeakRequest, VoiceSpeaker
 from rehearse.personas import (
     CONSENT_DECLINE_ACK,
     CONSENT_PROMPT,
@@ -46,7 +47,7 @@ class ConsentGate:
     """Run the consent prompt + classification before any practice content.
 
     The gate must be the first surface to act on the call. It speaks the
-    consent prompt via the injected `speak` callable, classifies the next
+    consent prompt via the injected speaker, classifies the next
     final user transcript frame, and resolves the session into either
     `GRANTED` (intake proceeds) or `DECLINED` (call ends with the orchestrator
     finalize hook).
@@ -58,7 +59,7 @@ class ConsentGate:
         store: LocalFilesystemStore,
         bus: FrameBus,
         *,
-        speak: Callable[[str], Awaitable[None]],
+        speaker: VoiceSpeaker,
         on_decline: Callable[[], Awaitable[None]],
         config: ConsentGateConfig | None = None,
         clock: Callable[[], datetime] = utcnow,
@@ -67,7 +68,7 @@ class ConsentGate:
         self._session_id = session_id
         self._store = store
         self._bus = bus
-        self._speak = speak
+        self._speaker = speaker
         self._on_decline = on_decline
         self._config = config or ConsentGateConfig()
         self._clock = clock
@@ -99,7 +100,7 @@ class ConsentGate:
 
     async def _ask(self, prompt: str) -> None:
         """Speak a prompt, mark asked, and reset the timeout watcher."""
-        await self._speak(prompt)
+        await self._speaker.say(SpeakRequest(text=prompt))
         self._asked_at = self._clock()
         log.info("consent.prompt.spoken", session_id=self._session_id)
         if self._timeout_task is not None:
@@ -189,7 +190,7 @@ class ConsentGate:
         )
         log.info("consent.declined", session_id=self._session_id, reason=reason)
         try:
-            await self._speak(CONSENT_DECLINE_ACK)
+            await self._speaker.say(SpeakRequest(text=CONSENT_DECLINE_ACK))
         except Exception as exc:
             log.warning(
                 "consent.decline.ack_failed",

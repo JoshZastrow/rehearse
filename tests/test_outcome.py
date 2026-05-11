@@ -18,6 +18,7 @@ from rehearse.outcome import (
     build_label,
     classify_outcome,
 )
+from rehearse.participants import SpeakRequest
 from rehearse.storage import LocalFilesystemStore
 from rehearse.types import ConsentState, Phase, Session, Speaker
 
@@ -135,6 +136,15 @@ def _user_frame(session_id: str, text: str, *, ts: float = 1.0) -> TranscriptDel
     )
 
 
+class _Speaker:
+    def __init__(self, spoken: list[str] | None = None) -> None:
+        self._spoken = spoken
+
+    async def say(self, request: SpeakRequest) -> None:
+        if self._spoken is not None:
+            self._spoken.append(request.text)
+
+
 @pytest.mark.asyncio
 async def test_probe_captures_positive_label(
     probe_store: tuple[LocalFilesystemStore, str],
@@ -143,13 +153,10 @@ async def test_probe_captures_positive_label(
     bus = FrameBus(session_id)
     spoken: list[str] = []
 
-    async def speak(text: str) -> None:
-        spoken.append(text)
-
     probe = OutcomeProbe(
         session_id,
         store,
-        speak=speak,
+        speaker=_Speaker(spoken),
         config=OutcomeProbeConfig(
             response_timeout_seconds=2,
             reprompt_limit=1,
@@ -190,13 +197,10 @@ async def test_probe_skips_on_timeout(
     store, session_id = probe_store
     bus = FrameBus(session_id)
 
-    async def speak(_text: str) -> None:
-        return None
-
     probe = OutcomeProbe(
         session_id,
         store,
-        speak=speak,
+        speaker=_Speaker(),
         config=OutcomeProbeConfig(
             response_timeout_seconds=0,  # instant timeout
             reprompt_limit=1,
@@ -234,13 +238,10 @@ async def test_probe_reprompts_then_skips_on_unclear(
     bus = FrameBus(session_id)
     spoken: list[str] = []
 
-    async def speak(text: str) -> None:
-        spoken.append(text)
-
     probe = OutcomeProbe(
         session_id,
         store,
-        speak=speak,
+        speaker=_Speaker(spoken),
         config=OutcomeProbeConfig(
             response_timeout_seconds=5,
             reprompt_limit=1,
@@ -281,13 +282,10 @@ async def test_probe_is_idempotent_after_capture(
     store, session_id = probe_store
     bus = FrameBus(session_id)
 
-    async def speak(_text: str) -> None:
-        return None
-
     probe = OutcomeProbe(
         session_id,
         store,
-        speak=speak,
+        speaker=_Speaker(),
         config=OutcomeProbeConfig(
             response_timeout_seconds=5,
             reprompt_limit=1,
@@ -327,13 +325,10 @@ async def test_probe_marks_skipped_on_hangup_after_prompt(
     store, session_id = probe_store
     bus = FrameBus(session_id)
 
-    async def speak(_text: str) -> None:
-        return None
-
     probe = OutcomeProbe(
         session_id,
         store,
-        speak=speak,
+        speaker=_Speaker(),
         config=OutcomeProbeConfig(
             response_timeout_seconds=30,
             reprompt_limit=1,

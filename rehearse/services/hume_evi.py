@@ -25,6 +25,7 @@ import rehearse.services.hume_configs as _hume_configs
 from rehearse.audio.resample import resample_pcm16
 from rehearse.bus import FrameBus
 from rehearse.frames import AudioChunk, EndOfCall, ProsodyEvent, TranscriptDelta
+from rehearse.participants import ParticipantConfig, SpeakRequest, VoiceParticipant
 from rehearse.services.hume_configs import select_config_id
 from rehearse.types import ProsodyScores, Speaker
 
@@ -46,7 +47,6 @@ class HumeEVIClient:
         *,
         api_key: str,
         config_id: str,
-        bus: FrameBus,
         session_id: str,
         persona_key: str = "default",
         connect_fn: Callable[..., Any] | None = None,
@@ -66,7 +66,6 @@ class HumeEVIClient:
         self._api_key = api_key
         self._fallback_config_id = config_id
         self._persona_key = persona_key
-        self._bus = bus
         self._session_id = session_id
         self._connect_fn = (
             connect_fn or AsyncHumeClient(api_key=api_key).empathic_voice.chat.connect
@@ -99,7 +98,6 @@ class HumeEVIClient:
 
     async def __aexit__(self, *_args: object) -> None:
         """Close any open Hume websocket resources."""
-        await self._flush_pending_coach(self._elapsed_s())
         if self._stack is not None:
             await self._stack.aclose()
         self._stack = None
@@ -131,7 +129,7 @@ class HumeEVIClient:
             raise RuntimeError("HumeEVIClient not connected")
         await self._socket.send_assistant_input(AssistantInput(text=text))
 
-    async def run_event_loop(self) -> None:
+    async def run_event_loop(self, bus: FrameBus) -> None:
         """Read Hume events until the socket closes and publish runtime frames.
 
         On websocket or connect-time failures, walk the configured backoff
@@ -144,13 +142,13 @@ class HumeEVIClient:
                 assert self._socket is not None
                 async for event in self._socket:
                     self._reset_reconnect_state()
-                    await self._handle_event(event)
+                    await self._handle_event(event, bus)
                 # Hume closed the socket cleanly (code 1000). Set _closing
                 # before publishing so any concurrent send_audio calls become
                 # no-ops rather than raising ConnectionClosedOK.
                 self._closing = True
-                await self._flush_pending_coach(self._elapsed_s())
-                await self._bus.publish(
+                await self._flush_pending_coach(self._elapsed_s(), bus)
+                await bus.publish(
                     EndOfCall(
                         session_id=self._session_id,
                         reason="hangup",
@@ -161,8 +159,8 @@ class HumeEVIClient:
             except Exception:
                 if not await self._try_backoff_reconnect():
                     self._closing = True
-                    await self._flush_pending_coach(self._elapsed_s())
-                    await self._bus.publish(
+                    await self._flush_pending_coach(self._elapsed_s(), bus)
+                    await bus.publish(
                         EndOfCall(
                             session_id=self._session_id,
                             reason="error",
@@ -242,20 +240,20 @@ class HumeEVIClient:
             await self._stack.aclose()
         await self._connect()
 
-    async def _handle_event(self, event: Any) -> None:
+    async def _handle_event(self, event: Any, bus: FrameBus) -> None:
         """Dispatch one Hume event to the correct runtime-frame handler."""
         event_type = getattr(event, "type", None)
         if event_type == "audio_output":
-            await self._publish_audio_output(event)
+            await self._publish_audio_output(event, bus)
             return
         if event_type == "user_message":
-            await self._publish_user_message(event)
+            await self._publish_user_message(event, bus)
             return
         if event_type == "assistant_message":
-            await self._publish_assistant_message(event)
+            await self._publish_assistant_message(event, bus)
             return
         if event_type == "assistant_end":
-            await self._flush_pending_coach(self._elapsed_s())
+            await self._flush_pending_coach(self._elapsed_s(), bus)
             return
         if event_type == "assistant_prosody":
             return
@@ -264,12 +262,12 @@ class HumeEVIClient:
         if event_type == "error":
             raise RuntimeError(getattr(event, "message", "hume websocket error"))
 
-    async def _publish_audio_output(self, event: Any) -> None:
+    async def _publish_audio_output(self, event: Any, bus: FrameBus) -> None:
         """Convert one Hume audio chunk into a runtime audio frame."""
         wav_bytes = base64.b64decode(event.data)
         pcm48k = _decode_wav_pcm16(wav_bytes)
         pcm16k = resample_pcm16(pcm48k, src_rate=48_000, dst_rate=16_000)
-        await self._bus.publish(
+        await bus.publish(
             AudioChunk(
                 session_id=self._session_id,
                 speaker=Speaker.COACH,
@@ -278,13 +276,13 @@ class HumeEVIClient:
             )
         )
 
-    async def _publish_user_message(self, event: Any) -> None:
+    async def _publish_user_message(self, event: Any, bus: FrameBus) -> None:
         """Publish transcript and prosody frames for one user utterance."""
         utterance_id = self._new_utterance_id("user")
         text = getattr(getattr(event, "message", None), "content", "") or ""
         begin_ms = float(getattr(getattr(event, "time", None), "begin", 0))
         end_ms = float(getattr(getattr(event, "time", None), "end", 0))
-        await self._bus.publish(
+        await bus.publish(
             TranscriptDelta(
                 session_id=self._session_id,
                 utterance_id=utterance_id,
@@ -297,7 +295,7 @@ class HumeEVIClient:
         )
 
         scores = _extract_scores(getattr(getattr(event, "models", None), "prosody", None))
-        await self._bus.publish(
+        await bus.publish(
             ProsodyEvent(
                 session_id=self._session_id,
                 utterance_id=utterance_id,
@@ -308,7 +306,7 @@ class HumeEVIClient:
             )
         )
 
-    async def _publish_assistant_message(self, event: Any) -> None:
+    async def _publish_assistant_message(self, event: Any, bus: FrameBus) -> None:
         """Buffer one assistant utterance; publish on the matching assistant_end.
 
         Hume sends `assistant_message` (text) before streaming the TTS
@@ -322,7 +320,7 @@ class HumeEVIClient:
         """
         now = self._elapsed_s()
         if self._pending_coach is not None:
-            await self._flush_pending_coach(now)
+            await self._flush_pending_coach(now, bus)
         text = getattr(getattr(event, "message", None), "content", "") or ""
         self._pending_coach = _PendingCoachTurn(
             utterance_id=self._new_utterance_id("assistant"),
@@ -330,13 +328,13 @@ class HumeEVIClient:
             ts_start=now,
         )
 
-    async def _flush_pending_coach(self, ts_end: float) -> None:
+    async def _flush_pending_coach(self, ts_end: float, bus: FrameBus) -> None:
         """Publish the buffered coach `TranscriptDelta` with a real `ts_end`."""
         pending = self._pending_coach
         if pending is None:
             return
         self._pending_coach = None
-        await self._bus.publish(
+        await bus.publish(
             TranscriptDelta(
                 session_id=self._session_id,
                 utterance_id=pending.utterance_id,
@@ -356,6 +354,65 @@ class HumeEVIClient:
         """Return a simple unique utterance id for the current session."""
         self._utterance_counter += 1
         return f"{prefix}-{self._utterance_counter}"
+
+
+class HumeEVIParticipant(VoiceParticipant):
+    """Domain actor wrapping HumeEVIClient for the coach side of a live call."""
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        config_id: str,
+        session_id: str,
+        persona_key: str = "default",
+        connect_fn: Callable[..., Any] | None = None,
+        reconnect_backoff_s: float = 0.1,
+        reconnect_backoff_schedule_s: tuple[float, ...] | None = None,
+        reconnect_budget_s: float = 15.0,
+    ) -> None:
+        """Create a coach participant backed by a Hume EVI websocket client."""
+        self._session_id = session_id
+        self._client = HumeEVIClient(
+            api_key=api_key,
+            config_id=config_id,
+            session_id=session_id,
+            persona_key=persona_key,
+            connect_fn=connect_fn,
+            reconnect_backoff_s=reconnect_backoff_s,
+            reconnect_backoff_schedule_s=reconnect_backoff_schedule_s,
+            reconnect_budget_s=reconnect_budget_s,
+        )
+
+    async def __aenter__(self) -> HumeEVIParticipant:
+        """Open the underlying Hume websocket connection."""
+        await self._client.__aenter__()
+        return self
+
+    async def __aexit__(self, *_args: object) -> None:
+        """Close the underlying Hume websocket connection."""
+        await self._client.__aexit__(*_args)
+
+    @property
+    def config(self) -> ParticipantConfig:
+        """Return stable identity for this coach participant."""
+        return ParticipantConfig(
+            participant_id=self._session_id,
+            role="coach",
+            backend="hume_evi",
+        )
+
+    async def receive_audio(self, pcm16_16k: bytes) -> None:
+        """Forward caller audio into Hume."""
+        await self._client.send_audio(pcm16_16k)
+
+    async def say(self, request: SpeakRequest) -> None:
+        """Speak a deterministic coach line through Hume assistant input."""
+        await self._client.say(request.text)
+
+    async def run(self, bus: FrameBus) -> None:
+        """Run the Hume event loop and publish frames to the bus."""
+        await self._client.run_event_loop(bus)
 
 
 def _decode_wav_pcm16(wav_bytes: bytes) -> bytes:

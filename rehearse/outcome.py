@@ -5,10 +5,9 @@ single yes/no question on the line before hangup, classifies the response
 with a deterministic parser (mirroring consent classification), and writes
 an `OutcomeLabel` onto the session manifest.
 
-Coach speaker channel: the probe is given an injected `speak` callable so
-the production wiring can route the prompt through Hume's
-`send_assistant_input` while tests can pass a fake. The probe never depends
-on the LLM path.
+Coach speaker channel: the probe is given an injected speaker so production
+wiring can route the prompt through the active voice participant while tests
+can pass a fake. The probe never depends on the LLM path.
 
 Spec: docs/specs/v2026-05-01-consent-and-outcome-capture.md
 """
@@ -17,7 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal
@@ -25,6 +24,7 @@ from typing import Literal
 import structlog
 
 from rehearse.frames import EndOfCall, Frame, PhaseSignal, TranscriptDelta
+from rehearse.participants import SpeakRequest, VoiceSpeaker
 from rehearse.session import utcnow
 from rehearse.storage import LocalFilesystemStore
 from rehearse.types import OutcomeLabel, Phase, Session, Speaker
@@ -91,7 +91,7 @@ class OutcomeProbe:
     Lifecycle (see spec §7.2):
       1. Wait for `PhaseSignal(to_phase=Phase.FEEDBACK)` on the bus.
       2. Sleep `feedback_budget - prompt_lead` seconds, then ask via the
-         injected `speak` callable.
+         injected speaker.
       3. Classify the next final user transcript frame with
          `classify_outcome`.
       4. positive/negative -> persist `OutcomeLabel`, mark `"captured"`.
@@ -104,14 +104,14 @@ class OutcomeProbe:
         session_id: str,
         store: LocalFilesystemStore,
         *,
-        speak: Callable[[str], Awaitable[None]],
+        speaker: VoiceSpeaker,
         config: OutcomeProbeConfig | None = None,
         clock: Callable[[], datetime] = utcnow,
     ) -> None:
         """Store identity, persistence, speaker channel, and timing knobs."""
         self._session_id = session_id
         self._store = store
-        self._speak = speak
+        self._speaker = speaker
         self._config = config or OutcomeProbeConfig()
         self._clock = clock
         self._asked_at: datetime | None = None
@@ -159,7 +159,7 @@ class OutcomeProbe:
         """Speak a prompt, mark asked, schedule the response timeout."""
         if self._captured:
             return
-        await self._speak(prompt)
+        await self._speaker.say(SpeakRequest(text=prompt))
         self._asked_at = self._clock()
         await self._store.update_session(
             self._session_id,

@@ -12,18 +12,17 @@ phase and there is no role transition to mark.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from collections.abc import AsyncIterator, Mapping
 from typing import Final
 
 import structlog
 
 from rehearse.frames import EndOfCall, Frame, PhaseSignal
+from rehearse.participants import SpeakRequest, VoiceSpeaker
 from rehearse.storage import LocalFilesystemStore
 from rehearse.types import Phase, Session
 
 log = structlog.get_logger(__name__)
-
-Speak = Callable[[str], Awaitable[None]]
 
 _DEFAULT_BRIDGES: Final[Mapping[Phase, str]] = {
     Phase.PRACTICE: "Okay, let's run it. I'll be {relationship} now.",
@@ -40,14 +39,14 @@ class PersonaSwapCoordinator:
         self,
         session_id: str,
         store: LocalFilesystemStore,
-        speak: Speak,
+        speaker: VoiceSpeaker,
         *,
         bridges: Mapping[Phase, str] | None = None,
     ) -> None:
         """Bind the session id, manifest store, speak function, and bridge copy."""
         self._session_id = session_id
         self._store = store
-        self._speak = speak
+        self._speaker = speaker
         self._bridges = bridges or _DEFAULT_BRIDGES
 
     async def run(self, frames: AsyncIterator[Frame]) -> None:
@@ -62,7 +61,7 @@ class PersonaSwapCoordinator:
                 continue
             text = await self._render(template)
             try:
-                await self._speak(text)
+                await self._speaker.say(SpeakRequest(text=text))
             except Exception as exc:
                 log.warning(
                     "persona_swap.speak_failed",
