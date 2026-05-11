@@ -21,6 +21,7 @@ from rehearse.eval.environments import list_environments
 from rehearse.eval.evals import get_eval, list_evals
 from rehearse.eval.executors import InProcessExecutor
 from rehearse.eval.providers import list_providers
+from rehearse.eval.report import ensure_run_recorded, record_run, render_report
 from rehearse.eval.runner import RunConfig, execute_run
 from rehearse.eval.transports import TransportEvent
 from rehearse.eval.watch import watch as run_watch
@@ -149,11 +150,12 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.cmd == "show":
-        path = args.runs_root / args.run_id / "summary.md"
-        if not path.exists():
-            print(f"no summary at {path}", file=sys.stderr)
+        run_dir = args.runs_root / args.run_id
+        if not run_dir.exists():
+            print(f"no run at {run_dir}", file=sys.stderr)
             return 1
-        print(path.read_text())
+        ensure_run_recorded(args.run_id, args.runs_root)
+        render_report(args.runs_root, highlight_run_id=args.run_id)
         return 0
 
     if args.cmd == "watch":
@@ -192,14 +194,18 @@ def main(argv: list[str] | None = None) -> int:
         )
         executor = InProcessExecutor(on_event=_print_event) if args.verbose else None
         outcome = asyncio.run(execute_run(config, executor=executor))
-        print(f"run_id: {outcome.run_id}")
-        print(f"run_dir: {outcome.run_dir}")
-        print(
-            f"examples: {outcome.n_examples} "
-            f"(ok={outcome.n_ok} error={outcome.n_error} timeout={outcome.n_timeout})"
+        record_run(
+            run_id=outcome.run_id,
+            eval_name=outcome.eval_name,
+            environment=outcome.environment,
+            run_date=outcome.started_at,
+            n_examples=outcome.n_examples,
+            duration_s=outcome.duration_s,
+            total_tokens=outcome.total_tokens,
+            scores=outcome.aggregate_scores,
+            runs_root=config.runs_root,
         )
-        for dim, mean in sorted(outcome.aggregate_scores.items()):
-            print(f"  {dim}: {mean:.3f}")
+        render_report(config.runs_root, highlight_run_id=outcome.run_id)
         return 0
 
     raise AssertionError(f"unhandled cmd: {args.cmd}")

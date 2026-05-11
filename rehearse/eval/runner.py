@@ -18,7 +18,7 @@ from __future__ import annotations
 import asyncio
 import statistics
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
@@ -82,6 +82,11 @@ class RunOutcome:
     n_error: int
     n_timeout: int
     aggregate_scores: dict[str, float]
+    eval_name: str = ""
+    environment: str = ""
+    started_at: datetime = field(default_factory=datetime.now)
+    duration_s: float = 0.0
+    total_tokens: int = 0
 
 
 async def execute_run(config: RunConfig, executor: Executor | None = None) -> RunOutcome:
@@ -236,6 +241,9 @@ async def execute_run(config: RunConfig, executor: Executor | None = None) -> Ru
     )
     (run_dir / "summary.md").write_text(summary)
 
+    total_tokens = sum(
+        (r.token_usage or {}).get("total_tokens", 0) for r in rollouts
+    )
     return RunOutcome(
         run_id=run_id,
         run_dir=run_dir,
@@ -244,6 +252,11 @@ async def execute_run(config: RunConfig, executor: Executor | None = None) -> Ru
         n_error=sum(1 for r in rollouts if r.status == "error"),
         n_timeout=sum(1 for r in rollouts if r.status == "timeout"),
         aggregate_scores=aggregates,
+        eval_name=eval_spec.name,
+        environment=environment.name,
+        started_at=started_at,
+        duration_s=(completed_at - started_at).total_seconds(),
+        total_tokens=total_tokens,
     )
 
 
@@ -309,6 +322,34 @@ def _render_summary(
     ]
     for dim, mean in sorted(aggregates.items()):
         lines.append(f"| `{dim}` | {mean:.3f} |")
+
+    # Per-rollout timing and token usage (when available).
+    durations_s = [r.duration_ms / 1000 for r in rollouts if r.duration_ms]
+    if durations_s:
+        avg_s = statistics.fmean(durations_s)
+        min_s = min(durations_s)
+        max_s = max(durations_s)
+        lines.extend([
+            "",
+            "## Runtime & tokens",
+            "",
+            "| Metric | Value |",
+            "|---|---|",
+            f"| Avg rollout time | {avg_s:.1f}s |",
+            f"| Min / max rollout time | {min_s:.1f}s / {max_s:.1f}s |",
+        ])
+        usages = [r.token_usage for r in rollouts if r.token_usage]
+        if usages:
+            coach_prompt = sum(u.get("coach_prompt_tokens", 0) for u in usages)
+            coach_compl = sum(u.get("coach_completion_tokens", 0) for u in usages)
+            cust_prompt = sum(u.get("customer_prompt_tokens", 0) for u in usages)
+            cust_compl = sum(u.get("customer_completion_tokens", 0) for u in usages)
+            total = sum(u.get("total_tokens", 0) for u in usages)
+            lines.extend([
+                f"| Coach tokens (prompt / completion) | {coach_prompt:,} / {coach_compl:,} |",
+                f"| Customer tokens (prompt / completion) | {cust_prompt:,} / {cust_compl:,} |",
+                f"| **Total tokens** | **{total:,}** |",
+            ])
 
     if environment_name == "runtime-sandbox":
         anthropic_key = os.environ.get("ANTHROPIC_API_KEY")

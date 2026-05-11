@@ -75,6 +75,11 @@ class TextOnlyCoachAdapter:
         self._client = client
         # History per session_id: list of (role, text) tuples
         self._histories: dict[str, list[tuple[str, str]]] = {}
+        self._usage: dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0}
+
+    @property
+    def token_usage(self) -> dict[str, int]:
+        return dict(self._usage)
 
     def _get_client(self) -> Any:
         if self._client is None:
@@ -110,6 +115,10 @@ class TextOnlyCoachAdapter:
         ).strip()
         if not coach_text:
             coach_text = "I hear you. Tell me more."
+        usage = getattr(resp, "usage", None)
+        if usage is not None:
+            self._usage["prompt_tokens"] += getattr(usage, "input_tokens", 0)
+            self._usage["completion_tokens"] += getattr(usage, "output_tokens", 0)
         history.append(("coach", coach_text))
         return coach_text
 

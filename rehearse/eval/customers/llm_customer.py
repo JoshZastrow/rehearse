@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -67,7 +68,7 @@ _PHASE_PROMPTS: dict[Phase, str] = {
     Phase.FEEDBACK: _FEEDBACK_PROMPT,
 }
 
-_MAX_TURNS = 12
+_MAX_TURNS = 24
 
 
 class SyntheticCaller:
@@ -100,6 +101,7 @@ class SyntheticCaller:
         self._temperature = temperature
         self._client = client
         self._run_dir = run_dir
+        self._usage: dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0}
 
     def _get_client(self) -> Any:
         if self._client is None:
@@ -137,6 +139,10 @@ class SyntheticCaller:
             system=system_prompt,
             messages=messages,
         )
+        usage = getattr(resp, "usage", None)
+        if usage is not None:
+            self._usage["prompt_tokens"] += getattr(usage, "input_tokens", 0)
+            self._usage["completion_tokens"] += getattr(usage, "output_tokens", 0)
         return resp.content[0].text.strip() if resp.content else ""
 
     async def run(
@@ -159,6 +165,7 @@ class SyntheticCaller:
                 await transport.send("text", payload={"text": first_text})
                 total_turns += 1
                 turns_per_phase[phase.value] = turns_per_phase.get(phase.value, 0) + 1
+                print(f"  [caller] turn {total_turns} ({phase.value}) customer → runtime", file=sys.stderr, flush=True)
 
             while total_turns < _MAX_TURNS:
                 event = await transport.receive()
@@ -171,6 +178,7 @@ class SyntheticCaller:
                             phase = Phase[new_phase_str]
                         except KeyError:
                             pass
+                        print(f"  [caller] phase → {phase.value}", file=sys.stderr, flush=True)
                         # Send the first turn of the new phase immediately.
                         first_text = await self._complete(
                             self._system_prompt(phase), history
@@ -184,7 +192,9 @@ class SyntheticCaller:
                             turns_per_phase[phase.value] = (
                                 turns_per_phase.get(phase.value, 0) + 1
                             )
+                            print(f"  [caller] turn {total_turns} ({phase.value}) customer → runtime", file=sys.stderr, flush=True)
                     elif evt in ("customer_done", "end_of_call", "runtime_done"):
+                        print(f"  [caller] received {evt}, stopping", file=sys.stderr, flush=True)
                         break
                     continue
 
@@ -194,6 +204,7 @@ class SyntheticCaller:
                 coach_text = str(event.payload.get("text", ""))
                 if coach_text:
                     history.append(("coach", coach_text))
+                    print(f"  [caller] turn {total_turns} ({phase.value}) runtime → customer", file=sys.stderr, flush=True)
 
                 if total_turns >= _MAX_TURNS:
                     break
@@ -207,6 +218,7 @@ class SyntheticCaller:
                 turns_per_phase[phase.value] = (
                     turns_per_phase.get(phase.value, 0) + 1
                 )
+                print(f"  [caller] turn {total_turns} ({phase.value}) customer → runtime", file=sys.stderr, flush=True)
 
         except Exception as exc:
             error = str(exc)
@@ -217,6 +229,7 @@ class SyntheticCaller:
             turns_sent=total_turns,
             turns_per_phase=turns_per_phase,
             error=error,
+            token_usage=dict(self._usage),
         )
 
         if self._run_dir is not None:

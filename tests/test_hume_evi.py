@@ -353,7 +353,6 @@ async def test_user_interrupts_consent_prompt_with_yes() -> None:
     client = HumeEVIClient(
         api_key="api",
         config_id="cfg",
-        bus=bus,
         session_id="s1",
         connect_fn=_connect_factory([socket]),
     )
@@ -361,7 +360,7 @@ async def test_user_interrupts_consent_prompt_with_yes() -> None:
     async with client:
         consume = asyncio.create_task(_drain(bus))
         await asyncio.sleep(0)
-        await client.run_event_loop()
+        await client.run_event_loop(bus)
         await bus.aclose()
         frames = await consume
 
@@ -408,11 +407,9 @@ async def test_send_audio_ignores_connection_closed_during_send() -> None:
         async def send_audio_input(self, _message: object) -> None:
             raise ConnectionClosedOK(None, None)
 
-    bus = FrameBus("s1")
     client = HumeEVIClient(
         api_key="api",
         config_id="cfg",
-        bus=bus,
         session_id="s1",
         connect_fn=_connect_factory([SocketThatClosesOnSend([])]),
     )

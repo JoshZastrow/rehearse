@@ -44,7 +44,8 @@ the phase you are building.
 | [`v2026-05-06-persona-config-swap.md`](v2026-05-06-persona-config-swap.md) | `draft` | `implementation` | Per-phase coach/character/feedback role swap via CLM | Routes Hume's per-turn LLM through our phase-aware `/chat/completions` so the assistant flips coach → in-character counterparty → feedback-coach as the manifest transitions. Adds `feedback_coach` role + `PersonaSwapCoordinator` bridge utterances. |
 | [`v2026-05-06-r6-reliability-backlog.md`](v2026-05-06-r6-reliability-backlog.md) | `done` | `implementation` | R6 runtime reliability punch list | All four items shipped: 1 (stream WAV to disk, commit 5d89572), 2 (Hume reconnect with backoff schedule + budget), 3 (finalize sweeper, commit b6c5242), 4 (`FinalizeSweeper.recover_orphans()` wired into app lifespan startup). |
 | [`v2026-05-06-time-aware-clm.md`](v2026-05-06-time-aware-clm.md) | `done` | `implementation` | Per-turn time card injection into CLM | Shipped via commits 8601f1c → a54d91b. TimeCard built and rendered as a second cached system block on every CLM turn. |
-| [`v2026-05-11-voice-participant-protocol.md`](v2026-05-11-voice-participant-protocol.md) | `wip` | `implementation` | Voice participant abstraction layer | Implementation started on `codex/voice-participant-protocol`: defines `VoiceParticipant` + `VoiceSpeaker`, `SpeakRequest` Pydantic type, removes bare `hume.say` from business logic. |
+| [`v2026-05-11-voice-participant-protocol.md`](v2026-05-11-voice-participant-protocol.md) | `draft` | `implementation` | Voice participant abstraction layer | Defines `VoiceParticipant` + `VoiceSpeaker` protocols, `SpeakRequest` Pydantic type. Removes `hume.say` from business logic. Enables coach/caller swap without touching telephony wiring. |
+| [`v2026-05-11-live-audio-eval-sandbox.md`](v2026-05-11-live-audio-eval-sandbox.md) | `draft` | `implementation` | Live-audio eval environment | Replaces post-hoc TTS synthesis with a real EVI session per rollout. `AudioCoachAdapter` seam enables provider swap. Closes eval/serve gap for voice. Amends 05-06 roadmap Mini-spec 2 (second half). |
 
 ## Workstream Map
 
@@ -58,6 +59,7 @@ the phase you are building.
 | Runtime R2-R7 | `v2026-04-27-runtime.md`, `v2026-04-28-drop-pipecat.md`, `v2026-04-28-runtime-workstream.md` | `v2026-04-28-hume-evi-bridge.md`; superseded runtime sections C3, C5, C7 |
 | CLM / persona / Hume config | `v2026-05-06-hume-config-as-code.md`, `v2026-05-06-time-aware-clm.md` | `v2026-04-28-hume-evi-bridge.md` |
 | Voice participant / coach swap | `v2026-05-11-voice-participant-protocol.md` | `v2026-04-28-hume-evi-bridge.md` |
+| Live-audio eval | `v2026-05-11-live-audio-eval-sandbox.md`, `v2026-05-07-runtime-eval-alignment.md` | `v2026-04-28-hume-evi-bridge.md` |
 | Consent + production data capture | `v2026-05-01-consent-and-outcome-capture.md`, `v2026-04-28-runtime-workstream.md` | `v2026-04-28-hume-evi-bridge.md` |
 | ML data pipeline | `../../SPEC.md` | No dedicated spec yet. Write one before implementation. |
 

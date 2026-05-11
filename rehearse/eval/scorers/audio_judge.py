@@ -194,7 +194,7 @@ class _GeminiAudioClient:
                 model=model,
                 contents=contents,
                 config=types.GenerateContentConfig(
-                    max_output_tokens=2048,
+                    max_output_tokens=8192,
                     temperature=0.0,
                 ),
             )

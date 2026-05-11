@@ -38,7 +38,18 @@ from rehearse.eval.environments._audio import (
 )
 from rehearse.eval.protocols import BenchmarkExample, RolloutResult
 from rehearse.eval.tts_bridge import TTSProvider, get_default_provider
+from rehearse.phases import PhaseBudgets
 from rehearse.runtime import RuntimeHost, TextOnlyCoachAdapter
+
+# Phase budgets compressed for text-only eval: no audio playback time, so
+# LLM turns happen ~10× faster than real phone exchanges. Production budgets
+# (60s/180s/60s) exhaust _MAX_TURNS before INTAKE can transition.
+_EVAL_BUDGETS = PhaseBudgets(
+    intake_seconds=20,
+    practice_seconds=60,
+    intake_min_dwell_seconds=10,
+    practice_min_dwell_seconds=20,
+)
 from rehearse.storage import LocalFilesystemStore
 from rehearse.transport import InMemoryTwoWayChannel
 
@@ -99,7 +110,7 @@ class RuntimeSandboxEnvironment:
         store = LocalFilesystemStore(session_dir.parent, public_base_url="http://localhost")
 
         coach = TextOnlyCoachAdapter()
-        host = RuntimeHost(store, coach)
+        host = RuntimeHost(store, coach, budgets=_EVAL_BUDGETS)
 
         scenario = example.payload.get("scenario", example.payload)
         customer = SyntheticCaller(
@@ -109,9 +120,11 @@ class RuntimeSandboxEnvironment:
 
         transport = InMemoryTwoWayChannel()
 
+        print(f"[runtime-sandbox] {example.id} starting rollout …", file=sys.stderr, flush=True)
         error: str | None = None
+        caller_result = None
         try:
-            await asyncio.gather(
+            _, caller_result = await asyncio.gather(
                 host.run(session_id=session_id, transport=transport.runtime),
                 customer.run(
                     transport=transport.customer,
@@ -121,6 +134,10 @@ class RuntimeSandboxEnvironment:
         except Exception as exc:
             error = f"{type(exc).__name__}: {exc}"
             traceback.print_exc(file=sys.stderr)
+
+        elapsed = (datetime.now() - started).total_seconds()
+        status_str = f"error: {error}" if error else "ok"
+        print(f"[runtime-sandbox] {example.id} rollout done ({elapsed:.0f}s) → {status_str}", file=sys.stderr, flush=True)
 
         # Post-hoc TTS + timing.jsonl. Only attempted when the rollout produced
         # a transcript; if the runtime crashed mid-call, skip audio.
@@ -136,6 +153,17 @@ class RuntimeSandboxEnvironment:
         completed = datetime.now()
         duration_ms = int((completed - started).total_seconds() * 1000)
 
+        # Merge token usage from coach and synthetic caller.
+        coach_u = getattr(coach, "token_usage", {}) or {}
+        caller_u = (getattr(caller_result, "token_usage", {}) if caller_result else {}) or {}
+        token_usage: dict[str, int] = {
+            "coach_prompt_tokens": coach_u.get("prompt_tokens", 0),
+            "coach_completion_tokens": coach_u.get("completion_tokens", 0),
+            "customer_prompt_tokens": caller_u.get("prompt_tokens", 0),
+            "customer_completion_tokens": caller_u.get("completion_tokens", 0),
+        }
+        token_usage["total_tokens"] = sum(token_usage.values())
+
         return RolloutResult(
             example_id=example.id,
             target_name=self.name,
@@ -147,6 +175,7 @@ class RuntimeSandboxEnvironment:
             artifacts_dir=session_dir,
             error=error,
             payload=audio_payload,
+            token_usage=token_usage,
         )
 
     async def _synthesize_audio(
@@ -172,6 +201,8 @@ class RuntimeSandboxEnvironment:
         )
 
         provider = self._get_tts_provider()
+        n_turns = len(frames)
+        print(f"[runtime-sandbox] synthesizing TTS for {n_turns} turns ({provider.name if provider else 'silent'}) …", file=sys.stderr, flush=True)
         if provider is not None:
             user_durations, coach_durations = await synthesize_turns(
                 run_dir=session_dir,

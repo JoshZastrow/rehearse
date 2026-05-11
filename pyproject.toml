@@ -17,6 +17,7 @@ dependencies = [
     "python-multipart>=0.0.9",
     "google-genai>=0.3",
     "rich>=13.7",
+    "duckdb>=1.1",
 ]
 
 [project.scripts]

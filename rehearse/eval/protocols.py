@@ -68,6 +68,7 @@ class RolloutResult(_Strict):
     artifacts_dir: Path | None = None
     payload: dict[str, Any] | None = None
     error: str | None = None
+    token_usage: dict[str, int] | None = None
 
 
 @runtime_checkable

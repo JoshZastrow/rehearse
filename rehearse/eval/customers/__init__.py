@@ -40,6 +40,7 @@ class CallerResult:
     turns_per_phase: dict[str, int]
     error: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    token_usage: dict[str, int] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------

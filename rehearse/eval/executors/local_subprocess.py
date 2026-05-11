@@ -42,10 +42,10 @@ class LocalSubprocessExecutor:
             "rehearse.eval.worker",
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+            stderr=None,  # inherit parent stderr so progress prints are visible
         )
         try:
-            stdout_b, stderr_b = await asyncio.wait_for(
+            stdout_b, _ = await asyncio.wait_for(
                 proc.communicate(json.dumps(request).encode()),
                 timeout=timeout_s,
             )
@@ -74,7 +74,7 @@ class LocalSubprocessExecutor:
                 started_at=started,
                 completed_at=completed,
                 duration_ms=int((completed - started).total_seconds() * 1000),
-                error=f"worker exit {proc.returncode}: {stderr_b.decode(errors='replace')[-2000:]}",
+                error=f"worker exit {proc.returncode}",
             )
 
         try:
