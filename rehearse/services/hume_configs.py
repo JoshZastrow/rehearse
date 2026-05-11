@@ -176,7 +176,7 @@ PERSONAS: dict[str, HumePersonaConfig] = {
             model=_CLM_URL,
         ),
         prompt_text=_DEFAULT_PROMPT,
-        on_new_chat=HumeEventMessage(enabled=True, text="Hey there, what's on the mind?"),
+        on_new_chat=HumeEventMessage(enabled=False, text=None),
         on_max_duration_timeout=HumeEventMessage(enabled=True, text=None),
         on_inactivity_timeout=HumeEventMessage(enabled=False, text=None),
         timeouts=HumeTimeouts(max_duration_secs=300, inactivity_secs=122),
@@ -206,9 +206,7 @@ PERSONAS: dict[str, HumePersonaConfig] = {
             model=_CLM_URL,
         ),
         prompt_text=_RELATIONSHIP_PROMPT,
-        on_new_chat=HumeEventMessage(
-            enabled=True, text="Hey, glad you called. What's going on?"
-        ),
+        on_new_chat=HumeEventMessage(enabled=False, text=None),
         on_max_duration_timeout=HumeEventMessage(enabled=True, text=None),
         on_inactivity_timeout=HumeEventMessage(enabled=False, text=None),
         timeouts=HumeTimeouts(max_duration_secs=300, inactivity_secs=122),

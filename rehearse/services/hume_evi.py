@@ -90,6 +90,7 @@ class HumeEVIClient:
         # `assistant_end` fires (or, as a safety net, when the next
         # assistant_message arrives or the socket closes).
         self._pending_coach: _PendingCoachTurn | None = None
+        self._closing = False
 
     async def __aenter__(self) -> HumeEVIClient:
         """Open the Hume websocket connection and return the adapter."""
@@ -109,6 +110,8 @@ class HumeEVIClient:
 
         if self._socket is None:
             raise RuntimeError("HumeEVIClient not connected")
+        if self._closing:
+            return
         payload = base64.b64encode(pcm16_16k).decode("ascii")
         await self._socket.send_audio_input(AudioInput(data=payload))
 
@@ -136,9 +139,22 @@ class HumeEVIClient:
                 async for event in self._socket:
                     self._reset_reconnect_state()
                     await self._handle_event(event)
+                # Hume closed the socket cleanly (code 1000). Set _closing
+                # before publishing so any concurrent send_audio calls become
+                # no-ops rather than raising ConnectionClosedOK.
+                self._closing = True
+                await self._flush_pending_coach(self._elapsed_s())
+                await self._bus.publish(
+                    EndOfCall(
+                        session_id=self._session_id,
+                        reason="hangup",
+                        ts=self._elapsed_s(),
+                    )
+                )
                 return
             except Exception:
                 if not await self._try_backoff_reconnect():
+                    self._closing = True
                     await self._flush_pending_coach(self._elapsed_s())
                     await self._bus.publish(
                         EndOfCall(

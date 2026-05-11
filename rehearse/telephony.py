@@ -299,7 +299,7 @@ def mount_twilio_routes(
                 hume_task = asyncio.create_task(hume.run_event_loop())
                 try:
                     async for chunk in twilio.inbound():
-                        if consent_state["declined"]:
+                        if consent_state["declined"] or hume_task.done():
                             break
                         await hume.send_audio(chunk)
                         await bus.publish(

@@ -428,6 +428,92 @@ def test_media_websocket_bridges_twilio_to_fake_hume(
     assert manifest["intake"]["counterparty_relationship"] == "counterparty"
 
 
+def test_media_websocket_handles_hume_normal_close(
+    app_client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Hume closing normally (code 1000) must not crash the ASGI handler.
+
+    Regression for: run_event_loop returning silently → send_audio raising
+    ConnectionClosedOK → unhandled exception in media_stream.
+    """
+    client, _, _config = app_client
+    session_dir = _config.session_root / "test-hume-close"
+    session_dir.mkdir()
+    (session_dir / "session.json").write_text(
+        Session(id="test-hume-close", created_at=datetime.now(UTC)).model_dump_json(indent=2)
+    )
+
+    class FakeHumeClosesNormally:
+        def __init__(self, *, api_key: str, config_id: str, bus, session_id: str, **_) -> None:
+            self._bus = bus
+            self._session_id = session_id
+            self._closing = False
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return None
+
+        async def say(self, text: str) -> None:
+            pass
+
+        async def send_audio(self, pcm16_16k: bytes) -> None:
+            if self._closing:
+                return
+            # First audio chunk → publish consent grant so the gate resolves.
+            await self._bus.publish(
+                TranscriptDelta(
+                    session_id=self._session_id,
+                    utterance_id="user-consent",
+                    speaker=Speaker.USER,
+                    text="yes",
+                    is_final=True,
+                    ts_start=0.0,
+                    ts_end=0.05,
+                )
+            )
+
+        async def run_event_loop(self) -> None:
+            # Simulate Hume closing the socket cleanly after a short delay.
+            await asyncio.sleep(0.05)
+            self._closing = True
+            from rehearse.frames import EndOfCall
+            await self._bus.publish(
+                EndOfCall(session_id=self._session_id, reason="hangup", ts=0.05)
+            )
+
+    from rehearse import telephony as telephony_module
+
+    monkeypatch.setattr(telephony_module, "HumeEVIClient", FakeHumeClosesNormally)
+
+    pcm8k = struct.pack("<4h", 0, 1000, -1000, 0)
+    payload = base64.b64encode(encode_pcm16(pcm8k)).decode("ascii")
+
+    # If the bug is present this raises an unhandled exception inside the
+    # websocket handler; the TestClient surfaces it as an error rather than
+    # a clean close.
+    with client.websocket_connect("/media/test-hume-close") as ws:
+        ws.send_json({"event": "connected"})
+        ws.send_json(
+            {
+                "event": "start",
+                "start": {
+                    "streamSid": "MZ_close",
+                    "callSid": "CA_close",
+                    "customParameters": {"session_id": "test-hume-close"},
+                },
+            }
+        )
+        ws.send_json({"event": "media", "media": {"payload": payload}})
+        ws.send_json({"event": "stop"})
+
+    # Session must finalize without an exception — transcript may be minimal.
+    assert (session_dir / "session.json").exists()
+    manifest = json.loads((session_dir / "session.json").read_text())
+    assert manifest["consent"] in ("granted", "pending")
+
+
 def test_twilio_sms_signature_validation_failure(
     config: RuntimeConfig, monkeypatch: pytest.MonkeyPatch
 ) -> None:

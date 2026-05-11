@@ -174,6 +174,7 @@ async def test_hume_client_maps_user_assistant_and_audio_events() -> None:
         ProsodyEvent,
         AudioChunk,
         TranscriptDelta,
+        EndOfCall,
     ]
     assert frames[0].text == "hello"
     assert frames[1].scores.emotions["joy"] == 0.8
@@ -285,6 +286,30 @@ async def test_hume_client_swap_config_not_implemented() -> None:
 
     with pytest.raises(NotImplementedError):
         await client.swap_config("cfg-2", "prompt")
+
+
+@pytest.mark.asyncio
+async def test_normal_socket_close_emits_hangup_end_of_call() -> None:
+    """Hume closing the socket cleanly (code 1000) publishes EndOfCall(hangup)."""
+    bus = FrameBus("s1")
+    client = HumeEVIClient(
+        api_key="api",
+        config_id="cfg",
+        bus=bus,
+        session_id="s1",
+        connect_fn=_connect_factory([FakeHumeSocket([])]),
+    )
+
+    async with client:
+        consume = asyncio.create_task(_drain(bus))
+        await asyncio.sleep(0)
+        await client.run_event_loop()
+        await bus.aclose()
+        frames = await consume
+
+    assert len(frames) == 1
+    assert isinstance(frames[0], EndOfCall)
+    assert frames[0].reason == "hangup"
 
 
 @pytest.mark.asyncio
