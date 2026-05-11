@@ -78,27 +78,41 @@ After v1 ships:
 
 ## 3. Design commitments
 
-1. **Protocols are structural, not inherited.** Both `VoiceParticipant` and
-   `VoiceSpeaker` are `typing.Protocol`. Existing classes satisfy them without
-   modification to their inheritance.
+1. **Client and Participant are different layers.**
+   A *client* is a network I/O wrapper — it knows the external service's wire
+   protocol, auth, and reconnect mechanics. It has no domain knowledge.
+   A *participant* is a domain actor — it knows about `FrameBus`, `SpeakRequest`,
+   and frame types. It uses a client as a transport detail.
+   `HumeEVIClient` stays as the Hume network layer. `HumeEVIParticipant` is
+   the domain actor that wraps it.
 
-2. **Pydantic for data, Protocol for behaviour.** `SpeakRequest` and
-   `ParticipantConfig` are `BaseModel`. The protocols themselves are `Protocol`.
-   This follows the pattern established in `rehearse/types.py` and
-   `rehearse/frames.py`.
+2. **`VoiceParticipant` is an ABC, not a Protocol.**
+   All participant implementations live in this codebase. `ABC` with
+   `@abstractmethod` gives compile-time contract acknowledgement and runtime
+   enforcement at instantiation. `typing.Protocol` (structural duck typing) is
+   reserved for interfaces over third-party code you don't control.
+   `VoiceSpeaker` — consumed by business logic — remains a `Protocol` because
+   it is a narrow capability slice, not a full class contract.
 
-3. **`VoiceSpeaker` is the only interface business logic receives.** No
-   component below `telephony.py` imports `HumeEVIClient` or holds a reference
-   to any concrete participant.
+3. **`FrameBus` belongs in the participant, not the client.**
+   `HumeEVIClient` currently takes `bus: FrameBus` in `__init__` — domain
+   bleeding into the network layer. In v1 this is tolerated; extracting the bus
+   dependency fully into `HumeEVIParticipant` is a follow-up cleanup. The spec
+   draws the line clearly so future work knows where to head.
 
-4. **`FrameBus` is the coordination layer.** Participants publish frames to the
+4. **`VoiceSpeaker` is the only interface business logic receives.** No
+   component below `telephony.py` imports `HumeEVIClient` or any concrete
+   participant class.
+
+5. **`FrameBus` is the coordination layer.** Participants publish frames to the
    bus and are decoupled from each other. The session coordinator in
-   `telephony.py` owns the audio pump between Twilio and the coach; neither
-   participant holds a reference to the other.
+   `telephony.py` owns the audio pump between participants; neither participant
+   holds a reference to the other.
 
-5. **v1 is a refactor, not a rewrite.** All existing behaviour is preserved.
-   The diff is: new file `rehearse/participants.py`, updated type annotations
-   in four files, no logic changes.
+6. **v1 is a refactor, not a rewrite.** All existing behaviour is preserved.
+   The diff is: new file `rehearse/participants.py`, new class
+   `HumeEVIParticipant` in `hume_evi.py`, updated type annotations in four
+   files, no logic changes outside those files.
 
 ---
 
@@ -135,7 +149,7 @@ telephony.py:media_stream
 telephony.py:media_stream
   │
   ├─ caller: VoiceParticipant = TwilioCallerParticipant(ws, bus, session_id)
-  ├─ coach:  VoiceParticipant = HumeEVIClient(...)   ← now implements protocol directly
+  ├─ coach:  VoiceParticipant = HumeEVIParticipant(...)  ← wraps HumeEVIClient
   │                              also satisfies VoiceSpeaker
   │
   ├─ ConsentGate(speaker=coach)           ← VoiceSpeaker, no Hume reference
@@ -232,11 +246,12 @@ await self._speaker.say(SpeakRequest(text=text))
 
 This is the only logic change in those three files.
 
-### 5.4 `VoiceParticipant` — full participant protocol
+### 5.4 `VoiceParticipant` — abstract base class
 
 ```python
-@runtime_checkable
-class VoiceParticipant(Protocol):
+from abc import ABC, abstractmethod
+
+class VoiceParticipant(ABC):
     """One side of a live voice call.
 
     Implementations:
@@ -250,10 +265,12 @@ class VoiceParticipant(Protocol):
     """
 
     @property
+    @abstractmethod
     def config(self) -> ParticipantConfig:
         """Return stable identity for this participant."""
         ...
 
+    @abstractmethod
     async def receive_audio(self, pcm16_16k: bytes) -> None:
         """Accept one chunk of PCM16/16kHz audio from the other participant.
 
@@ -263,6 +280,7 @@ class VoiceParticipant(Protocol):
         """
         ...
 
+    @abstractmethod
     async def say(self, request: SpeakRequest) -> None:
         """Inject one deterministic utterance without an LLM round-trip.
 
@@ -273,6 +291,7 @@ class VoiceParticipant(Protocol):
         """
         ...
 
+    @abstractmethod
     async def run(self, bus: FrameBus) -> None:
         """Run this participant's event loop until the call ends.
 
@@ -295,33 +314,62 @@ satisfies `VoiceSpeaker` structurally.
 
 ## 6. Implementation notes per class
 
-### 6.1 `HumeEVIClient` implements `VoiceParticipant` directly
+### 6.1 `HumeEVIParticipant` — new class in `rehearse/services/hume_evi.py`
 
-No wrapper class. `HumeEVIClient` gets three mechanical changes:
-
-| Before | After | Notes |
-|---|---|---|
-| `send_audio(self, pcm16_16k: bytes)` | `receive_audio(self, pcm16_16k: bytes)` | Rename only. One call site in `telephony.py`. |
-| `say(self, text: str)` | `say(self, request: SpeakRequest)` | Unwrap `request.text` at the top of the method body. |
-| `run_event_loop(self)` | `run(self, bus: FrameBus)` | Rename. `bus` is already stored in `__init__`; the parameter can be accepted and ignored, or used to replace `self._bus` so `run` is callable without prior `__init__` wiring. |
-
-Add the `config` property:
+`HumeEVIClient` stays unchanged as the Hume network layer. `HumeEVIParticipant`
+is a new class in the same module that extends `VoiceParticipant` and wraps the
+client:
 
 ```python
-@property
-def config(self) -> ParticipantConfig:
-    return ParticipantConfig(
-        participant_id=self._session_id,
-        role="coach",
-        backend="hume_evi",
-    )
+class HumeEVIParticipant(VoiceParticipant):
+    """Domain actor wrapping HumeEVIClient for the coach side of a live call."""
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        config_id: str,
+        session_id: str,
+        persona_key: str = "default",
+        # ... same optional knobs as HumeEVIClient
+    ) -> None:
+        self._session_id = session_id
+        self._client = HumeEVIClient(
+            api_key=api_key,
+            config_id=config_id,
+            session_id=session_id,
+            persona_key=persona_key,
+            bus=None,  # bus injected at run() time, not construction
+        )
+
+    @property
+    def config(self) -> ParticipantConfig:
+        return ParticipantConfig(
+            participant_id=self._session_id,
+            role="coach",
+            backend="hume_evi",
+        )
+
+    async def receive_audio(self, pcm16_16k: bytes) -> None:
+        await self._client.send_audio(pcm16_16k)
+
+    async def say(self, request: SpeakRequest) -> None:
+        await self._client.say(request.text)
+
+    async def run(self, bus: FrameBus) -> None:
+        self._client._bus = bus  # bind bus at run time
+        await self._client.run_event_loop()
 ```
 
-Existing tests need call-site updates to match the new signatures (e.g.
-`client.say("hello")` → `client.say(SpeakRequest(text="hello"))`). This is
-the same work a wrapper would require on its own tests. A pure pass-through
-wrapper adds zero value and violates the project rule against single-use
-abstractions.
+`HumeEVIClient` is not changed. Its method signatures, existing tests, and
+internal structure remain stable. The participant owns the domain translation;
+the client owns the wire protocol.
+
+The `bus=None` construction followed by `_bus` assignment at `run()` time is
+a temporary bridge. The follow-up cleanup (commitment 3 in §3) moves bus
+handling fully out of `HumeEVIClient` — at that point `HumeEVIParticipant`
+subscribes to client events directly and publishes frames itself, and
+`HumeEVIClient` becomes a pure I/O class with no domain imports.
 
 ### 6.2 `TwilioCallerParticipant` — new class wrapping `TwilioStream`
 
@@ -457,7 +505,7 @@ not anticipated here.
 | File | Change |
 |---|---|
 | `rehearse/participants.py` | **New.** `SpeakRequest`, `ParticipantConfig`, `VoiceSpeaker`, `VoiceParticipant` |
-| `rehearse/services/hume_evi.py` | Three method renames on `HumeEVIClient`: `send_audio→receive_audio`, `say(str)→say(SpeakRequest)`, `run_event_loop→run(bus)`. Add `config` property. |
+| `rehearse/services/hume_evi.py` | **New class** `HumeEVIParticipant(VoiceParticipant)`. `HumeEVIClient` unchanged. |
 | `rehearse/telephony.py` | Wire `HumeEVIParticipant` + `TwilioCallerParticipant`. Pass `coach` (not `hume.say`) to business logic constructors. |
 | `rehearse/audio/twilio_stream.py` | **New class** `TwilioCallerParticipant` in same module, or separate `rehearse/audio/caller_participant.py`. |
 | `rehearse/consent.py` | `speak: Callable` → `speaker: VoiceSpeaker`. Call site update. |
