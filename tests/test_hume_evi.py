@@ -19,6 +19,7 @@ from hume.empathic_voice.types.web_socket_error import WebSocketError
 from rehearse.bus import FrameBus
 from rehearse.frames import AudioChunk, EndOfCall, ProsodyEvent, TranscriptDelta
 from rehearse.services.hume_evi import HumeEVIClient
+from rehearse.types import Speaker
 
 
 class _Sleep:
@@ -280,6 +281,117 @@ async def test_hume_client_swap_config_not_implemented() -> None:
 
     with pytest.raises(NotImplementedError):
         await client.swap_config("cfg-2", "prompt")
+
+
+@pytest.mark.asyncio
+async def test_user_interrupts_consent_prompt_with_yes() -> None:
+    """User saying 'yes' mid-consent-prompt must reach ConsentGate as a final
+    TranscriptDelta so consent resolves — even though the coach was still speaking.
+
+    Hume event sequence for an interruption:
+      assistant_message (consent prompt starts)
+      → user_interruption (user starts speaking)
+      → user_message("yes")
+      → assistant_message (coach responds to granted consent)
+      → assistant_end
+    """
+    from hume.empathic_voice.types.user_interruption import UserInterruption
+
+    socket = FakeHumeSocket(
+        [
+            # Consent prompt: coach begins speaking
+            AssistantMessage.model_validate(
+                {
+                    "type": "assistant_message",
+                    "from_text": False,
+                    "is_quick_response": False,
+                    "message": {
+                        "role": "assistant",
+                        "content": "Quick heads up — this call is recorded so I can give you feedback.",
+                    },
+                    "models": {},
+                }
+            ),
+            # User says "yes" before prompt finishes
+            UserInterruption.model_validate({"type": "user_interruption", "time": 500}),
+            UserMessage.model_validate(
+                {
+                    "type": "user_message",
+                    "from_text": False,
+                    "interim": False,
+                    "message": {"role": "user", "content": "yes"},
+                    "models": {
+                        "prosody": {
+                            "scores": {
+                                "Anger": 0.0,
+                                "Joy": 0.4,
+                                **{name: 0.0 for name in _OTHER_EMOTIONS},
+                            }
+                        }
+                    },
+                    "time": {"begin": 500, "end": 700},
+                }
+            ),
+            # Coach responds now that consent is granted
+            AssistantMessage.model_validate(
+                {
+                    "type": "assistant_message",
+                    "from_text": False,
+                    "is_quick_response": False,
+                    "message": {
+                        "role": "assistant",
+                        "content": "Great, let's get started. Who are you rehearsing with?",
+                    },
+                    "models": {},
+                }
+            ),
+            AssistantEnd.model_validate({"type": "assistant_end"}),
+        ]
+    )
+
+    bus = FrameBus("s1")
+    client = HumeEVIClient(
+        api_key="api",
+        config_id="cfg",
+        bus=bus,
+        session_id="s1",
+        connect_fn=_connect_factory([socket]),
+    )
+
+    async with client:
+        consume = asyncio.create_task(_drain(bus))
+        await asyncio.sleep(0)
+        await client.run_event_loop()
+        await bus.aclose()
+        frames = await consume
+
+    user_transcripts = [
+        f for f in frames if isinstance(f, TranscriptDelta) and f.speaker == Speaker.USER
+    ]
+    coach_transcripts = [
+        f for f in frames if isinstance(f, TranscriptDelta) and f.speaker == Speaker.COACH
+    ]
+
+    # The user's "yes" arrives as a final transcript — ConsentGate can classify it.
+    assert len(user_transcripts) == 1
+    assert user_transcripts[0].text == "yes"
+    assert user_transcripts[0].is_final is True
+
+    # Interrupted consent prompt is flushed when the next assistant_message arrives.
+    # Both turns published: the interrupted consent prompt + the post-consent response.
+    assert len(coach_transcripts) == 2
+    assert "recorded" in coach_transcripts[0].text
+    assert "get started" in coach_transcripts[1].text
+
+    # Prosody scores accompany the "yes".
+    prosody_frames = [f for f in frames if isinstance(f, ProsodyEvent)]
+    assert len(prosody_frames) == 1
+    assert prosody_frames[0].scores.emotions["joy"] == pytest.approx(0.4)
+
+    # Call ends cleanly after normal socket close.
+    end_frames = [f for f in frames if isinstance(f, EndOfCall)]
+    assert len(end_frames) == 1
+    assert end_frames[0].reason == "hangup"
 
 
 @pytest.mark.asyncio
