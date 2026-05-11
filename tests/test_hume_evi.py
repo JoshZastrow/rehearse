@@ -289,6 +289,34 @@ async def test_hume_client_swap_config_not_implemented() -> None:
 
 
 @pytest.mark.asyncio
+async def test_send_audio_ignores_connection_closed_during_send() -> None:
+    """ConnectionClosedOK raised inside send_audio_input must not propagate.
+
+    Race: _closing check passes (False), then the socket closes *during* the
+    awaited send_audio_input call. The exception must be caught and _closing
+    set so future sends are no-ops.
+    """
+    from websockets.exceptions import ConnectionClosedOK
+
+    class SocketThatClosesOnSend(FakeHumeSocket):
+        async def send_audio_input(self, _message: object) -> None:
+            raise ConnectionClosedOK(None, None)
+
+    bus = FrameBus("s1")
+    client = HumeEVIClient(
+        api_key="api",
+        config_id="cfg",
+        bus=bus,
+        session_id="s1",
+        connect_fn=_connect_factory([SocketThatClosesOnSend([])]),
+    )
+    async with client:
+        await client.send_audio(b"pcm_chunk")  # must not raise
+
+    assert client._closing  # flag set so subsequent sends are no-ops
+
+
+@pytest.mark.asyncio
 async def test_normal_socket_close_emits_hangup_end_of_call() -> None:
     """Hume closing the socket cleanly (code 1000) publishes EndOfCall(hangup)."""
     bus = FrameBus("s1")

@@ -113,7 +113,13 @@ class HumeEVIClient:
         if self._closing:
             return
         payload = base64.b64encode(pcm16_16k).decode("ascii")
-        await self._socket.send_audio_input(AudioInput(data=payload))
+        try:
+            await self._socket.send_audio_input(AudioInput(data=payload))
+        except Exception:
+            # Socket closed between the _closing check and the actual send.
+            # Mark closing so subsequent chunks are no-ops; run_event_loop
+            # will publish EndOfCall once it processes the close.
+            self._closing = True
 
     async def say(self, text: str) -> None:
         """Have the coach speak `text` directly via an assistant_input message.
