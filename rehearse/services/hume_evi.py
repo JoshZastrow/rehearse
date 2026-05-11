@@ -17,6 +17,7 @@ from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from typing import Any
 
+import structlog
 from hume.client import AsyncHumeClient
 from hume.empathic_voice.types.assistant_input import AssistantInput
 from hume.empathic_voice.types.audio_input import AudioInput
@@ -29,6 +30,7 @@ from rehearse.participants import ParticipantConfig, SpeakRequest, VoiceParticip
 from rehearse.services.hume_configs import select_config_id
 from rehearse.types import ProsodyScores, Speaker
 
+log = structlog.get_logger(__name__)
 
 @dataclass
 class _PendingCoachTurn:
@@ -280,15 +282,22 @@ class HumeEVIClient:
         """Publish transcript and prosody frames for one user utterance."""
         utterance_id = self._new_utterance_id("user")
         text = getattr(getattr(event, "message", None), "content", "") or ""
+        is_final = not bool(getattr(event, "interim", False))
         begin_ms = float(getattr(getattr(event, "time", None), "begin", 0))
         end_ms = float(getattr(getattr(event, "time", None), "end", 0))
+        log.info(
+            "hume.user_message",
+            session_id=self._session_id,
+            text=text,
+            is_final=is_final,
+        )
         await bus.publish(
             TranscriptDelta(
                 session_id=self._session_id,
                 utterance_id=utterance_id,
                 speaker=Speaker.USER,
                 text=text,
-                is_final=not bool(getattr(event, "interim", False)),
+                is_final=is_final,
                 ts_start=begin_ms / 1000.0,
                 ts_end=end_ms / 1000.0,
             )
@@ -322,6 +331,7 @@ class HumeEVIClient:
         if self._pending_coach is not None:
             await self._flush_pending_coach(now, bus)
         text = getattr(getattr(event, "message", None), "content", "") or ""
+        log.info("hume.coach_message", session_id=self._session_id, text=text)
         self._pending_coach = _PendingCoachTurn(
             utterance_id=self._new_utterance_id("assistant"),
             text=text,
