@@ -32,12 +32,15 @@ export VLLM_API_KEY=dummy
 |---|---|---|---|---|
 | `noop` | `noop` | `echo` | `noop_score` | Offline smoke test. |
 | `mme-emotion` | `mme-emotion` | `multimodal-llm` | `mme_recognition_accuracy` | 10-clip manifest scaffold. Real run needs media files + provider credentials. |
+| `voice-rollout-judges` | `voice-rollout-judges` | `runtime-sandbox` | `content_quality`, `intake_fidelity`, audio judges | Runs the real `RuntimeHost` against `SyntheticCaller`. Needs `ANTHROPIC_API_KEY`. |
 
 | Environment | What it does | Reads model slots |
 |---|---|---|
 | `echo` | Returns the example payload unchanged. | - |
 | `raw-llm` | Single Claude call with `example.payload["prompt"]`. Kept for text diagnostics. | `raw_llm` |
 | `multimodal-llm` | Loads an audio/video file and calls an audio LLM provider. | `provider`, `multimodal_hosted`, `multimodal_open` |
+| `runtime-sandbox` | Wires the real `RuntimeHost` (PhaseProcessor, IntakeProcessor, persona compiler, coach loop) against `SyntheticCaller`. Writes the full artifact set. Needs `ANTHROPIC_API_KEY`. | - |
+| `voice-agent-sandbox` | **Deprecated.** Emits a warning and delegates to `runtime-sandbox`. Will be removed after one week of `runtime-sandbox` running green. | - |
 
 | Provider | Used by | Required env |
 |---|---|---|
@@ -67,6 +70,12 @@ uv run rehearse-eval show <run_id>
 
 # 6. Watch a sandbox rollout turn-by-turn (subprocess isolation is bypassed)
 uv run rehearse-eval run --eval coach-dialogue-smoke --limit 1 --verbose
+
+# 7. Run voice-rollout-judges with the real runtime (needs ANTHROPIC_API_KEY)
+make eval-voice-rollout
+
+# 8. Same with live Hume TTS + audio judges (also needs GOOGLE_API_KEY)
+make eval-voice-rollout-live
 ```
 
 Deprecated aliases still work during migration: `list-benchmarks`,
@@ -111,9 +120,37 @@ Datasets live in `rehearse/eval/datasets/` and only load examples. Evals live
 in `rehearse/eval/evals/` and compose one dataset, a scoring plan, compatible
 environments, and a rollout timeout. Environments live in
 `rehearse/eval/environments/` and run the system under test. Scorers live in
-`rehearse/eval/scorers/`.
+`rehearse/eval/scorers/`. Customer drivers live in `rehearse/eval/customers/`
+and implement the `CustomerDriver` protocol — they are the only component that
+knows about scenarios; the runtime sees only a text stream.
 
 Register new pieces in the matching package `__init__.py`.
+
+### `CustomerDriver` protocol
+
+A `CustomerDriver` plays the role of the person on the other end of the line.
+It receives runtime utterances from the transport and sends customer turns back.
+The runtime cannot tell whether the bytes come from a real human, a recording,
+or an LLM.
+
+```python
+class CustomerDriver(Protocol):
+    name: str
+    version: str
+
+    async def run(
+        self,
+        *,
+        transport: TwoWayChannel,
+        runtime_phase: Callable[[], Phase],
+    ) -> CallerResult: ...
+```
+
+`SyntheticCaller` (`rehearse/eval/customers/llm_customer.py`) is the v1
+implementation: phase-aware, event-driven (switches prompts on
+`phase_transition` control events), sends the first turn without waiting for a
+runtime greeting. Add new drivers alongside it and register in
+`rehearse/eval/customers/__init__.py`.
 
 ## MME-Emotion Data
 
