@@ -94,11 +94,12 @@ After v1 ships:
    `VoiceSpeaker` — consumed by business logic — remains a `Protocol` because
    it is a narrow capability slice, not a full class contract.
 
-3. **`FrameBus` belongs in the participant, not the client.**
+3. **`FrameBus` belongs in the participant, not the client — fixed in v1.**
    `HumeEVIClient` currently takes `bus: FrameBus` in `__init__` — domain
-   bleeding into the network layer. In v1 this is tolerated; extracting the bus
-   dependency fully into `HumeEVIParticipant` is a follow-up cleanup. The spec
-   draws the line clearly so future work knows where to head.
+   bleeding into the network layer. This is fixed in v1: `bus` is removed from
+   `HumeEVIClient.__init__` and added as a parameter to `run_event_loop(bus)`,
+   which threads it to the five `_bus.publish` call sites. The change is 8 lines.
+   After v1, `HumeEVIClient` has no domain imports.
 
 4. **`VoiceSpeaker` is the only interface business logic receives.** No
    component below `telephony.py` imports `HumeEVIClient` or any concrete
@@ -320,6 +321,20 @@ satisfies `VoiceSpeaker` structurally.
 is a new class in the same module that extends `VoiceParticipant` and wraps the
 client:
 
+**Changes to `HumeEVIClient`** (8 lines, commitment 3 in §3):
+
+- Remove `bus: FrameBus` from `__init__` and `self._bus = bus`.
+- Change `run_event_loop(self)` → `run_event_loop(self, bus: FrameBus)`.
+- Replace the 5 `self._bus.publish(...)` call sites with `bus.publish(...)`,
+  threading `bus` through the private methods that need it
+  (`_publish_audio_output`, `_publish_user_message`, `_publish_assistant_message`,
+  `_flush_pending_coach`).
+
+After this change `HumeEVIClient` has no domain imports (`FrameBus`, frame
+types). It is a pure Hume SDK wrapper.
+
+**`HumeEVIParticipant`** — new class, same module:
+
 ```python
 class HumeEVIParticipant(VoiceParticipant):
     """Domain actor wrapping HumeEVIClient for the coach side of a live call."""
@@ -331,7 +346,7 @@ class HumeEVIParticipant(VoiceParticipant):
         config_id: str,
         session_id: str,
         persona_key: str = "default",
-        # ... same optional knobs as HumeEVIClient
+        # ... same optional knobs passed through to HumeEVIClient
     ) -> None:
         self._session_id = session_id
         self._client = HumeEVIClient(
@@ -339,7 +354,6 @@ class HumeEVIParticipant(VoiceParticipant):
             config_id=config_id,
             session_id=session_id,
             persona_key=persona_key,
-            bus=None,  # bus injected at run() time, not construction
         )
 
     @property
@@ -357,19 +371,12 @@ class HumeEVIParticipant(VoiceParticipant):
         await self._client.say(request.text)
 
     async def run(self, bus: FrameBus) -> None:
-        self._client._bus = bus  # bind bus at run time
-        await self._client.run_event_loop()
+        await self._client.run_event_loop(bus)
 ```
 
-`HumeEVIClient` is not changed. Its method signatures, existing tests, and
-internal structure remain stable. The participant owns the domain translation;
-the client owns the wire protocol.
-
-The `bus=None` construction followed by `_bus` assignment at `run()` time is
-a temporary bridge. The follow-up cleanup (commitment 3 in §3) moves bus
-handling fully out of `HumeEVIClient` — at that point `HumeEVIParticipant`
-subscribes to client events directly and publishes frames itself, and
-`HumeEVIClient` becomes a pure I/O class with no domain imports.
+`HumeEVIClient.__aenter__`/`__aexit__` are still used for connection lifecycle.
+`HumeEVIParticipant` is used as the context manager in `telephony.py` via a
+thin `__aenter__`/`__aexit__` that delegates to the underlying client.
 
 ### 6.2 `TwilioCallerParticipant` — new class wrapping `TwilioStream`
 
@@ -505,7 +512,7 @@ not anticipated here.
 | File | Change |
 |---|---|
 | `rehearse/participants.py` | **New.** `SpeakRequest`, `ParticipantConfig`, `VoiceSpeaker`, `VoiceParticipant` |
-| `rehearse/services/hume_evi.py` | **New class** `HumeEVIParticipant(VoiceParticipant)`. `HumeEVIClient` unchanged. |
+| `rehearse/services/hume_evi.py` | **New class** `HumeEVIParticipant(VoiceParticipant)`. `HumeEVIClient`: remove `bus` from `__init__`, add `bus: FrameBus` param to `run_event_loop`, thread to 5 publish call sites (~8 lines). |
 | `rehearse/telephony.py` | Wire `HumeEVIParticipant` + `TwilioCallerParticipant`. Pass `coach` (not `hume.say`) to business logic constructors. |
 | `rehearse/audio/twilio_stream.py` | **New class** `TwilioCallerParticipant` in same module, or separate `rehearse/audio/caller_participant.py`. |
 | `rehearse/consent.py` | `speak: Callable` → `speaker: VoiceSpeaker`. Call site update. |
@@ -539,4 +546,9 @@ not anticipated here.
    socket correctly routes `say(SpeakRequest(text="hello"))` to
    `hume_client.say("hello")`.
 
-7. `mypy --strict rehearse/participants.py` passes clean.
+7. `HumeEVIClient` has no import of `FrameBus` or any frame type after the
+   `bus` extraction. Verified by `grep -n "FrameBus\|from rehearse" rehearse/services/hume_evi.py`
+   showing zero hits on the client class (the participant class in the same file
+   may import them).
+
+8. `mypy --strict rehearse/participants.py` passes clean.
