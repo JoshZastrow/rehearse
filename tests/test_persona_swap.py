@@ -11,6 +11,7 @@ import pytest
 from rehearse.agents.persona_swap import PersonaSwapCoordinator
 from rehearse.bus import FrameBus
 from rehearse.frames import EndOfCall, PhaseSignal
+from rehearse.participants import SpeakRequest
 from rehearse.storage import LocalFilesystemStore
 from rehearse.types import (
     ConsentState,
@@ -53,6 +54,20 @@ async def _drive(coordinator: PersonaSwapCoordinator, bus: FrameBus, frames):
     await task
 
 
+class _Speaker:
+    def __init__(self, spoken: list[str] | None = None, *, fail_first: bool = False) -> None:
+        self._spoken = spoken
+        self._fail_first = fail_first
+        self.calls = 0
+
+    async def say(self, request: SpeakRequest) -> None:
+        self.calls += 1
+        if self._fail_first and self.calls == 1:
+            raise RuntimeError("hume socket closed")
+        if self._spoken is not None:
+            self._spoken.append(request.text)
+
+
 @pytest.mark.asyncio
 async def test_practice_signal_speaks_bridge_with_relationship(
     store_and_session: tuple[LocalFilesystemStore, str],
@@ -61,7 +76,7 @@ async def test_practice_signal_speaks_bridge_with_relationship(
     spoken: list[str] = []
 
     coordinator = PersonaSwapCoordinator(
-        session_id, store, speak=lambda text: _record(spoken, text)
+        session_id, store, speaker=_Speaker(spoken)
     )
     bus = FrameBus(session_id)
     await _drive(
@@ -89,7 +104,7 @@ async def test_feedback_signal_speaks_static_bridge(
     spoken: list[str] = []
 
     coordinator = PersonaSwapCoordinator(
-        session_id, store, speak=lambda text: _record(spoken, text)
+        session_id, store, speaker=_Speaker(spoken)
     )
     bus = FrameBus(session_id)
     await _drive(
@@ -118,7 +133,7 @@ async def test_intake_signal_does_not_speak(
     spoken: list[str] = []
 
     coordinator = PersonaSwapCoordinator(
-        session_id, store, speak=lambda text: _record(spoken, text)
+        session_id, store, speaker=_Speaker(spoken)
     )
     bus = FrameBus(session_id)
     await _drive(
@@ -151,7 +166,7 @@ async def test_falls_back_to_generic_relationship_when_persona_missing(
     spoken: list[str] = []
 
     coordinator = PersonaSwapCoordinator(
-        session.id, store, speak=lambda text: _record(spoken, text)
+        session.id, store, speaker=_Speaker(spoken)
     )
     bus = FrameBus(session.id)
     await _drive(
@@ -177,14 +192,8 @@ async def test_speak_failure_is_logged_not_fatal(
 ) -> None:
     """A failure inside speak() must not kill the coordinator loop."""
     store, session_id = store_and_session
-    calls = {"count": 0}
-
-    async def _flaky_speak(_text: str) -> None:
-        calls["count"] += 1
-        if calls["count"] == 1:
-            raise RuntimeError("hume socket closed")
-
-    coordinator = PersonaSwapCoordinator(session_id, store, speak=_flaky_speak)
+    speaker = _Speaker(fail_first=True)
+    coordinator = PersonaSwapCoordinator(session_id, store, speaker=speaker)
     bus = FrameBus(session_id)
     await _drive(
         coordinator,
@@ -207,7 +216,7 @@ async def test_speak_failure_is_logged_not_fatal(
         ],
     )
 
-    assert calls["count"] == 2  # second one ran despite first one raising
+    assert speaker.calls == 2  # second one ran despite first one raising
 
 
 @pytest.mark.asyncio
@@ -219,7 +228,7 @@ async def test_end_of_call_stops_the_loop(
     spoken: list[str] = []
 
     coordinator = PersonaSwapCoordinator(
-        session_id, store, speak=lambda text: _record(spoken, text)
+        session_id, store, speaker=_Speaker(spoken)
     )
     bus = FrameBus(session_id)
     task = asyncio.create_task(coordinator.run(bus.subscribe()))
@@ -243,8 +252,3 @@ async def test_end_of_call_stops_the_loop(
     await task
 
     assert spoken == []
-
-
-async def _record(target: list[str], text: str) -> None:
-    """Append the spoken text to a list for assertions."""
-    target.append(text)

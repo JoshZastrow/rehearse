@@ -9,10 +9,9 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import suppress
-
-import anyio
 from typing import Protocol
 
+import anyio
 import structlog
 from fastapi import (
     BackgroundTasks,
@@ -28,7 +27,7 @@ from twilio.request_validator import RequestValidator
 from twilio.rest import Client as TwilioClient
 
 from rehearse.agents.persona_swap import PersonaSwapCoordinator
-from rehearse.audio.twilio_stream import TwilioStream
+from rehearse.audio.twilio_stream import TwilioCallerParticipant, TwilioStream
 from rehearse.bus import FrameBus
 from rehearse.config import RuntimeConfig
 from rehearse.consent import ConsentGate, ConsentGateConfig
@@ -36,7 +35,7 @@ from rehearse.frames import AudioChunk, EndOfCall
 from rehearse.intake import IntakeProcessor
 from rehearse.outcome import OutcomeProbe, OutcomeProbeConfig
 from rehearse.phases import PhaseBudgets, PhaseProcessor
-from rehearse.services.hume_evi import HumeEVIClient
+from rehearse.services.hume_evi import HumeEVIParticipant
 from rehearse.session import SessionOrchestrator, TriggerEvent, utcnow
 from rehearse.types import Speaker
 from rehearse.writers import (
@@ -219,12 +218,17 @@ def mount_twilio_routes(
             phase_getter=lambda: phase_processor.current_phase,
         )
         try:
-            async with TwilioStream(ws) as twilio, HumeEVIClient(
+            async with TwilioStream(ws) as twilio, HumeEVIParticipant(
                 api_key=config.hume_api_key,
                 config_id=config.hume_config_id,
-                bus=bus,
                 session_id=session_id,
-            ) as hume:
+            ) as coach:
+                caller = TwilioCallerParticipant(twilio, session_id)
+                await orchestrator.store.update_session(
+                    session_id,
+                    lambda s: _set_participants(s, [caller.config, coach.config]),
+                )
+
                 async def _on_decline() -> None:
                     """Mark the session for shutdown on consent decline."""
                     consent_state["declined"] = True
@@ -240,7 +244,7 @@ def mount_twilio_routes(
                     session_id,
                     orchestrator.store,
                     bus,
-                    speak=hume.say,
+                    speaker=coach,
                     on_decline=_on_decline,
                     config=ConsentGateConfig(
                         prompt_timeout_seconds=config.consent_prompt_timeout_seconds,
@@ -250,7 +254,7 @@ def mount_twilio_routes(
                 outcome_probe = OutcomeProbe(
                     session_id,
                     orchestrator.store,
-                    speak=hume.say,
+                    speaker=coach,
                     config=OutcomeProbeConfig(
                         response_timeout_seconds=config.outcome_response_timeout_seconds,
                         reprompt_limit=config.outcome_reprompt_limit,
@@ -262,7 +266,7 @@ def mount_twilio_routes(
                 persona_swap = PersonaSwapCoordinator(
                     session_id,
                     orchestrator.store,
-                    speak=hume.say,
+                    speaker=coach,
                 )
                 consent_task = asyncio.create_task(consent_gate.run(bus.subscribe()))
                 outcome_task = asyncio.create_task(outcome_probe.run(bus.subscribe()))
@@ -295,21 +299,13 @@ def mount_twilio_routes(
                         phase_getter=lambda: phase_processor.current_phase,
                     ).run(bus.subscribe())
                 )
-                assistant_task = asyncio.create_task(_pump_assistant_audio(twilio, bus))
-                hume_task = asyncio.create_task(hume.run_event_loop())
+                assistant_task = asyncio.create_task(_pump_assistant_audio(caller, bus))
+                coach_task = asyncio.create_task(coach.run(bus))
                 try:
-                    async for chunk in twilio.inbound():
-                        if consent_state["declined"] or hume_task.done():
+                    async for chunk in caller.audio_stream(bus):
+                        if consent_state["declined"] or coach_task.done():
                             break
-                        await hume.send_audio(chunk)
-                        await bus.publish(
-                            AudioChunk(
-                                session_id=session_id,
-                                speaker=Speaker.USER,
-                                pcm16_16k=chunk,
-                                ts=0.0,
-                            )
-                        )
+                        await coach.receive_audio(chunk)
                 finally:
                     # Shield cleanup from external cancellation (e.g. starlette
                     # TestClient closes the anyio CancelScope immediately after
@@ -318,11 +314,11 @@ def mount_twilio_routes(
                     with anyio.CancelScope(shield=True):
                         await bus.aclose()
                         assistant_task.cancel()
-                        hume_task.cancel()
+                        coach_task.cancel()
                         with suppress(asyncio.CancelledError):
                             await assistant_task
                         with suppress(asyncio.CancelledError):
-                            await hume_task
+                            await coach_task
                         await consent_task
                         await outcome_task
                         await phase_task
@@ -364,8 +360,14 @@ def _read_consent_from_disk(orchestrator: SessionOrchestrator, session_id: str):
         return ConsentState.PENDING
 
 
-async def _pump_assistant_audio(twilio: TwilioStream, bus: FrameBus) -> None:
+def _set_participants(session, participants):
+    """Persist the live-call participant identities on the session manifest."""
+    session.participants = participants
+    return session
+
+
+async def _pump_assistant_audio(caller: TwilioCallerParticipant, bus: FrameBus) -> None:
     """Forward assistant audio frames from the bus back to Twilio."""
     async for frame in bus.subscribe():
         if isinstance(frame, AudioChunk) and frame.speaker != Speaker.USER:
-            await twilio.send(frame.pcm16_16k)
+            await caller.receive_audio(frame.pcm16_16k)

@@ -12,6 +12,7 @@ import pytest
 from rehearse.bus import FrameBus
 from rehearse.consent import ConsentGate, ConsentGateConfig
 from rehearse.frames import ConsentResolved, TranscriptDelta
+from rehearse.participants import SpeakRequest
 from rehearse.personas import (
     CONSENT_DECLINE_ACK,
     CONSENT_PROMPT,
@@ -106,6 +107,14 @@ def _user_frame(session_id: str, text: str, *, ts: float = 0.5) -> TranscriptDel
     )
 
 
+class _Speaker:
+    def __init__(self, spoken: list[str]) -> None:
+        self._spoken = spoken
+
+    async def say(self, request: SpeakRequest) -> None:
+        self._spoken.append(request.text)
+
+
 @pytest.mark.asyncio
 async def test_consent_gate_grants_on_yes(
     gate_store: tuple[LocalFilesystemStore, str],
@@ -114,9 +123,6 @@ async def test_consent_gate_grants_on_yes(
     bus = FrameBus(session_id)
     spoken: list[str] = []
     declined_called: list[bool] = []
-
-    async def speak(text: str) -> None:
-        spoken.append(text)
 
     async def on_decline() -> None:
         declined_called.append(True)
@@ -131,7 +137,7 @@ async def test_consent_gate_grants_on_yes(
     collector = asyncio.create_task(collect())
     gate = ConsentGate(
         session_id, store, bus,
-        speak=speak,
+        speaker=_Speaker(spoken),
         on_decline=on_decline,
         config=ConsentGateConfig(prompt_timeout_seconds=10, reprompt_limit=1),
     )
@@ -159,15 +165,12 @@ async def test_consent_gate_declines_on_no(
     spoken: list[str] = []
     declined_called: list[bool] = []
 
-    async def speak(text: str) -> None:
-        spoken.append(text)
-
     async def on_decline() -> None:
         declined_called.append(True)
 
     gate = ConsentGate(
         session_id, store, bus,
-        speak=speak,
+        speaker=_Speaker(spoken),
         on_decline=on_decline,
         config=ConsentGateConfig(prompt_timeout_seconds=10, reprompt_limit=1),
     )
@@ -192,15 +195,12 @@ async def test_consent_gate_reprompts_then_declines_on_unclear(
     bus = FrameBus(session_id)
     spoken: list[str] = []
 
-    async def speak(text: str) -> None:
-        spoken.append(text)
-
     async def on_decline() -> None:
         return None
 
     gate = ConsentGate(
         session_id, store, bus,
-        speak=speak,
+        speaker=_Speaker(spoken),
         on_decline=on_decline,
         config=ConsentGateConfig(prompt_timeout_seconds=10, reprompt_limit=1),
     )

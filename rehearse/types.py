@@ -226,6 +226,15 @@ class OutcomeLabel(Strict):
     notes: str | None = None
 
 
+class ParticipantConfig(Strict):
+    """Stable identity for one live-call participant."""
+
+    participant_id: str
+    role: Literal["caller", "coach", "observer"]
+    display_name: str | None = None
+    backend: str
+
+
 class Session(Strict):
     """Index record for a session directory.
 
@@ -249,6 +258,7 @@ class Session(Strict):
     outcome_probe_status: Literal["pending", "asked", "captured", "skipped"] | None = None
     pipeline_version: str | None = None
     model_slots: dict[str, str] = Field(default_factory=dict)
+    participants: list[ParticipantConfig] = Field(default_factory=list)
 
 
 # ───────────────────────────────────────────────────────────────────────────────

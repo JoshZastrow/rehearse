@@ -15,6 +15,10 @@ from fastapi import WebSocket
 
 from rehearse.audio.mulaw import decode_mulaw, encode_pcm16
 from rehearse.audio.resample import downsample_16k_to_8k, upsample_8k_to_16k
+from rehearse.bus import FrameBus
+from rehearse.frames import AudioChunk
+from rehearse.participants import ParticipantConfig, SpeakRequest, VoiceParticipant
+from rehearse.types import Speaker
 
 
 class TwilioStream:
@@ -117,6 +121,50 @@ class TwilioStream:
                 "mark": {"name": name},
             }
         )
+
+
+class TwilioCallerParticipant(VoiceParticipant):
+    """VoiceParticipant wrapping a Twilio WebSocket media stream."""
+
+    def __init__(self, stream: TwilioStream, session_id: str) -> None:
+        """Store the Twilio stream and session identity."""
+        self._stream = stream
+        self._session_id = session_id
+
+    @property
+    def config(self) -> ParticipantConfig:
+        """Return stable identity for this caller participant."""
+        return ParticipantConfig(
+            participant_id=self._session_id,
+            role="caller",
+            backend="twilio_stream",
+        )
+
+    async def receive_audio(self, pcm16_16k: bytes) -> None:
+        """Send coach audio back to the live caller."""
+        await self._stream.send(pcm16_16k)
+
+    async def say(self, request: SpeakRequest) -> None:
+        """No-op: the real caller speaks for themselves."""
+        return None
+
+    async def audio_stream(self, bus: FrameBus) -> AsyncIterator[bytes]:
+        """Yield caller audio while publishing matching AudioChunk frames."""
+        async for chunk in self._stream.inbound():
+            await bus.publish(
+                AudioChunk(
+                    session_id=self._session_id,
+                    speaker=Speaker.USER,
+                    pcm16_16k=chunk,
+                    ts=0.0,
+                )
+            )
+            yield chunk
+
+    async def run(self, bus: FrameBus) -> None:
+        """Drain caller audio into the bus until Twilio closes the stream."""
+        async for _chunk in self.audio_stream(bus):
+            continue
 
 
 def _require_str(data: dict[str, Any], key: str) -> str:

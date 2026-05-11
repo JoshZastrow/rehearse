@@ -82,7 +82,6 @@ async def test_hume_client_send_audio_uses_audio_input_message() -> None:
     client = HumeEVIClient(
         api_key="api",
         config_id="cfg",
-        bus=FrameBus("s1"),
         session_id="s1",
         connect_fn=_connect_factory([socket]),
     )
@@ -99,7 +98,6 @@ async def test_hume_client_send_audio_requires_connection() -> None:
     client = HumeEVIClient(
         api_key="api",
         config_id="cfg",
-        bus=FrameBus("s1"),
         session_id="s1",
         connect_fn=_connect_factory([FakeHumeSocket([])]),
     )
@@ -155,7 +153,6 @@ async def test_hume_client_maps_user_assistant_and_audio_events() -> None:
     client = HumeEVIClient(
         api_key="api",
         config_id="cfg",
-        bus=bus,
         session_id="s1",
         connect_fn=_connect_factory([socket]),
     )
@@ -163,7 +160,7 @@ async def test_hume_client_maps_user_assistant_and_audio_events() -> None:
     async with client:
         consume = asyncio.create_task(_drain(bus))
         await asyncio.sleep(0)
-        await client.run_event_loop()
+        await client.run_event_loop(bus)
         await bus.aclose()
         frames = await consume
 
@@ -207,7 +204,6 @@ async def test_coach_transcript_records_real_duration_from_assistant_end() -> No
     client = HumeEVIClient(
         api_key="api",
         config_id="cfg",
-        bus=bus,
         session_id="s1",
         connect_fn=_connect_factory([socket]),
     )
@@ -215,7 +211,7 @@ async def test_coach_transcript_records_real_duration_from_assistant_end() -> No
     async with client:
         consume = asyncio.create_task(_drain(bus))
         await asyncio.sleep(0)
-        await client.run_event_loop()
+        await client.run_event_loop(bus)
         await bus.aclose()
         frames = await consume
 
@@ -256,7 +252,6 @@ async def test_two_assistant_messages_without_end_flush_previous() -> None:
     client = HumeEVIClient(
         api_key="api",
         config_id="cfg",
-        bus=bus,
         session_id="s1",
         connect_fn=_connect_factory([socket]),
     )
@@ -264,7 +259,7 @@ async def test_two_assistant_messages_without_end_flush_previous() -> None:
     async with client:
         consume = asyncio.create_task(_drain(bus))
         await asyncio.sleep(0)
-        await client.run_event_loop()
+        await client.run_event_loop(bus)
         await bus.aclose()
         frames = await consume
 
@@ -279,7 +274,6 @@ async def test_hume_client_swap_config_not_implemented() -> None:
     client = HumeEVIClient(
         api_key="api",
         config_id="cfg",
-        bus=FrameBus("s1"),
         session_id="s1",
         connect_fn=_connect_factory([FakeHumeSocket([])]),
     )
@@ -295,7 +289,6 @@ async def test_normal_socket_close_emits_hangup_end_of_call() -> None:
     client = HumeEVIClient(
         api_key="api",
         config_id="cfg",
-        bus=bus,
         session_id="s1",
         connect_fn=_connect_factory([FakeHumeSocket([])]),
     )
@@ -303,7 +296,7 @@ async def test_normal_socket_close_emits_hangup_end_of_call() -> None:
     async with client:
         consume = asyncio.create_task(_drain(bus))
         await asyncio.sleep(0)
-        await client.run_event_loop()
+        await client.run_event_loop(bus)
         await bus.aclose()
         frames = await consume
 
@@ -327,7 +320,6 @@ async def test_reconnect_schedule_exhausted_emits_end_of_call() -> None:
     client = HumeEVIClient(
         api_key="api",
         config_id="cfg",
-        bus=bus,
         session_id="s1",
         connect_fn=_connect_factory([first, second]),
         reconnect_backoff_schedule_s=(0.0,),
@@ -337,7 +329,7 @@ async def test_reconnect_schedule_exhausted_emits_end_of_call() -> None:
     async with client:
         consume = asyncio.create_task(_drain(bus))
         await asyncio.sleep(0)
-        await client.run_event_loop()
+        await client.run_event_loop(bus)
         await bus.aclose()
         frames = await consume
 
@@ -355,7 +347,6 @@ async def test_reconnect_within_budget_recovers_without_end_of_call() -> None:
     client = HumeEVIClient(
         api_key="api",
         config_id="cfg",
-        bus=bus,
         session_id="s1",
         connect_fn=_connect_factory([first, second, third]),
         reconnect_backoff_schedule_s=(0.0, 0.0, 0.0, 0.0),
@@ -365,7 +356,7 @@ async def test_reconnect_within_budget_recovers_without_end_of_call() -> None:
     async with client:
         consume = asyncio.create_task(_drain(bus))
         await asyncio.sleep(0)
-        await client.run_event_loop()
+        await client.run_event_loop(bus)
         await bus.aclose()
         frames = await consume
 
@@ -412,7 +403,6 @@ async def test_reconnect_state_resets_after_successful_event() -> None:
     client = HumeEVIClient(
         api_key="api",
         config_id="cfg",
-        bus=bus,
         session_id="s1",
         connect_fn=_connect_factory([first, second, third]),
         reconnect_backoff_schedule_s=(0.0,),
@@ -422,7 +412,7 @@ async def test_reconnect_state_resets_after_successful_event() -> None:
     async with client:
         consume = asyncio.create_task(_drain(bus))
         await asyncio.sleep(0)
-        await client.run_event_loop()
+        await client.run_event_loop(bus)
         await bus.aclose()
         frames = await consume
 
@@ -440,7 +430,6 @@ async def test_reconnect_budget_caps_total_window() -> None:
     client = HumeEVIClient(
         api_key="api",
         config_id="cfg",
-        bus=bus,
         session_id="s1",
         connect_fn=_connect_factory(sockets),
         reconnect_backoff_schedule_s=(0.05, 0.05, 0.05, 0.05),
@@ -450,7 +439,7 @@ async def test_reconnect_budget_caps_total_window() -> None:
     async with client:
         consume = asyncio.create_task(_drain(bus))
         await asyncio.sleep(0)
-        await client.run_event_loop()
+        await client.run_event_loop(bus)
         await bus.aclose()
         frames = await consume
 
@@ -460,7 +449,6 @@ async def test_reconnect_budget_caps_total_window() -> None:
 
 @pytest.mark.asyncio
 async def test_connect_uses_mapped_config_id_for_persona(tmp_path, monkeypatch):
-    from rehearse.bus import FrameBus
     from rehearse.services import hume_configs
 
     mapping = tmp_path / "mapping.json"
@@ -488,12 +476,10 @@ async def test_connect_uses_mapped_config_id_for_persona(tmp_path, monkeypatch):
         captured.update(kwargs)
         return _FakeSocket()
 
-    bus = FrameBus("sess_test")
     client = HumeEVIClient(
         api_key="k",
         config_id="cfg_env_fallback",
         persona_key="relationship_coach",
-        bus=bus,
         session_id="sess_test",
         connect_fn=_connect_fn,
     )
@@ -505,7 +491,6 @@ async def test_connect_uses_mapped_config_id_for_persona(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_connect_falls_back_to_env_config_id_when_no_mapping(tmp_path, monkeypatch):
-    from rehearse.bus import FrameBus
     from rehearse.services import hume_configs
 
     monkeypatch.setattr(hume_configs, "MAPPING_PATH_DEFAULT", tmp_path / "missing.json")
@@ -529,12 +514,10 @@ async def test_connect_falls_back_to_env_config_id_when_no_mapping(tmp_path, mon
         captured.update(kwargs)
         return _FakeSocket()
 
-    bus = FrameBus("sess_test")
     client = HumeEVIClient(
         api_key="k",
         config_id="cfg_env_fallback",
         persona_key="relationship_coach",
-        bus=bus,
         session_id="sess_test",
         connect_fn=_connect_fn,
     )
