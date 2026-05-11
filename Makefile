@@ -1,7 +1,24 @@
-.PHONY: help eval-list eval-voice-replay eval-voice-replay-live eval-voice-replay-dogfood eval-voice-smoke eval-voice-smoke-live eval-voice-rollout eval-voice-rollout-live eval-watch nightly-stability test lint
+.PHONY: help serve eval-list eval-voice-replay eval-voice-replay-live eval-voice-replay-dogfood eval-voice-smoke eval-voice-smoke-live eval-voice-rollout eval-voice-rollout-live eval-watch nightly-stability test lint
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk -F':.*?## ' '{printf "  %-28s %s\n", $$1, $$2}'
+
+serve: ## start the server + ngrok tunnel (sets BASE_URL automatically)
+	@bash scripts/serve.sh
+
+setup: ## install deps + link .env from main worktree (run once per worktree)
+	uv sync
+	@if [ ! -f .env ]; then \
+	  MAIN_ROOT=$$(git worktree list | head -1 | awk '{print $$1}'); \
+	  if [ -f "$$MAIN_ROOT/.env" ] && [ "$$(pwd)" != "$$MAIN_ROOT" ]; then \
+	    ln -s "$$MAIN_ROOT/.env" .env && echo "Linked .env from $$MAIN_ROOT"; \
+	  else \
+	    cp .env.example .env && echo "Copied .env.example → .env  (fill in API keys)"; \
+	  fi \
+	fi
+
+clean: ## remove generated artifacts (venv, cache, sessions, runs)
+	rm -rf .venv .cache sessions evals/runs evals/datasets/mme-emotion/v0-10clip/clips
 
 eval-list: ## list evals, datasets, environments
 	uv run rehearse-eval list-evals
