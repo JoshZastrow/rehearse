@@ -22,9 +22,11 @@ import structlog
 from rehearse.bus import FrameBus
 from rehearse.frames import ConsentResolved, EndOfCall, Frame, TranscriptDelta
 from rehearse.participants import SpeakRequest, VoiceSpeaker
+from rehearse.memory import CallerMemory, NullCallerMemory
 from rehearse.personas import (
     CONSENT_DECLINE_ACK,
     CONSENT_PROMPT,
+    CONSENT_REMINDER,
     CONSENT_REPROMPT,
     classify_consent,
 )
@@ -63,6 +65,8 @@ class ConsentGate:
         on_decline: Callable[[], Awaitable[None]],
         config: ConsentGateConfig | None = None,
         clock: Callable[[], datetime] = utcnow,
+        caller_hash: str | None = None,
+        memory: CallerMemory | None = None,
     ) -> None:
         """Store identity, persistence, speaker, decline hook, and timing knobs."""
         self._session_id = session_id
@@ -72,6 +76,8 @@ class ConsentGate:
         self._on_decline = on_decline
         self._config = config or ConsentGateConfig()
         self._clock = clock
+        self._caller_hash = caller_hash
+        self._memory: CallerMemory = memory or NullCallerMemory()
         self._asked_at: datetime | None = None
         self._reprompts = 0
         self._resolved = False
@@ -79,7 +85,10 @@ class ConsentGate:
 
     async def run(self, frames: AsyncIterator[Frame]) -> None:
         """Speak the prompt and consume bus frames until consent resolves."""
-        await self._ask(CONSENT_PROMPT)
+        prompt = CONSENT_PROMPT
+        if self._caller_hash and await self._memory.has_prior_consent(self._caller_hash):
+            prompt = CONSENT_REMINDER
+        await self._ask(prompt)
         try:
             async for frame in frames:
                 if self._resolved:
@@ -176,6 +185,8 @@ class ConsentGate:
                 ts=now.timestamp(),
             )
         )
+        if self._caller_hash:
+            await self._memory.record_consent(self._caller_hash)
 
     async def _decline(self, *, reason: Literal["explicit", "timeout", "unclear"]) -> None:
         """Persist DECLINED, speak the acknowledgement, hand off to finalize."""

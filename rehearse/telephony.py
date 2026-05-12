@@ -33,11 +33,12 @@ from rehearse.config import RuntimeConfig
 from rehearse.consent import ConsentGate, ConsentGateConfig
 from rehearse.frames import AudioChunk, EndOfCall
 from rehearse.intake import IntakeProcessor
+from rehearse.memory import CallerMemory, HonchoCallerMemory, NullCallerMemory
 from rehearse.outcome import OutcomeProbe, OutcomeProbeConfig
 from rehearse.phases import PhaseBudgets, PhaseProcessor
 from rehearse.services.hume_evi import HumeEVIParticipant
 from rehearse.session import SessionOrchestrator, TriggerEvent, utcnow
-from rehearse.types import Speaker
+from rehearse.types import Session, Speaker
 from rehearse.writers import (
     AudioRecorder,
     ProsodyWriter,
@@ -240,6 +241,15 @@ def mount_twilio_routes(
                         )
                     )
 
+                _session_obj = Session.model_validate_json(
+                    await orchestrator.store.read(session_id, "session.json")
+                )
+                caller_hash = _session_obj.phone_number_hash
+                _memory: CallerMemory = (
+                    HonchoCallerMemory(config.honcho_api_key, config.honcho_workspace_id)
+                    if config.honcho_api_key
+                    else NullCallerMemory()
+                )
                 consent_gate = ConsentGate(
                     session_id,
                     orchestrator.store,
@@ -250,6 +260,8 @@ def mount_twilio_routes(
                         prompt_timeout_seconds=config.consent_prompt_timeout_seconds,
                         reprompt_limit=config.consent_reprompt_limit,
                     ),
+                    caller_hash=caller_hash,
+                    memory=_memory,
                 )
                 outcome_probe = OutcomeProbe(
                     session_id,

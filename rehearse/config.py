@@ -40,6 +40,8 @@ class RuntimeConfig:
     finalize_sweep_grace_seconds: int = 60
     finalize_sweep_interval_seconds: int = 60
     finalize_sweep_enabled: bool = True
+    honcho_api_key: str | None = None
+    honcho_workspace_id: str = "rehearse"
 
     @classmethod
     def from_env(cls, *, load_dotenv_file: bool = True) -> RuntimeConfig:
@@ -101,4 +103,6 @@ class RuntimeConfig:
                 os.environ.get("FINALIZE_SWEEP_INTERVAL_SECONDS", "60")
             ),
             finalize_sweep_enabled=os.environ.get("FINALIZE_SWEEP_ENABLED", "1") != "0",
+            honcho_api_key=os.environ.get("HONCHO_API_KEY") or None,
+            honcho_workspace_id=os.environ.get("HONCHO_WORKSPACE_ID", "rehearse"),
         )
