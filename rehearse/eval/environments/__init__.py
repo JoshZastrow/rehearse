@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from rehearse.eval.environments.audio_fixture import AudioFixtureEnvironment
+from rehearse.eval.environments.live_audio_sandbox import LiveAudioSandboxEnvironment
 from rehearse.eval.environments.live_rollout_audio import LiveRolloutAudioEnvironment
 from rehearse.eval.environments.multimodal_llm import MultimodalLLMEnvironment
 from rehearse.eval.environments.production_replay import ProductionReplayEnvironment
@@ -37,6 +38,7 @@ ENVIRONMENTS: dict[str, EnvironmentFactory] = {
     "voice-agent-sandbox": _deprecated_voice_agent_sandbox,
     "audio-fixture": lambda slots: AudioFixtureEnvironment(model_slots=slots),
     "live-rollout-audio": lambda slots: LiveRolloutAudioEnvironment(model_slots=slots),
+    "live-audio-sandbox": lambda slots: LiveAudioSandboxEnvironment(model_slots=slots),
     "production-replay": lambda slots: ProductionReplayEnvironment(model_slots=slots),
     "runtime-sandbox": lambda slots: RuntimeSandboxEnvironment(model_slots=slots),
 }

@@ -56,7 +56,9 @@ _DEFAULT_WEIGHTS: dict[str, float] = {
 class VoiceRolloutJudgesEval:
     name = "voice-rollout-judges"
     version = "v0"
-    supported_environments = frozenset({"live-rollout-audio", "runtime-sandbox"})
+    supported_environments = frozenset(
+        {"live-rollout-audio", "runtime-sandbox", "live-audio-sandbox"}
+    )
     preferred_environment = "runtime-sandbox"
 
     def __init__(self) -> None:

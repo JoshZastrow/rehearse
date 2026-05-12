@@ -29,9 +29,12 @@ def test_every_dataset_satisfies_protocol():
 
 
 def test_every_environment_satisfies_protocol():
-    # Some environments (runtime-sandbox) raise at __init__ without API keys.
-    # Provide a stub key so the protocol check can instantiate them.
-    with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-stub"}):
+    # Some environments raise at __init__ without API keys. Provide stub keys
+    # so the protocol check can instantiate them without hitting providers.
+    with patch.dict(
+        "os.environ",
+        {"ANTHROPIC_API_KEY": "test-stub", "HUME_API_KEY": "test-stub"},
+    ):
         for name in ENVIRONMENTS:
             environment = get_environment(name, model_slots={})
             assert isinstance(environment, Environment), f"{name} is not an Environment"

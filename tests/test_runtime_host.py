@@ -4,23 +4,26 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from rehearse.phases import PhaseBudgets
 from rehearse.runtime import (
+    CoachAudioEvent,
+    CoachProsodyEvent,
+    CoachTranscriptEvent,
+    CoachTurnComplete,
     CoachVoiceAdapter,
     RuntimeHost,
     RuntimePhaseTimeoutError,
     SessionArtifacts,
+    StubAudioCoachAdapter,
 )
-from rehearse.phases import PhaseBudgets
 from rehearse.storage import LocalFilesystemStore
 from rehearse.transport import InMemoryTwoWayChannel, TransportEvent
-from rehearse.types import ConsentState, Phase, Session
-
+from rehearse.types import Phase
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -79,6 +82,7 @@ def _make_host(
     *,
     budgets: PhaseBudgets | None = None,
     phase_timeout_s: float = 10.0,
+    enable_audio_recording: bool = False,
 ) -> tuple[RuntimeHost, LocalFilesystemStore]:
     store = LocalFilesystemStore(tmp_path, "https://example.test")
     host = RuntimeHost(
@@ -86,6 +90,7 @@ def _make_host(
         coach,
         budgets=budgets or _ZERO_DWELL_BUDGETS,
         phase_timeout_s=phase_timeout_s,
+        enable_audio_recording=enable_audio_recording,
     )
     return host, store
 
@@ -334,3 +339,66 @@ async def test_early_hangup_exits_cleanly(tmp_path: Path) -> None:
     assert artifacts.session_json.exists()
     assert artifacts.phase_timing_json.exists()
     assert artifacts.intake_json is None
+
+
+@pytest.mark.asyncio
+async def test_audio_mode_routes_audio_and_end_of_turn_to_coach(
+    tmp_path: Path,
+) -> None:
+    """Audio transport events are passed into the audio coach adapter."""
+    coach = StubAudioCoachAdapter(scripted_events=[CoachTurnComplete()])
+    host, _ = _make_host(tmp_path, coach)
+    transport = InMemoryTwoWayChannel()
+
+    async def _customer() -> None:
+        await transport.customer.send("audio", data=b"\x01\x00\x02\x00")
+        await transport.customer.send("control", payload={"event": "end_of_turn"})
+        await transport.customer.send("control", payload={"event": "customer_done"})
+
+    await asyncio.gather(
+        host.run(session_id="sess-audio-routing", transport=transport.runtime),
+        _customer(),
+    )
+
+    assert coach.audio_chunks == [b"\x01\x00\x02\x00"]
+    assert coach.end_of_turn_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_audio_mode_publishes_coach_events_and_records_turn_wav(
+    tmp_path: Path,
+) -> None:
+    """Coach transcript/audio/prosody events are mirrored into runtime artifacts."""
+    coach = StubAudioCoachAdapter(
+        scripted_events=[
+            CoachTranscriptEvent(text="I hear you.", utterance_id="coach-1"),
+            CoachProsodyEvent(scores={"Calmness": 0.9}),
+            CoachAudioEvent(pcm16_16k=b"\x00\x00" * 1600),
+            CoachTurnComplete(),
+        ]
+    )
+    host, _ = _make_host(tmp_path, coach, enable_audio_recording=True)
+    transport = InMemoryTwoWayChannel()
+
+    async def _customer() -> None:
+        await transport.customer.send("audio", data=b"\x01\x00" * 1600)
+        await transport.customer.send("control", payload={"event": "end_of_turn"})
+        seen_text = False
+        while not seen_text:
+            event = await transport.customer.receive()
+            if event.kind == "text":
+                seen_text = True
+                assert event.payload["text"] == "I hear you."
+        await transport.customer.send("control", payload={"event": "customer_done"})
+
+    await asyncio.gather(
+        host.run(session_id="sess-audio-artifacts", transport=transport.runtime),
+        _customer(),
+    )
+
+    session_dir = tmp_path / "sess-audio-artifacts"
+    transcript = session_dir / "transcript.jsonl"
+    assert "I hear you." in transcript.read_text()
+    assert (session_dir / "prosody.jsonl").exists()
+    assert (session_dir / "audio" / "coach" / "turn_0.wav").exists()
+    assert (session_dir / "audio" / "coach" / "turn_0.wav").stat().st_size > 44
