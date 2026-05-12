@@ -97,7 +97,7 @@ class ProsodyWriter:
 
 
 class AudioRecorder:
-    """Stream audio chunks to `audio.wav` as the call runs."""
+    """Stream audio chunks to `audio.wav` and per-role turn WAVs as the call runs."""
 
     def __init__(
         self,
@@ -117,6 +117,12 @@ class AudioRecorder:
         writer = await asyncio.to_thread(
             StreamingWavWriter.open, path, self._sample_rate
         )
+        turn_writers: dict[str, StreamingWavWriter | None] = {
+            "user": None,
+            "coach": None,
+        }
+        turn_index: dict[str, int] = {"user": 0, "coach": 0}
+        active_role: str | None = None
         await self._store.update_session(
             self._session_id,
             lambda session: _add_artifact_path(session, key="audio", file_name="audio.wav"),
@@ -125,8 +131,34 @@ class AudioRecorder:
             async for frame in frames:
                 if isinstance(frame, AudioChunk):
                     await asyncio.to_thread(writer.write, frame.pcm16_16k)
+                    role = frame.speaker.value
+                    if role not in turn_writers:
+                        continue
+                    if active_role is not None and active_role != role:
+                        previous = turn_writers[active_role]
+                        if previous is not None:
+                            await asyncio.to_thread(previous.close)
+                            turn_writers[active_role] = None
+                            turn_index[active_role] += 1
+                    active_role = role
+                    role_writer = turn_writers[role]
+                    if role_writer is None:
+                        role_path = (
+                            self._store.session_dir(self._session_id)
+                            / "audio"
+                            / role
+                            / f"turn_{turn_index[role]}.wav"
+                        )
+                        role_writer = await asyncio.to_thread(
+                            StreamingWavWriter.open, role_path, self._sample_rate
+                        )
+                        turn_writers[role] = role_writer
+                    await asyncio.to_thread(role_writer.write, frame.pcm16_16k)
         finally:
             await asyncio.to_thread(writer.close)
+            for role_writer in turn_writers.values():
+                if role_writer is not None:
+                    await asyncio.to_thread(role_writer.close)
 
 
 class TimingWriter:
@@ -142,7 +174,8 @@ class TimingWriter:
     from fixture-emitted timing files:
 
         {"turn_index": int, "role": "user"|"coach", "event": "audio_start", "t_ms": int}
-        {"turn_index": int, "role": "user"|"coach", "event": "audio_end",   "t_ms": int, "duration_ms": int}
+        {"turn_index": int, "role": "user"|"coach", "event": "audio_end",
+         "t_ms": int, "duration_ms": int}
 
     `t_ms` is wall-clock milliseconds since the writer saw its first
     chunk, so user-side and coach-side timestamps share one clock

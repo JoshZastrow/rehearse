@@ -20,29 +20,30 @@ import asyncio
 import json
 from collections.abc import AsyncIterator, Callable
 from contextlib import suppress
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Protocol
-from uuid import uuid4
+from typing import Any, Protocol, runtime_checkable
 
 import structlog
 
 from rehearse.bus import FrameBus
 from rehearse.frames import (
+    AudioChunk,
     EndOfCall,
     Frame,
     IntakeComplete,
     PhaseSignal,
+    ProsodyEvent,
     TranscriptDelta,
 )
 from rehearse.intake import IntakeProcessor
 from rehearse.phases import PhaseBudgets, PhaseProcessor
 from rehearse.session import utcnow
 from rehearse.storage import LocalFilesystemStore
-from rehearse.transport import InMemoryTwoWayChannel, RuntimeTransport, TransportEvent
-from rehearse.types import ConsentState, Phase, Session, Speaker
-from rehearse.writers import TimingWriter, TranscriptWriter
+from rehearse.transport import RuntimeTransport, TransportEvent
+from rehearse.types import ConsentState, Phase, ProsodyScores, Session, Speaker
+from rehearse.writers import AudioRecorder, ProsodyWriter, TimingWriter, TranscriptWriter
 
 log = structlog.get_logger(__name__)
 
@@ -57,6 +58,46 @@ class CoachVoiceAdapter(Protocol):
     async def respond(self, user_text: str, session_id: str) -> str:
         """Return the coach's text response to the latest user utterance."""
         ...
+
+
+class CoachTurnEvent:
+    """One event emitted by an audio-capable coach during a turn."""
+
+
+@dataclass(frozen=True)
+class CoachTranscriptEvent(CoachTurnEvent):
+    text: str
+    utterance_id: str
+
+
+@dataclass(frozen=True)
+class CoachAudioEvent(CoachTurnEvent):
+    pcm16_16k: bytes
+
+
+@dataclass(frozen=True)
+class CoachProsodyEvent(CoachTurnEvent):
+    scores: dict[str, float]
+
+
+@dataclass(frozen=True)
+class CoachTurnComplete(CoachTurnEvent):
+    pass
+
+
+@runtime_checkable
+class AudioCoachAdapter(Protocol):
+    """Stateful voice-provider session used by live-audio eval rollouts."""
+
+    async def __aenter__(self) -> AudioCoachAdapter: ...
+
+    async def __aexit__(self, *args: object) -> None: ...
+
+    async def send_audio(self, pcm16_16k: bytes) -> None: ...
+
+    async def end_of_turn(self) -> None: ...
+
+    def events(self) -> AsyncIterator[CoachTurnEvent]: ...
 
 
 class TextOnlyCoachAdapter:
@@ -122,6 +163,126 @@ class TextOnlyCoachAdapter:
         history.append(("coach", coach_text))
         return coach_text
 
+    async def send_audio(self, pcm16_16k: bytes) -> None:
+        """Text-only adapter ignores audio; kept for protocol compatibility."""
+
+    async def end_of_turn(self) -> None:
+        """Text-only runtime path still uses respond(), so this is a no-op."""
+
+    def events(self) -> AsyncIterator[CoachTurnEvent]:
+        async def _empty() -> AsyncIterator[CoachTurnEvent]:
+            if False:
+                yield CoachTurnComplete()
+
+        return _empty()
+
+    async def __aenter__(self) -> TextOnlyCoachAdapter:
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        return None
+
+
+class StubAudioCoachAdapter:
+    """Scriptable audio coach used by unit tests."""
+
+    def __init__(self, scripted_events: list[CoachTurnEvent] | None = None) -> None:
+        self._scripted_events = list(scripted_events or [])
+        self._queue: asyncio.Queue[CoachTurnEvent | None] = asyncio.Queue()
+        self.audio_chunks: list[bytes] = []
+        self.end_of_turn_calls = 0
+
+    async def __aenter__(self) -> StubAudioCoachAdapter:
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        await self._queue.put(None)
+
+    async def send_audio(self, pcm16_16k: bytes) -> None:
+        self.audio_chunks.append(pcm16_16k)
+
+    async def end_of_turn(self) -> None:
+        self.end_of_turn_calls += 1
+        for event in self._scripted_events:
+            await self._queue.put(event)
+
+    async def _events(self) -> AsyncIterator[CoachTurnEvent]:
+        while True:
+            event = await self._queue.get()
+            if event is None:
+                break
+            yield event
+
+    def events(self) -> AsyncIterator[CoachTurnEvent]:
+        return self._events()
+
+
+class HumeEVIAdapter:
+    """AudioCoachAdapter wrapper around HumeEVIClient."""
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        config_id: str,
+        session_id: str,
+        persona_key: str = "default",
+        client: Any = None,
+    ) -> None:
+        self._client = client
+        self._api_key = api_key
+        self._config_id = config_id
+        self._session_id = session_id
+        self._persona_key = persona_key
+        self._bus = FrameBus(f"{session_id}-hume-adapter")
+        self._task: asyncio.Task[None] | None = None
+
+    async def __aenter__(self) -> HumeEVIAdapter:
+        if self._client is None:
+            from rehearse.services.hume_evi import HumeEVIClient
+
+            self._client = HumeEVIClient(
+                api_key=self._api_key,
+                config_id=self._config_id,
+                session_id=self._session_id,
+                persona_key=self._persona_key,
+            )
+        await self._client.__aenter__()
+        self._task = asyncio.create_task(self._client.run_event_loop(self._bus))
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        await self._bus.aclose()
+        if self._task is not None:
+            self._task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._task
+        await self._client.__aexit__(*args)
+
+    async def send_audio(self, pcm16_16k: bytes) -> None:
+        await self._client.send_audio(pcm16_16k)
+
+    async def end_of_turn(self) -> None:
+        return None
+
+    async def _events(self) -> AsyncIterator[CoachTurnEvent]:
+        async for frame in self._bus.subscribe():
+            if isinstance(frame, TranscriptDelta) and frame.speaker == Speaker.COACH:
+                yield CoachTranscriptEvent(
+                    text=frame.text,
+                    utterance_id=frame.utterance_id,
+                )
+            elif isinstance(frame, AudioChunk) and frame.speaker == Speaker.COACH:
+                yield CoachAudioEvent(pcm16_16k=frame.pcm16_16k)
+            elif isinstance(frame, ProsodyEvent) and frame.speaker == Speaker.COACH:
+                yield CoachProsodyEvent(scores=frame.scores.emotions)
+            elif isinstance(frame, EndOfCall):
+                break
+
+    def events(self) -> AsyncIterator[CoachTurnEvent]:
+        return self._events()
+
+
 
 class HumeCoachAdapter:
     """Routes coach responses through HumeEVIClient. Used in serving mode.
@@ -170,6 +331,7 @@ class RuntimeHost:
         clock: Callable[[], datetime] = utcnow,
         phase_timeout_s: float = 60.0,
         bus: FrameBus | None = None,
+        enable_audio_recording: bool = False,
     ) -> None:
         self._store = store
         self._coach = coach
@@ -177,6 +339,10 @@ class RuntimeHost:
         self._clock = clock
         self._phase_timeout_s = phase_timeout_s
         self._external_bus = bus
+        self._enable_audio_recording = enable_audio_recording
+        self._audio_mode = isinstance(coach, AudioCoachAdapter) and not isinstance(
+            coach, TextOnlyCoachAdapter
+        )
         self._current_phase: Phase = Phase.INTAKE
 
     @property
@@ -230,6 +396,7 @@ class RuntimeHost:
 
         intake_json_path: Path | None = None
         intake_complete_event = asyncio.Event()
+        coach_turn_complete_event = asyncio.Event()
 
         async def _watch_signals(frames: AsyncIterator[Frame]) -> None:
             nonlocal intake_json_path
@@ -256,26 +423,70 @@ class RuntimeHost:
         intake_task = asyncio.create_task(intake_processor.run(bus.subscribe()))
         transcript_task = asyncio.create_task(transcript_writer.run(bus.subscribe()))
         signal_task = asyncio.create_task(_watch_signals(bus.subscribe()))
+        extra_tasks: list[asyncio.Task[Any]] = []
+        coach_event_task: asyncio.Task[Any] | None = None
+        if self._enable_audio_recording:
+            extra_tasks.extend(
+                [
+                    asyncio.create_task(
+                        ProsodyWriter(session_id, self._store).run(bus.subscribe())
+                    ),
+                    asyncio.create_task(
+                        AudioRecorder(session_id, self._store).run(bus.subscribe())
+                    ),
+                    asyncio.create_task(
+                        TimingWriter(session_id, self._store).run(bus.subscribe())
+                    ),
+                ]
+            )
+        if self._audio_mode:
+            coach_event_task = asyncio.create_task(
+                self._consume_coach_events(
+                    session_id, transport, bus, coach_turn_complete_event
+                )
+            )
 
         # Give each subscriber task one event-loop tick to enter its async-for
         # loop and register its queue with the bus.  Without this, the first
         # publish inside _run_loop fires before any subscription exists, losing
         # the first frame.
         await asyncio.sleep(0)
+        if self._audio_mode or self._enable_audio_recording:
+            # Audio tests and live-audio eval can emit frames immediately after
+            # end_of_turn. Writer tasks first register artifact files, so give
+            # that setup a brief chance to complete before fast stub providers
+            # publish their first coach events.
+            await asyncio.sleep(0.05)
 
         try:
             async with asyncio.timeout(self._phase_timeout_s * 3):
-                await self._run_loop(session_id, transport, bus, intake_complete_event)
-        except TimeoutError:
+                await self._run_loop(
+                    session_id,
+                    transport,
+                    bus,
+                    intake_complete_event,
+                    coach_turn_complete_event,
+                )
+        except TimeoutError as exc:
             raise RuntimePhaseTimeoutError(
                 f"RuntimeHost session {session_id} exceeded total timeout "
                 f"({self._phase_timeout_s * 3:.0f}s)"
-            )
+            ) from exc
         finally:
             await bus.aclose()
-            for task in (phase_task, intake_task, transcript_task, signal_task):
+            for task in (
+                phase_task,
+                intake_task,
+                transcript_task,
+                signal_task,
+                *extra_tasks,
+            ):
                 with suppress(asyncio.CancelledError):
                     await task
+            if coach_event_task is not None:
+                coach_event_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await coach_event_task
 
         return await self._write_final_artifacts(
             session_id, run_dir, intake_json_path
@@ -287,6 +498,7 @@ class RuntimeHost:
         transport: RuntimeTransport,
         bus: FrameBus,
         intake_complete_event: asyncio.Event,
+        coach_turn_complete_event: asyncio.Event | None = None,
     ) -> None:
         """Read user turns from transport, call coach, write coach turns back."""
         utterance_idx = 0
@@ -295,16 +507,26 @@ class RuntimeHost:
                 event: TransportEvent = await asyncio.wait_for(
                     transport.receive(), timeout=self._phase_timeout_s
                 )
-            except TimeoutError:
+            except TimeoutError as exc:
                 raise RuntimePhaseTimeoutError(
                     f"{self._current_phase.upper()} phase exceeded "
                     f"{self._phase_timeout_s:.0f}s budget"
-                )
+                ) from exc
             except Exception:
                 break
 
             if event.kind == "control":
                 ev = event.payload.get("event", "")
+                if ev == "end_of_turn" and self._audio_mode:
+                    if coach_turn_complete_event is not None:
+                        coach_turn_complete_event.clear()
+                    await self._coach.end_of_turn()  # type: ignore[attr-defined]
+                    if coach_turn_complete_event is not None:
+                        await asyncio.wait_for(
+                            coach_turn_complete_event.wait(),
+                            timeout=self._phase_timeout_s,
+                        )
+                    continue
                 if ev in ("customer_done", "end_of_call", "runtime_done"):
                     await bus.publish(
                         EndOfCall(
@@ -314,6 +536,20 @@ class RuntimeHost:
                         )
                     )
                     break
+                continue
+
+            if event.kind == "audio" and self._audio_mode:
+                pcm = event.data or b""
+                if pcm:
+                    await bus.publish(
+                        AudioChunk(
+                            session_id=session_id,
+                            speaker=Speaker.USER,
+                            pcm16_16k=pcm,
+                            ts=self._clock().timestamp(),
+                        )
+                    )
+                    await self._coach.send_audio(pcm)  # type: ignore[attr-defined]
                 continue
 
             if event.kind != "text":
@@ -361,6 +597,63 @@ class RuntimeHost:
                 "text",
                 payload={"text": coach_text, "role": "coach"},
             )
+
+    async def _consume_coach_events(
+        self,
+        session_id: str,
+        transport: RuntimeTransport,
+        bus: FrameBus,
+        coach_turn_complete_event: asyncio.Event,
+    ) -> None:
+        """Mirror audio-coach events onto the runtime bus and sandbox transport."""
+        last_utterance_id = "coach-0"
+        async for event in self._coach.events():  # type: ignore[attr-defined]
+            now = self._clock().timestamp()
+            if isinstance(event, CoachTranscriptEvent):
+                last_utterance_id = event.utterance_id
+                await bus.publish(
+                    TranscriptDelta(
+                        session_id=session_id,
+                        utterance_id=event.utterance_id,
+                        speaker=Speaker.COACH,
+                        text=event.text,
+                        is_final=True,
+                        ts_start=now,
+                        ts_end=now,
+                    )
+                )
+                await transport.send(
+                    "text",
+                    payload={"text": event.text, "role": "coach"},
+                )
+            elif isinstance(event, CoachAudioEvent):
+                await bus.publish(
+                    AudioChunk(
+                        session_id=session_id,
+                        speaker=Speaker.COACH,
+                        pcm16_16k=event.pcm16_16k,
+                        ts=now,
+                    )
+                )
+                await transport.send("audio", data=event.pcm16_16k)
+            elif isinstance(event, CoachProsodyEvent):
+                await bus.publish(
+                    ProsodyEvent(
+                        session_id=session_id,
+                        utterance_id=last_utterance_id,
+                        speaker=Speaker.COACH,
+                        scores=ProsodyScores(
+                            arousal=0.0,
+                            valence=0.0,
+                            emotions=dict(event.scores),
+                        ),
+                        ts_start=now,
+                        ts_end=now,
+                    )
+                )
+            elif isinstance(event, CoachTurnComplete):
+                coach_turn_complete_event.set()
+                continue
 
     async def _write_final_artifacts(
         self,

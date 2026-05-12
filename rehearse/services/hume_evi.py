@@ -50,6 +50,7 @@ class HumeEVIClient:
         api_key: str,
         config_id: str,
         session_id: str,
+        bus: FrameBus | None = None,
         persona_key: str = "default",
         connect_fn: Callable[..., Any] | None = None,
         reconnect_backoff_s: float = 0.1,  # legacy, retained for backwards-compat
@@ -67,6 +68,7 @@ class HumeEVIClient:
         """
         self._api_key = api_key
         self._fallback_config_id = config_id
+        self._bus = bus
         self._persona_key = persona_key
         self._session_id = session_id
         self._connect_fn = (
@@ -131,7 +133,7 @@ class HumeEVIClient:
             raise RuntimeError("HumeEVIClient not connected")
         await self._socket.send_assistant_input(AssistantInput(text=text))
 
-    async def run_event_loop(self, bus: FrameBus) -> None:
+    async def run_event_loop(self, bus: FrameBus | None = None) -> None:
         """Read Hume events until the socket closes and publish runtime frames.
 
         On websocket or connect-time failures, walk the configured backoff
@@ -139,6 +141,9 @@ class HumeEVIClient:
         resets both the attempt counter and the budget anchor so a later
         disruption gets a full retry window.
         """
+        bus = bus or self._bus
+        if bus is None:
+            raise RuntimeError("HumeEVIClient.run_event_loop requires a FrameBus")
         while True:
             try:
                 assert self._socket is not None

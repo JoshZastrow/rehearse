@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import base64
 import os
+import tempfile
 import wave
 from pathlib import Path
 from typing import Protocol
@@ -32,6 +33,13 @@ class TTSProvider(Protocol):
         out_path: Path,
         description: str | None = None,
     ) -> float: ...
+
+    async def synthesize_pcm(
+        self,
+        *,
+        text: str,
+        description: str | None = None,
+    ) -> bytes: ...
 
 
 class HumeOctaveProvider:
@@ -68,6 +76,17 @@ class HumeOctaveProvider:
         out_path.write_bytes(audio_bytes)
         return _wav_duration_s(out_path)
 
+    async def synthesize_pcm(
+        self,
+        *,
+        text: str,
+        description: str | None = None,
+    ) -> bytes:
+        with tempfile.TemporaryDirectory() as tmp:
+            wav_path = Path(tmp) / "utterance.wav"
+            await self.synthesize(text=text, out_path=wav_path, description=description)
+            return _read_wav_pcm16(wav_path)
+
 
 def get_default_provider() -> TTSProvider | None:
     """Return the configured provider, or None if no credentials are set.
@@ -89,3 +108,8 @@ def _wav_duration_s(path: Path) -> float:
         frames = wav.getnframes()
         rate = wav.getframerate()
     return frames / float(rate) if rate else 0.0
+
+
+def _read_wav_pcm16(path: Path) -> bytes:
+    with wave.open(str(path), "rb") as wav:
+        return wav.readframes(wav.getnframes())
