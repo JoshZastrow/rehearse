@@ -21,11 +21,12 @@ if [ -f .env ]; then
 fi
 
 HONCHO_PID=""
+NGROK_PID=""
 
 cleanup() {
   echo "Shutting down..."
   [ -n "$HONCHO_PID" ] && kill "$HONCHO_PID" 2>/dev/null || true
-  kill "$NGROK_PID" 2>/dev/null || true
+  [ -n "$NGROK_PID" ] && kill "$NGROK_PID" 2>/dev/null || true
 }
 trap cleanup EXIT
 

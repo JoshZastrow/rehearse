@@ -52,7 +52,7 @@ echo "Starting Honcho API on port $HONCHO_PORT..."
   AUTH_USE_AUTH=false \
   SENTRY_ENABLED=false \
   LLM_ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}" \
-  uv run fastapi run src/main.py --port "$HONCHO_PORT" 2>&1
+  uv run uvicorn src.main:app --host 0.0.0.0 --port "$HONCHO_PORT" 2>&1
 ) &
 HONCHO_API_PID=$!
 
