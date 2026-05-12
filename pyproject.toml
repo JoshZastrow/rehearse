@@ -19,6 +19,9 @@ dependencies = [
     "rich>=13.7",
     "duckdb>=1.1",
     "honcho-ai>=2.1",
+    "pg0-embedded>=0.14.1",
+    "psycopg[binary]>=3.3.4",
+    "hindsight-all>=0.6.1",
 ]
 
 [project.scripts]

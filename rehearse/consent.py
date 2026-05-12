@@ -85,10 +85,15 @@ class ConsentGate:
 
     async def run(self, frames: AsyncIterator[Frame]) -> None:
         """Speak the prompt and consume bus frames until consent resolves."""
-        prompt = CONSENT_PROMPT
         if self._caller_hash and await self._memory.has_prior_consent(self._caller_hash):
-            prompt = CONSENT_REMINDER
-        await self._ask(prompt)
+            # Returning caller: state the reminder and immediately proceed.
+            # No "yes" needed — they already consented on a prior call.
+            await self._speaker.say(SpeakRequest(text=CONSENT_REMINDER))
+            log.info("consent.reminder.spoken", session_id=self._session_id)
+            await self._grant()
+            return
+        # First-time caller: full prompt, wait for spoken response.
+        await self._ask(CONSENT_PROMPT)
         try:
             async for frame in frames:
                 if self._resolved:
