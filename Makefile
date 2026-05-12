@@ -1,10 +1,13 @@
-.PHONY: help serve setup setup-honcho eval-list eval-voice-replay eval-voice-replay-live eval-voice-replay-dogfood eval-voice-smoke eval-voice-smoke-live eval-voice-rollout eval-voice-rollout-live eval-voice-rollout-audio eval-watch nightly-stability test lint
+.PHONY: help serve serve-memory setup setup-honcho eval-list eval-voice-replay eval-voice-replay-live eval-voice-replay-dogfood eval-voice-smoke eval-voice-smoke-live eval-voice-rollout eval-voice-rollout-live eval-voice-rollout-audio eval-watch nightly-stability test lint
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk -F':.*?## ' '{printf "  %-28s %s\n", $$1, $$2}'
 
 serve: ## start ngrok + Honcho (auto-detected) + rehearse server
 	@bash scripts/serve.sh
+
+serve-memory: ## start the rehearse-memory MCP server (Honcho backend)
+	uv run python3 -m rehearse.services.memory_mcp_server
 
 setup: ## install deps + link .env (run once per worktree)
 	uv sync

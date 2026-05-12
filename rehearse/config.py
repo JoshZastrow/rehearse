@@ -43,6 +43,7 @@ class RuntimeConfig:
     honcho_api_key: str | None = None
     honcho_workspace_id: str = "rehearse"
     honcho_base_url: str | None = None  # set to http://localhost:8001 for self-hosted
+    memory_mcp_url: str | None = None  # MEMORY_MCP_URL — MCP memory server endpoint
 
     @classmethod
     def from_env(cls, *, load_dotenv_file: bool = True) -> RuntimeConfig:
@@ -107,4 +108,5 @@ class RuntimeConfig:
             honcho_api_key=os.environ.get("HONCHO_API_KEY") or None,
             honcho_workspace_id=os.environ.get("HONCHO_WORKSPACE_ID", "rehearse"),
             honcho_base_url=os.environ.get("HONCHO_BASE_URL") or None,
+            memory_mcp_url=os.environ.get("MEMORY_MCP_URL") or None,
         )

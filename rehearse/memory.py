@@ -16,6 +16,11 @@ InMemoryCallerMemory   In-process set. Shared across calls in the same process.
 HonchoCallerMemory     Honcho-backed. Persists caller facts to the Honcho
                        cloud API keyed by phone_number_hash. Used in
                        production when HONCHO_API_KEY is set.
+
+MCPCallerMemory        MCP-protocol client. Connects to any MCP server that
+                       exposes has_prior_consent and record_consent tools.
+                       Used when MEMORY_MCP_URL is set; lets Honcho (or any
+                       other backend) be swapped without changing call code.
 """
 
 from __future__ import annotations
@@ -125,6 +130,64 @@ class HonchoCallerMemory:
         except Exception as exc:
             log.warning(
                 "honcho.record_consent.failed",
+                caller_hash=caller_hash[:8],
+                error=str(exc),
+            )
+
+
+class MCPCallerMemory:
+    """Connects to any MCP server implementing has_prior_consent + record_consent tools.
+
+    The server endpoint is passed as ``url`` (e.g. ``http://localhost:3333/mcp``).
+    If the trailing ``/mcp`` path is omitted it is appended automatically to
+    match the FastMCP default ``streamable_http_path``.
+
+    Fails open: any connection or tool error causes has_prior_consent to return
+    False (caller hears the full prompt) and record_consent to log a warning.
+    """
+
+    def __init__(self, url: str) -> None:
+        if not url.endswith("/mcp"):
+            url = url.rstrip("/") + "/mcp"
+        self._url = url
+
+    async def has_prior_consent(self, caller_hash: str) -> bool:
+        try:
+            from mcp import ClientSession
+            from mcp.client.streamable_http import streamablehttp_client
+
+            async with streamablehttp_client(self._url) as (read, write, _):
+                async with ClientSession(read, write) as session:
+                    await session.initialize()
+                    result = await session.call_tool(
+                        "has_prior_consent", {"caller_hash": caller_hash}
+                    )
+            # The tool returns a bool serialised as a text content block.
+            raw = result.content[0].text if result.content else "false"
+            value = raw.strip().lower() in ("true", "1", "yes")
+            log.debug("mcp.has_prior_consent", caller_hash=caller_hash[:8], result=value)
+            return value
+        except Exception as exc:
+            log.warning(
+                "mcp.has_prior_consent.failed",
+                caller_hash=caller_hash[:8],
+                error=str(exc),
+            )
+            return False
+
+    async def record_consent(self, caller_hash: str) -> None:
+        try:
+            from mcp import ClientSession
+            from mcp.client.streamable_http import streamablehttp_client
+
+            async with streamablehttp_client(self._url) as (read, write, _):
+                async with ClientSession(read, write) as session:
+                    await session.initialize()
+                    await session.call_tool("record_consent", {"caller_hash": caller_hash})
+            log.info("mcp.consent_recorded", caller_hash=caller_hash[:8])
+        except Exception as exc:
+            log.warning(
+                "mcp.record_consent.failed",
                 caller_hash=caller_hash[:8],
                 error=str(exc),
             )

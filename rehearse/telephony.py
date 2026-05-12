@@ -33,7 +33,7 @@ from rehearse.config import RuntimeConfig
 from rehearse.consent import ConsentGate, ConsentGateConfig
 from rehearse.frames import AudioChunk, EndOfCall
 from rehearse.intake import IntakeProcessor
-from rehearse.memory import CallerMemory, HonchoCallerMemory, NullCallerMemory
+from rehearse.memory import CallerMemory, HonchoCallerMemory, MCPCallerMemory, NullCallerMemory
 from rehearse.outcome import OutcomeProbe, OutcomeProbeConfig
 from rehearse.phases import PhaseBudgets, PhaseProcessor
 from rehearse.services.hume_evi import HumeEVIParticipant
@@ -245,15 +245,17 @@ def mount_twilio_routes(
                     await orchestrator.store.read(session_id, "session.json")
                 )
                 caller_hash = _session_obj.phone_number_hash
-                _memory: CallerMemory = (
-                    HonchoCallerMemory(
+                # Priority: MEMORY_MCP_URL > HONCHO_API_KEY/BASE_URL > NullCallerMemory
+                if config.memory_mcp_url:
+                    _memory: CallerMemory = MCPCallerMemory(config.memory_mcp_url)
+                elif config.honcho_api_key or config.honcho_base_url:
+                    _memory = HonchoCallerMemory(
                         api_key=config.honcho_api_key or "",
                         workspace_id=config.honcho_workspace_id,
                         base_url=config.honcho_base_url,
                     )
-                    if (config.honcho_api_key or config.honcho_base_url)
-                    else NullCallerMemory()
-                )
+                else:
+                    _memory = NullCallerMemory()
                 consent_gate = ConsentGate(
                     session_id,
                     orchestrator.store,
