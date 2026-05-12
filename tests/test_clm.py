@@ -133,6 +133,40 @@ def test_chat_completions_streams_openai_sse(tmp_path: Path) -> None:
     ]
 
 
+def test_chat_completions_handles_null_prosody_in_models() -> None:
+    """Hume sends {"models": {"prosody": null}} for some message types.
+    _message_content must not raise AttributeError when prosody value is null.
+    """
+    from rehearse.agents.clm import _message_content
+
+    # prosody key present but value is null — this is what Hume sends for
+    # messages that don't have emotion scores (e.g. the consent "yes").
+    msg = CLMMessage(
+        role="user",
+        content="yes",
+        models={"prosody": None},
+    )
+    assert _message_content(msg) == "yes"
+
+    # scores key present but value is null
+    msg_null_scores = CLMMessage(
+        role="user",
+        content="hello",
+        models={"prosody": {"scores": None}},
+    )
+    assert _message_content(msg_null_scores) == "hello"
+
+    # normal prosody scores still work
+    msg_with_scores = CLMMessage(
+        role="user",
+        content="hello",
+        models={"prosody": {"scores": {"Joy": 0.9, "Anger": 0.1}}},
+    )
+    result = _message_content(msg_with_scores)
+    assert "Joy=0.90" in result
+    assert "hello" in result
+
+
 def test_path_based_hume_clm_route_supports_non_stream_json(tmp_path: Path) -> None:
     """The older path-based route should still work for buffered responses."""
     responder = FakeResponder(["One short reply."])

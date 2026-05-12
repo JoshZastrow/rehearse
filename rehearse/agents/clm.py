@@ -392,7 +392,7 @@ def _message_content(message: CLMMessage) -> str:
         return ""
     prosody_scores = {}
     if isinstance(message.models, dict):
-        prosody_scores = message.models.get("prosody", {}).get("scores", {})
+        prosody_scores = (message.models.get("prosody") or {}).get("scores") or {}
     if not prosody_scores:
         return text
     top_emotions = sorted(prosody_scores.items(), key=lambda item: item[1], reverse=True)[:3]
