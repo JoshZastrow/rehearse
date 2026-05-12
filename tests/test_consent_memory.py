@@ -200,8 +200,11 @@ async def test_null_memory_always_gives_full_prompt(
 
 
 # ---------------------------------------------------------------------------
-# Integration tests — require real Honcho cloud API
-# Run with: pytest -m live_api tests/test_consent_memory.py
+# Integration tests — Honcho server fixture (preferred) or cloud API fallback
+#
+# Two ways to run:
+#   make setup-honcho && pytest -m live_api   (self-hosted, no cloud key)
+#   HONCHO_API_KEY=<key> pytest -m live_api   (cloud API)
 # ---------------------------------------------------------------------------
 
 def _unique_caller() -> str:
@@ -210,12 +213,24 @@ def _unique_caller() -> str:
 
 
 @pytest.fixture
-def honcho_memory():
-    """Real HonchoCallerMemory. Skipped when HONCHO_API_KEY is not set."""
+def honcho_memory(honcho_server):
+    """HonchoCallerMemory pointed at the session-scoped local Honcho server.
+
+    Falls back to the cloud API when honcho_server is not available (i.e.
+    lib/honcho/ not set up) and HONCHO_API_KEY is set in the environment.
+    """
+    from rehearse.memory import HonchoCallerMemory
+
+    if honcho_server:
+        # Self-hosted Honcho via conftest.py fixture — no API key needed.
+        return HonchoCallerMemory(base_url=honcho_server, workspace_id="rehearse-test")
+
+    # Cloud fallback.
     api_key = os.environ.get("HONCHO_API_KEY")
     if not api_key:
-        pytest.skip("HONCHO_API_KEY not set — skipping Honcho integration test")
-    from rehearse.memory import HonchoCallerMemory
+        pytest.skip(
+            "No Honcho available: run 'make setup-honcho' or set HONCHO_API_KEY"
+        )
     return HonchoCallerMemory(api_key=api_key, workspace_id="rehearse-test")
 
 
