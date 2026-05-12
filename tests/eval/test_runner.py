@@ -122,3 +122,103 @@ async def test_repetitions_must_be_at_least_one():
 
     with pytest.raises(ValueError, match="repetitions"):
         RunConfig(eval_name="noop", repetitions=0)
+
+
+async def test_async_scheduler_scores_fast_rollout_before_slow_rollout_finishes(
+    tmp_path: Path,
+):
+    import asyncio
+    from datetime import datetime
+
+    from rehearse.eval.evals import EVALS
+    from rehearse.eval.protocols import BenchmarkExample, RolloutResult
+    from rehearse.types import RubricScore
+
+    slow_finished = asyncio.Event()
+    fast_scored = asyncio.Event()
+
+    class _Dataset:
+        name = "async-runner-test"
+        version = "v1"
+
+        def load(self):
+            return [
+                BenchmarkExample(id="slow", benchmark=self.name, payload={}),
+                BenchmarkExample(id="fast", benchmark=self.name, payload={}),
+            ]
+
+    class _Scorer:
+        name = "async-test-scorer"
+        dimension = "async_score"
+
+        async def score(self, example, rollout, run_id):
+            if example.id == "fast":
+                fast_scored.set()
+            return [
+                RubricScore(
+                    run_id=run_id,
+                    example_id=example.id,
+                    dimension=self.dimension,
+                    value=1.0,
+                    scorer="deterministic",
+                )
+            ]
+
+    class _Eval:
+        name = "async-runner-test"
+        version = "v1"
+        dataset = _Dataset()
+        supported_environments = frozenset({"echo"})
+        preferred_environment = "echo"
+
+        def load(self):
+            return self.dataset.load()
+
+        def scoring_plan(self):
+            return [_Scorer()]
+
+        def rollout_timeout_s(self):
+            return 5
+
+    class _Executor:
+        async def submit(self, **kwargs):
+            example = kwargs["example"]
+            if example.id == "slow":
+                await asyncio.sleep(0.2)
+                slow_finished.set()
+            else:
+                await asyncio.sleep(0.01)
+            now = datetime.now()
+            return RolloutResult(
+                example_id=example.id,
+                target_name=kwargs["target_name"],
+                target_version=kwargs["target_version"],
+                status="ok",
+                started_at=now,
+                completed_at=now,
+                duration_ms=1,
+                artifacts_dir=kwargs["run_dir"],
+            )
+
+    EVALS["async-runner-test"] = _Eval
+    try:
+        config = RunConfig(
+            eval_name="async-runner-test",
+            environment="echo",
+            scheduler="async",
+            rollout_workers=2,
+            scoring_workers=1,
+            runs_root=tmp_path,
+        )
+        task = asyncio.create_task(execute_run(config, executor=_Executor()))
+
+        await asyncio.wait_for(fast_scored.wait(), timeout=1.0)
+        assert not slow_finished.is_set()
+
+        outcome = await task
+        assert outcome.n_ok == 2
+        assert outcome.aggregate_scores["async_score"] == 1.0
+        assert (outcome.run_dir / "scheduler_events.jsonl").exists()
+        assert (outcome.run_dir / "pipeline_metrics.json").exists()
+    finally:
+        del EVALS["async-runner-test"]
