@@ -216,7 +216,7 @@ async def test_llm_judge_confirms_second_call_is_brief_reminder(tmp_path: Path) 
     reminder_text = spoken[0] if spoken else ""
 
     # Layer 1: keyword match.
-    assert "transcribed" in reminder_text.lower() or CONSENT_REMINDER in reminder_text, (
+    assert "recorded" in reminder_text.lower() or CONSENT_REMINDER in reminder_text, (
         f"Expected reminder content, got: {reminder_text!r}"
     )
 

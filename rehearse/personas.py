@@ -31,10 +31,7 @@ CONSENT_DECLINE_ACK = (
     "No problem — I won't record this call. Take care."
 )
 
-CONSENT_REMINDER = (
-    "Again, this call will be transcribed so I can give you feedback. "
-    "Just say yes to continue."
-)
+CONSENT_REMINDER = "Quick note: this call is being recorded."
 
 _AFFIRMATIVE: frozenset[str] = frozenset(
     {
