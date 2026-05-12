@@ -246,8 +246,12 @@ def mount_twilio_routes(
                 )
                 caller_hash = _session_obj.phone_number_hash
                 _memory: CallerMemory = (
-                    HonchoCallerMemory(config.honcho_api_key, config.honcho_workspace_id)
-                    if config.honcho_api_key
+                    HonchoCallerMemory(
+                        api_key=config.honcho_api_key or "",
+                        workspace_id=config.honcho_workspace_id,
+                        base_url=config.honcho_base_url,
+                    )
+                    if (config.honcho_api_key or config.honcho_base_url)
                     else NullCallerMemory()
                 )
                 consent_gate = ConsentGate(

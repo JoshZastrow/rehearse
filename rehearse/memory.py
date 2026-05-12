@@ -89,10 +89,19 @@ class HonchoCallerMemory:
     (caller hears the full prompt) and record_consent to log a warning.
     """
 
-    def __init__(self, api_key: str, workspace_id: str = "rehearse") -> None:
+    def __init__(
+        self,
+        api_key: str = "",
+        workspace_id: str = "rehearse",
+        base_url: str | None = None,
+    ) -> None:
         from honcho import Honcho
 
-        self._honcho = Honcho(api_key=api_key, workspace_id=workspace_id)
+        self._honcho = Honcho(
+            api_key=api_key or None,
+            workspace_id=workspace_id,
+            base_url=base_url,
+        )
 
     async def has_prior_consent(self, caller_hash: str) -> bool:
         try:

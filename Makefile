@@ -1,12 +1,12 @@
-.PHONY: help serve eval-list eval-voice-replay eval-voice-replay-live eval-voice-replay-dogfood eval-voice-smoke eval-voice-smoke-live eval-voice-rollout eval-voice-rollout-live eval-voice-rollout-audio eval-watch nightly-stability test lint
+.PHONY: help serve setup setup-honcho eval-list eval-voice-replay eval-voice-replay-live eval-voice-replay-dogfood eval-voice-smoke eval-voice-smoke-live eval-voice-rollout eval-voice-rollout-live eval-voice-rollout-audio eval-watch nightly-stability test lint
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk -F':.*?## ' '{printf "  %-28s %s\n", $$1, $$2}'
 
-serve: ## start the server + ngrok tunnel (sets BASE_URL automatically)
+serve: ## start ngrok + Honcho (auto-detected) + rehearse server
 	@bash scripts/serve.sh
 
-setup: ## install deps + link .env from main worktree (run once per worktree)
+setup: ## install deps + link .env (run once per worktree)
 	uv sync
 	@if [ ! -f .env ]; then \
 	  MAIN_ROOT=$$(git worktree list | head -1 | awk '{print $$1}'); \
@@ -16,6 +16,30 @@ setup: ## install deps + link .env from main worktree (run once per worktree)
 	    cp .env.example .env && echo "Copied .env.example → .env  (fill in API keys)"; \
 	  fi \
 	fi
+
+setup-honcho: ## clone + migrate Honcho for self-hosted local dev (no cloud API key needed)
+	@if [ ! -d lib/honcho ]; then \
+	  echo "Cloning Honcho into lib/honcho..."; \
+	  git clone https://github.com/plastic-labs/honcho.git lib/honcho; \
+	fi
+	@echo "Installing Honcho dependencies..."
+	@cd lib/honcho && uv sync
+	@echo "Writing lib/honcho/.env..."
+	@cat > lib/honcho/.env <<'EOF'
+	DB_CONNECTION_URI=postgresql+psycopg://postgres:postgres@127.0.0.1:5433/postgres
+	AUTH_USE_AUTH=false
+	SENTRY_ENABLED=false
+	EOF
+	@echo "Running Honcho migrations (pg0 must be running on port 5433)..."
+	@python3 scripts/pg0_server.py 5433 & \
+	  PG0_PID=$$!; \
+	  sleep 3; \
+	  cd lib/honcho && DB_CONNECTION_URI=postgresql+psycopg://postgres:postgres@127.0.0.1:5433/postgres uv run alembic upgrade head; \
+	  kill $$PG0_PID 2>/dev/null || true
+	@echo ""
+	@echo "Done. Add to .env:"
+	@echo "  HONCHO_BASE_URL=http://localhost:8001"
+	@echo "Then 'make serve' will start Honcho automatically."
 
 clean: ## remove generated artifacts (venv, cache, sessions, runs)
 	rm -rf .venv .cache sessions evals/runs evals/datasets/mme-emotion/v0-10clip/clips

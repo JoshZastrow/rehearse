@@ -42,6 +42,7 @@ class RuntimeConfig:
     finalize_sweep_enabled: bool = True
     honcho_api_key: str | None = None
     honcho_workspace_id: str = "rehearse"
+    honcho_base_url: str | None = None  # set to http://localhost:8001 for self-hosted
 
     @classmethod
     def from_env(cls, *, load_dotenv_file: bool = True) -> RuntimeConfig:
@@ -105,4 +106,5 @@ class RuntimeConfig:
             finalize_sweep_enabled=os.environ.get("FINALIZE_SWEEP_ENABLED", "1") != "0",
             honcho_api_key=os.environ.get("HONCHO_API_KEY") or None,
             honcho_workspace_id=os.environ.get("HONCHO_WORKSPACE_ID", "rehearse"),
+            honcho_base_url=os.environ.get("HONCHO_BASE_URL") or None,
         )
