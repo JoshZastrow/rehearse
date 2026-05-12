@@ -245,14 +245,20 @@ def mount_twilio_routes(
                     await orchestrator.store.read(session_id, "session.json")
                 )
                 caller_hash = _session_obj.phone_number_hash
-                # Priority: MEMORY_MCP_URL > HONCHO_API_KEY/BASE_URL > NullCallerMemory
+                # Priority: MEMORY_MCP_URL → HONCHO_BASE_URL (self-hosted, local)
+                #           → HONCHO_API_KEY (cloud) → NullCallerMemory
+                # Self-hosted always wins over cloud when both are configured.
                 if config.memory_mcp_url:
                     _memory: CallerMemory = MCPCallerMemory(config.memory_mcp_url)
-                elif config.honcho_api_key or config.honcho_base_url:
+                elif config.honcho_base_url:
                     _memory = HonchoCallerMemory(
-                        api_key=config.honcho_api_key or "",
                         workspace_id=config.honcho_workspace_id,
                         base_url=config.honcho_base_url,
+                    )
+                elif config.honcho_api_key:
+                    _memory = HonchoCallerMemory(
+                        api_key=config.honcho_api_key,
+                        workspace_id=config.honcho_workspace_id,
                     )
                 else:
                     _memory = NullCallerMemory()
