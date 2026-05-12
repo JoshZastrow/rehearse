@@ -309,6 +309,71 @@ async def test_word_feedback_in_user_situation_does_not_trigger_transition(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("phrase", [
+    "great, thanks",
+    "great thanks",
+    "okay, thanks",
+    "that was helpful",
+    "that's helpful",
+    "that was great",
+    "i think i'm done",
+    "let's stop there",
+    "we can stop",
+    "how did i do",
+    "stop the scene",
+])
+async def test_natural_conversation_ender_triggers_feedback(
+    phase_store: tuple[LocalFilesystemStore, str],
+    phrase: str,
+) -> None:
+    """Natural closing phrases spoken during PRACTICE must transition to FEEDBACK."""
+    store, session_id = phase_store
+    bus = FrameBus(session_id)
+    clock = FakeClock(datetime(2026, 5, 6, 23, 0, tzinfo=UTC))
+    processor = PhaseProcessor(
+        session_id,
+        store,
+        bus,
+        budgets=PhaseBudgets(intake_min_dwell_seconds=5, practice_min_dwell_seconds=10),
+        clock=clock,
+        consent_getter=lambda: ConsentState.GRANTED,
+    )
+    await processor.bootstrap()
+    run_task = asyncio.create_task(processor.run(bus.subscribe()))
+    await asyncio.sleep(0)
+
+    # Drive intake → practice: need >=2 user turns + min dwell elapsed
+    clock.now += timedelta(seconds=10)
+    await bus.publish(TranscriptDelta(
+        session_id=session_id, utterance_id="u1", speaker=Speaker.USER,
+        text="I need to rehearse a difficult conversation.", is_final=True,
+        ts_start=0.0, ts_end=1.0,
+    ))
+    await asyncio.sleep(0)
+    await bus.publish(TranscriptDelta(
+        session_id=session_id, utterance_id="u2", speaker=Speaker.USER,
+        text="let's practice", is_final=True, ts_start=1.0, ts_end=2.0,
+    ))
+    await asyncio.sleep(0.05)
+    assert processor.current_phase == Phase.PRACTICE
+
+    # User says the natural ender after practice min dwell
+    clock.now += timedelta(seconds=15)
+    await bus.publish(TranscriptDelta(
+        session_id=session_id, utterance_id="u3", speaker=Speaker.USER,
+        text=phrase, is_final=True, ts_start=15.0, ts_end=16.0,
+    ))
+    await asyncio.sleep(0.05)
+
+    assert processor.current_phase == Phase.FEEDBACK, (
+        f"Expected FEEDBACK after '{phrase}' but stayed in PRACTICE"
+    )
+
+    await bus.aclose()
+    await run_task
+
+
+@pytest.mark.asyncio
 async def test_cue_blocked_before_min_dwell_elapsed(
     phase_store: tuple[LocalFilesystemStore, str],
 ) -> None:

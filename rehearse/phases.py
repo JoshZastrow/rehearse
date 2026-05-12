@@ -257,6 +257,7 @@ _INTAKE_READY_CUES: frozenset[str] = frozenset(
 # review situation in intake content and trips a premature transition.
 _FEEDBACK_READY_CUES: frozenset[str] = frozenset(
     {
+        # Explicit requests
         "give me feedback",
         "your feedback",
         "some feedback",
@@ -265,10 +266,27 @@ _FEEDBACK_READY_CUES: frozenset[str] = frozenset(
         "what should i change",
         "what would you change",
         "let's debrief",
+        # Scene control
         "stop the scene",
         "pause the scene",
         "out of scene",
         "step out",
+        "end scene",
+        "cut",
+        # Natural conversation enders — signal the user is stepping back
+        # from the roleplay and ready to debrief.
+        "great, thanks",
+        "great thanks",
+        "okay, thanks",
+        "ok, thanks",
+        "that was helpful",
+        "that's helpful",
+        "that was great",
+        "that's great",
+        "i think i'm done",
+        "i'm done with that",
+        "let's stop there",
+        "we can stop",
     }
 )
 
