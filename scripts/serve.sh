@@ -30,13 +30,11 @@ cleanup() {
 trap cleanup EXIT
 
 # ── Memory backend ────────────────────────────────────────────────────────────
-if [ -n "${HONCHO_API_KEY:-}" ]; then
-  echo "Memory: Honcho cloud (HONCHO_API_KEY set)"
-
-elif [ -n "${HONCHO_BASE_URL:-}" ]; then
-  echo "Memory: Honcho at $HONCHO_BASE_URL (HONCHO_BASE_URL set)"
-
-elif [ -d "$SCRIPT_DIR/../lib/honcho" ]; then
+# Priority: lib/honcho/ (self-hosted, local) > HONCHO_BASE_URL (external)
+#           > HONCHO_API_KEY (cloud) > none
+# lib/honcho/ always wins so you never need to comment out HONCHO_API_KEY
+# just because you set up local Honcho.
+if [ -d "$SCRIPT_DIR/../lib/honcho" ]; then
   echo "Memory: starting self-hosted Honcho with embedded pg0..."
   bash "$SCRIPT_DIR/honcho_serve.sh" &
   HONCHO_PID=$!
@@ -56,8 +54,14 @@ elif [ -d "$SCRIPT_DIR/../lib/honcho" ]; then
   HONCHO_BASE_URL=$(cat /tmp/rehearse-honcho-url.txt)
   echo "Memory: Honcho ready at $HONCHO_BASE_URL"
 
+elif [ -n "${HONCHO_BASE_URL:-}" ]; then
+  echo "Memory: Honcho at $HONCHO_BASE_URL (HONCHO_BASE_URL set)"
+
+elif [ -n "${HONCHO_API_KEY:-}" ]; then
+  echo "Memory: Honcho cloud (HONCHO_API_KEY set)"
+
 else
-  echo "Memory: none (set HONCHO_API_KEY or run 'make setup-honcho' for self-hosted)"
+  echo "Memory: none (run 'make setup-honcho' for self-hosted, or set HONCHO_API_KEY for cloud)"
 fi
 
 # ── Sync Hume configs ─────────────────────────────────────────────────────────
