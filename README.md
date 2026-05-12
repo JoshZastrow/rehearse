@@ -10,6 +10,98 @@ See [SPEC.md](SPEC.md) for the foundational design.
 
 Live runtime + eval harness scaffold.
 
+## Quick Start
+
+### Prerequisites
+
+- Python 3.11+, [uv](https://docs.astral.sh/uv/), [ngrok](https://ngrok.com/), a Twilio account, a Hume EVI account
+
+### 1. Install dependencies
+
+```bash
+make setup
+```
+
+### 2. Configure environment
+
+```bash
+cp .env.example .env
+# Fill in: TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER,
+#          HUME_API_KEY, HUME_CONFIG_ID, HUME_CLM_SECRET, ANTHROPIC_API_KEY
+```
+
+### 3. Set up caller memory (returning callers get a shorter consent prompt)
+
+**Option A: Honcho cloud (recommended)**
+
+```bash
+# Add to .env:
+HONCHO_API_KEY=<your-key>
+```
+
+**Option B: Self-hosted (no cloud account needed)**
+
+```bash
+make setup-honcho
+# Then add to .env:
+# HONCHO_BASE_URL=http://localhost:8001
+```
+
+If neither is set, `NullCallerMemory` is used — calls still work, every caller hears the full consent prompt.
+
+### 4. Initialize Hume EVI configs
+
+```bash
+BASE_URL=https://your-ngrok-url uv run rehearse-hume sync
+```
+
+### 5. Start everything
+
+```bash
+make serve
+# Opens ngrok tunnel, syncs Hume configs, starts rehearse server.
+# If lib/honcho/ exists, also starts local Honcho with embedded Postgres.
+```
+
+Send an SMS to your Twilio number to trigger an outbound call.
+
+---
+
+## Memory Backends
+
+Returning callers hear a one-sentence reminder ("Again, this call will be transcribed...") instead of the full 55-word consent prompt. First-time callers always receive the full prompt.
+
+The `CallerMemory` protocol (`rehearse/memory.py`) is provider-agnostic — any class with `has_prior_consent` and `record_consent` satisfies it. The target protocol is MCP; any MCP-compatible memory server works.
+
+| Backend | Config | Use |
+|---|---|---|
+| `HonchoCallerMemory` | `HONCHO_API_KEY` in `.env` | Honcho cloud — recommended for production |
+| `HonchoCallerMemory` (self-hosted) | `make setup-honcho` + `HONCHO_BASE_URL=http://localhost:8001` | Local Honcho with embedded Postgres — no cloud account |
+| `NullCallerMemory` | (neither key set) | Fallback — calls work, every caller gets the full prompt |
+
+Caller identity is a SHA-256 hash of the E.164 phone number — no plaintext numbers leave the runtime.
+
+---
+
+## Development
+
+```bash
+make test                   # run full pytest suite
+make lint                   # ruff check
+make eval-voice-rollout     # eval without live services (needs ANTHROPIC_API_KEY only)
+pytest -m live_api          # tests requiring real API keys
+```
+
+Key eval targets:
+
+```bash
+make eval-voice-smoke           # fixture smoke with stub judges (free)
+make eval-voice-rollout-live    # rollout with real Hume TTS + audio judges
+make eval-watch RUN=<run_id>    # tail scores.jsonl for a live run
+```
+
+---
+
 - Runtime: SMS triggers an outbound call. Twilio Media Streams bridges audio to Hume EVI. A custom-language-model webhook serves coach/character turns. Transcript, prosody, audio, and telemetry artifacts persist per session. Post-call synthesis writes `story.md` + `feedback.md` and SMSes a viewer link back. End-to-end verified on a real phone call (2026-05-01). See [`docs/specs/v2026-04-28-runtime-workstream.md`](docs/specs/v2026-04-28-runtime-workstream.md).
 - Eval harness: see [`rehearse/eval/README.md`](rehearse/eval/README.md). Public shape is evals, datasets, scorers, and environments. Runs `noop` offline and has the MME-Emotion audio eval scaffold.
 
