@@ -26,15 +26,11 @@ setup-honcho: ## clone + migrate Honcho for self-hosted local dev (no cloud API 
 	  git clone https://github.com/plastic-labs/honcho.git lib/honcho; \
 	fi
 	@echo "Installing Honcho dependencies..."
-	@cd lib/honcho && uv sync
+	cd lib/honcho && uv sync
 	@echo "Writing lib/honcho/.env..."
-	@cat > lib/honcho/.env <<'EOF'
-	DB_CONNECTION_URI=postgresql+psycopg://postgres:postgres@127.0.0.1:5433/postgres
-	AUTH_USE_AUTH=false
-	SENTRY_ENABLED=false
-	EOF
-	@echo "Running Honcho migrations (pg0 must be running on port 5433)..."
-	@python3 scripts/pg0_server.py 5433 & \
+	@printf 'DB_CONNECTION_URI=postgresql+psycopg://postgres:postgres@127.0.0.1:5433/postgres\nAUTH_USE_AUTH=false\nSENTRY_ENABLED=false\n' > lib/honcho/.env
+	@echo "Running Honcho migrations..."
+	@uv run python3 scripts/pg0_server.py 5433 & \
 	  PG0_PID=$$!; \
 	  sleep 3; \
 	  cd lib/honcho && DB_CONNECTION_URI=postgresql+psycopg://postgres:postgres@127.0.0.1:5433/postgres uv run alembic upgrade head; \
