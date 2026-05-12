@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import random
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
@@ -26,7 +27,7 @@ from rehearse.memory import CallerMemory, NullCallerMemory
 from rehearse.personas import (
     CONSENT_DECLINE_ACK,
     CONSENT_PROMPT,
-    CONSENT_REMINDER,
+    CONSENT_REMINDERS,
     CONSENT_REPROMPT,
     classify_consent,
 )
@@ -86,10 +87,11 @@ class ConsentGate:
     async def run(self, frames: AsyncIterator[Frame]) -> None:
         """Speak the prompt and consume bus frames until consent resolves."""
         if self._caller_hash and await self._memory.has_prior_consent(self._caller_hash):
-            # Returning caller: state the reminder and immediately proceed.
+            # Returning caller: pick a reminder phrase at random and proceed immediately.
             # No "yes" needed — they already consented on a prior call.
-            await self._speaker.say(SpeakRequest(text=CONSENT_REMINDER))
-            log.info("consent.reminder.spoken", session_id=self._session_id)
+            reminder = random.choice(CONSENT_REMINDERS)
+            await self._speaker.say(SpeakRequest(text=reminder))
+            log.info("consent.reminder.spoken", session_id=self._session_id, text=reminder)
             await self._grant()
             return
         # First-time caller: full prompt, wait for spoken response.

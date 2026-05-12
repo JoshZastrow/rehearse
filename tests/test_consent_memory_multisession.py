@@ -28,7 +28,7 @@ from rehearse.consent import ConsentGate, ConsentGateConfig
 from rehearse.frames import ConsentResolved, TranscriptDelta
 from rehearse.memory import InMemoryCallerMemory
 from rehearse.participants import SpeakRequest
-from rehearse.personas import CONSENT_PROMPT, CONSENT_REMINDER
+from rehearse.personas import CONSENT_PROMPT, CONSENT_REMINDERS
 from rehearse.storage import LocalFilesystemStore
 from rehearse.types import ConsentState, Session, Speaker
 
@@ -149,7 +149,7 @@ async def test_second_session_hears_brief_reminder_and_is_auto_granted(
     spoken, resolved = await _run_gate(tmp_path, CALLER_HASH, memory, response=None)
 
     # Keyword check.
-    assert spoken == [CONSENT_REMINDER], f"Returning caller got: {spoken}"
+    assert spoken[0] in CONSENT_REMINDERS, f"Returning caller got: {spoken}"
     assert CONSENT_PROMPT not in spoken[0]
     assert resolved and resolved[0].state == ConsentState.GRANTED
 
@@ -185,7 +185,7 @@ async def test_different_callers_have_independent_memory(tmp_path: Path) -> None
 
     # Caller A on a second call gets the reminder.
     spoken_a2, _ = await _run_gate(tmp_path, caller_a, memory, response=None)
-    assert spoken_a2[0] == CONSENT_REMINDER
+    assert spoken_a2[0] in CONSENT_REMINDERS
 
 
 # ---------------------------------------------------------------------------
@@ -216,7 +216,7 @@ async def test_llm_judge_confirms_second_call_is_brief_reminder(tmp_path: Path) 
     reminder_text = spoken[0] if spoken else ""
 
     # Layer 1: keyword match.
-    assert "recorded" in reminder_text.lower() or CONSENT_REMINDER in reminder_text, (
+    assert "recorded" in reminder_text.lower() or reminder_text in CONSENT_REMINDERS, (
         f"Expected reminder content, got: {reminder_text!r}"
     )
 

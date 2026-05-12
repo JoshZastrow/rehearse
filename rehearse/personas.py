@@ -31,7 +31,16 @@ CONSENT_DECLINE_ACK = (
     "No problem — I won't record this call. Take care."
 )
 
-CONSENT_REMINDER = "Quick note: this call is being recorded."
+CONSENT_REMINDER = "Quick note: this call is being recorded."  # kept for test assertions
+
+CONSENT_REMINDERS: tuple[str, ...] = (
+    "Quick note: this call is being recorded.",
+    "Just so you know, I record calls so I can give you better feedback.",
+    "One quick thing — I'll be recording this for coaching purposes.",
+    "Heads up: this call is recorded so I can follow up with feedback.",
+    "Just a reminder that this call is being recorded for coaching.",
+    "By the way, I do record sessions — helps me give you sharper feedback.",
+)
 
 _AFFIRMATIVE: frozenset[str] = frozenset(
     {

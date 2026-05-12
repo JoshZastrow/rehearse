@@ -34,7 +34,7 @@ from rehearse.consent import ConsentGate, ConsentGateConfig
 from rehearse.frames import ConsentResolved, TranscriptDelta
 from rehearse.memory import InMemoryCallerMemory
 from rehearse.participants import SpeakRequest
-from rehearse.personas import CONSENT_PROMPT, CONSENT_REMINDER
+from rehearse.personas import CONSENT_PROMPT, CONSENT_REMINDERS
 from rehearse.storage import LocalFilesystemStore
 from rehearse.types import ConsentState, Session, Speaker
 
@@ -166,7 +166,7 @@ async def test_returning_caller_gets_brief_reminder_and_is_immediately_granted(
         s, session_id, caller_hash=CALLER_HASH, memory=memory, send_yes=False
     )
 
-    assert spoken == [CONSENT_REMINDER], (
+    assert spoken[0] in CONSENT_REMINDERS, (
         f"Expected CONSENT_REMINDER but got: {spoken}"
     )
     assert resolved and resolved[0].state == ConsentState.GRANTED
@@ -264,5 +264,5 @@ async def test_honcho_returning_caller_gets_reminder_and_immediate_grant(
     spoken, resolved = await _run_consent(
         s, session_id, caller_hash=caller_hash, memory=honcho_memory, send_yes=False
     )
-    assert spoken == [CONSENT_REMINDER]
+    assert spoken[0] in CONSENT_REMINDERS
     assert resolved and resolved[0].state == ConsentState.GRANTED
