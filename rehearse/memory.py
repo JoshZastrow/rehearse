@@ -96,7 +96,8 @@ class HonchoCallerMemory:
 
     async def has_prior_consent(self, caller_hash: str) -> bool:
         try:
-            peer = self._honcho.aio.peer(caller_hash)
+            # honcho.peer() is sync and returns a Peer; .aio.get_metadata() is async.
+            peer = self._honcho.peer(caller_hash)
             metadata = await peer.aio.get_metadata()
             return bool(metadata.get("consented"))
         except Exception as exc:
@@ -109,7 +110,7 @@ class HonchoCallerMemory:
 
     async def record_consent(self, caller_hash: str) -> None:
         try:
-            peer = self._honcho.aio.peer(caller_hash)
+            peer = self._honcho.peer(caller_hash)
             await peer.aio.set_metadata({"consented": True})
             log.info("honcho.consent_recorded", caller_hash=caller_hash[:8])
         except Exception as exc:

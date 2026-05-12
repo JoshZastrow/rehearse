@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -72,9 +73,11 @@ class _CapturingSpeaker:
 
     def __init__(self) -> None:
         self.spoken: list[str] = []
+        self.said = asyncio.Event()  # set after first say()
 
     async def say(self, request: SpeakRequest) -> None:
         self.spoken.append(request.text)
+        self.said.set()
 
 
 async def _run_consent(
@@ -111,12 +114,15 @@ async def _run_consent(
         memory=memory,
     )
     task = asyncio.create_task(gate.run(bus.subscribe()))
-    await asyncio.sleep(0.01)
+    # Wait for the gate to speak the prompt — at that point it has subscribed
+    # to the bus and is ready to receive the user's "yes" frame.
+    # For live Honcho tests the has_prior_consent API call can take >1s;
+    # publishing "yes" before subscription is registered causes a missed frame.
+    await asyncio.wait_for(speaker.said.wait(), timeout=15.0)
     if send_yes:
         await bus.publish(_yes_frame(session_id))
-    await asyncio.sleep(0.05)
+    await asyncio.wait_for(task, timeout=15.0)
     await bus.aclose()
-    await task
     await collector
     return speaker.spoken, resolved
 
@@ -198,7 +204,9 @@ async def test_null_memory_always_gives_full_prompt(
 # Run with: pytest -m live_api tests/test_consent_memory.py
 # ---------------------------------------------------------------------------
 
-HONCHO_TEST_CALLER = f"test-caller-{os.getpid()}"  # unique per process to avoid cross-test pollution
+def _unique_caller() -> str:
+    """Fresh caller hash per test run — prevents Honcho state from leaking across runs."""
+    return f"test-caller-{uuid.uuid4().hex[:12]}"
 
 
 @pytest.fixture
@@ -219,8 +227,9 @@ async def test_honcho_first_time_caller_gets_full_prompt(
 ) -> None:
     """First-time caller gets the full consent prompt via real Honcho."""
     s, session_id = store
+    caller_hash = _unique_caller()
     spoken, resolved = await _run_consent(
-        s, session_id, caller_hash=HONCHO_TEST_CALLER, memory=honcho_memory
+        s, session_id, caller_hash=caller_hash, memory=honcho_memory
     )
     assert spoken == [CONSENT_PROMPT]
     assert resolved and resolved[0].state == ConsentState.GRANTED
@@ -234,11 +243,11 @@ async def test_honcho_returning_caller_gets_reminder_and_immediate_grant(
 ) -> None:
     """Returning caller (prior consent in Honcho) gets reminder and is immediately granted."""
     s, session_id = store
-    # Record prior consent directly
-    await honcho_memory.record_consent(HONCHO_TEST_CALLER)
+    caller_hash = _unique_caller()
+    await honcho_memory.record_consent(caller_hash)
 
     spoken, resolved = await _run_consent(
-        s, session_id, caller_hash=HONCHO_TEST_CALLER, memory=honcho_memory, send_yes=False
+        s, session_id, caller_hash=caller_hash, memory=honcho_memory, send_yes=False
     )
     assert spoken == [CONSENT_REMINDER]
     assert resolved and resolved[0].state == ConsentState.GRANTED
