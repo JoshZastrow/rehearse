@@ -31,7 +31,7 @@ class RuntimeConfig:
     log_level: str = "info"
     validate_twilio_signature: bool = True
     disable_sms: bool = False
-    consent_prompt_timeout_seconds: int = 20
+    consent_prompt_timeout_seconds: int = 45
     consent_reprompt_limit: int = 1
     outcome_prompt_lead_seconds: int = 15
     outcome_response_timeout_seconds: int = 15

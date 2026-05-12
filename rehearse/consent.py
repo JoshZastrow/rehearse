@@ -39,7 +39,7 @@ log = structlog.get_logger(__name__)
 class ConsentGateConfig:
     """Configuration knobs for the consent gate."""
 
-    prompt_timeout_seconds: int = 20
+    prompt_timeout_seconds: int = 45
     reprompt_limit: int = 1
 
 
