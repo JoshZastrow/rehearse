@@ -41,7 +41,7 @@ log = structlog.get_logger(__name__)
 class CallerMemory(Protocol):
     """Standard memory interface for Rehearse agents.
 
-    Any class that provides these two async methods satisfies this protocol.
+    Any class that provides these methods satisfies this protocol.
     No inheritance required.
     """
 
@@ -53,6 +53,17 @@ class CallerMemory(Protocol):
         """Persist that this caller has granted consent."""
         ...
 
+    async def get_recent_intakes(self, caller_hash: str, n: int = 3) -> list[str]:
+        """Return up to n situation strings from this caller's most recent intakes.
+
+        Newest first. Returns [] for a first-time caller.
+        """
+        ...
+
+    async def record_intake(self, caller_hash: str, situation: str) -> None:
+        """Persist one intake situation for future retrieval."""
+        ...
+
 
 # ---------------------------------------------------------------------------
 # Implementations
@@ -60,7 +71,7 @@ class CallerMemory(Protocol):
 
 
 class NullCallerMemory:
-    """No-op memory. Every caller is treated as new. Default when Honcho is not configured."""
+    """No-op memory. Every caller is treated as new. Default when no backend is configured."""
 
     async def has_prior_consent(self, caller_hash: str) -> bool:
         return False
@@ -68,18 +79,31 @@ class NullCallerMemory:
     async def record_consent(self, caller_hash: str) -> None:
         pass
 
+    async def get_recent_intakes(self, caller_hash: str, n: int = 3) -> list[str]:
+        return []
+
+    async def record_intake(self, caller_hash: str, situation: str) -> None:
+        pass
+
 
 class InMemoryCallerMemory:
-    """In-process memory backed by a Python set. Used in tests."""
+    """In-process memory. Used in tests."""
 
     def __init__(self) -> None:
         self._consented: set[str] = set()
+        self._intakes: dict[str, list[str]] = {}  # caller_hash → [newest, ..., oldest]
 
     async def has_prior_consent(self, caller_hash: str) -> bool:
         return caller_hash in self._consented
 
     async def record_consent(self, caller_hash: str) -> None:
         self._consented.add(caller_hash)
+
+    async def get_recent_intakes(self, caller_hash: str, n: int = 3) -> list[str]:
+        return self._intakes.get(caller_hash, [])[:n]
+
+    async def record_intake(self, caller_hash: str, situation: str) -> None:
+        self._intakes.setdefault(caller_hash, []).insert(0, situation)
 
 
 class HonchoCallerMemory:
@@ -130,6 +154,36 @@ class HonchoCallerMemory:
         except Exception as exc:
             log.warning(
                 "honcho.record_consent.failed",
+                caller_hash=caller_hash[:8],
+                error=str(exc),
+            )
+
+    async def get_recent_intakes(self, caller_hash: str, n: int = 3) -> list[str]:
+        try:
+            peer = self._honcho.peer(caller_hash)
+            metadata = await peer.aio.get_metadata()
+            intakes = metadata.get("intakes", [])
+            return list(intakes)[:n] if isinstance(intakes, list) else []
+        except Exception as exc:
+            log.warning(
+                "honcho.get_recent_intakes.failed",
+                caller_hash=caller_hash[:8],
+                error=str(exc),
+            )
+            return []
+
+    async def record_intake(self, caller_hash: str, situation: str) -> None:
+        try:
+            peer = self._honcho.peer(caller_hash)
+            metadata = await peer.aio.get_metadata()
+            intakes: list[str] = list(metadata.get("intakes", []))
+            intakes.insert(0, situation)
+            intakes = intakes[:20]  # cap at 20 stored intakes
+            await peer.aio.set_metadata({**metadata, "intakes": intakes})
+            log.info("honcho.intake_recorded", caller_hash=caller_hash[:8])
+        except Exception as exc:
+            log.warning(
+                "honcho.record_intake.failed",
                 caller_hash=caller_hash[:8],
                 error=str(exc),
             )

@@ -194,6 +194,34 @@ class ConsentGate:
         )
         if self._caller_hash:
             await self._memory.record_consent(self._caller_hash)
+            await self._speak_intake_context()
+
+    async def _speak_intake_context(self) -> None:
+        """If the caller has prior intakes, briefly name them and ask if today matches."""
+        if not self._caller_hash:
+            return
+        intakes = await self._memory.get_recent_intakes(self._caller_hash)
+        if not intakes:
+            return
+        if len(intakes) == 1:
+            line = f"Last time you worked on {intakes[0]}. Same topic today, or something new?"
+        elif len(intakes) == 2:
+            line = (
+                f"You've worked on {intakes[0]} and {intakes[1]}. "
+                "One of those today, or something different?"
+            )
+        else:
+            topics = ", ".join(intakes[:-1]) + f", and {intakes[-1]}"
+            line = f"You've worked on {topics}. Is today about one of those, or something new?"
+        try:
+            await self._speaker.say(SpeakRequest(text=line))
+            log.info("consent.intake_context.spoken", session_id=self._session_id)
+        except Exception as exc:
+            log.warning(
+                "consent.intake_context.speak_failed",
+                session_id=self._session_id,
+                error=str(exc),
+            )
 
     async def _decline(self, *, reason: Literal["explicit", "timeout", "unclear"]) -> None:
         """Persist DECLINED, speak the acknowledgement, hand off to finalize."""

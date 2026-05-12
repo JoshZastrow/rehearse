@@ -26,6 +26,7 @@ from fastapi.responses import PlainTextResponse, Response
 from twilio.request_validator import RequestValidator
 from twilio.rest import Client as TwilioClient
 
+from rehearse.agents.intake_recorder import IntakeMemoryRecorder
 from rehearse.agents.persona_swap import PersonaSwapCoordinator
 from rehearse.audio.twilio_stream import TwilioCallerParticipant, TwilioStream
 from rehearse.bus import FrameBus
@@ -296,6 +297,11 @@ def mount_twilio_routes(
                 outcome_task = asyncio.create_task(outcome_probe.run(bus.subscribe()))
                 phase_task = asyncio.create_task(phase_processor.run(bus.subscribe()))
                 intake_task = asyncio.create_task(intake_processor.run(bus.subscribe()))
+                intake_recorder_task = asyncio.create_task(
+                    IntakeMemoryRecorder(
+                        session_id, caller_hash, _memory
+                    ).run(bus.subscribe())
+                )
                 persona_swap_task = asyncio.create_task(
                     persona_swap.run(bus.subscribe())
                 )
