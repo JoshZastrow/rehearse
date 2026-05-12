@@ -27,7 +27,7 @@ def test_default_persona_is_registered():
     assert persona.language_model.provider == "CUSTOM_LANGUAGE_MODEL"
     assert persona.language_model.model is not None
     assert persona.language_model.model.endswith("/chat/completions")
-    assert persona.timeouts.max_duration_secs == 300
+    assert persona.timeouts.max_duration_secs == 480
     # builtin_tools must be empty when language_model.provider is
     # CUSTOM_LANGUAGE_MODEL — Hume rejects tool use on those configs.
     assert persona.builtin_tools == []

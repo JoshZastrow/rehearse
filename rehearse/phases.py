@@ -28,7 +28,7 @@ class PhaseBudgets:
     """
 
     intake_seconds: int = 60
-    practice_seconds: int = 180
+    practice_seconds: int = 120
     feedback_seconds: int = 60
     intake_min_dwell_seconds: int = 30
     practice_min_dwell_seconds: int = 90

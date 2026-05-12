@@ -179,7 +179,7 @@ PERSONAS: dict[str, HumePersonaConfig] = {
         on_new_chat=HumeEventMessage(enabled=False, text=None),
         on_max_duration_timeout=HumeEventMessage(enabled=True, text=None),
         on_inactivity_timeout=HumeEventMessage(enabled=False, text=None),
-        timeouts=HumeTimeouts(max_duration_secs=300, inactivity_secs=122),
+        timeouts=HumeTimeouts(max_duration_secs=480, inactivity_secs=122),
         turn_detection=HumeTurnDetection(
             end_of_turn_silence_ms=500,
             prefix_padding_ms=300,
@@ -209,7 +209,7 @@ PERSONAS: dict[str, HumePersonaConfig] = {
         on_new_chat=HumeEventMessage(enabled=False, text=None),
         on_max_duration_timeout=HumeEventMessage(enabled=True, text=None),
         on_inactivity_timeout=HumeEventMessage(enabled=False, text=None),
-        timeouts=HumeTimeouts(max_duration_secs=300, inactivity_secs=122),
+        timeouts=HumeTimeouts(max_duration_secs=480, inactivity_secs=122),
         turn_detection=HumeTurnDetection(
             end_of_turn_silence_ms=500,
             prefix_padding_ms=300,
