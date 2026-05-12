@@ -24,3 +24,4 @@ evals/fixtures/founder-recorded/clips/*
 .coverage
 coverage.json
 lib/
+.gstack/

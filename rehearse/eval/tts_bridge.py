@@ -82,10 +82,12 @@ class HumeOctaveProvider:
         text: str,
         description: str | None = None,
     ) -> bytes:
+        # HumeEVIClient.send_audio expects PCM16 at 16kHz mono.
+        # Hume Octave outputs 48kHz — resample before returning.
         with tempfile.TemporaryDirectory() as tmp:
             wav_path = Path(tmp) / "utterance.wav"
             await self.synthesize(text=text, out_path=wav_path, description=description)
-            return _read_wav_pcm16(wav_path)
+            return _read_wav_pcm16_16k(wav_path)
 
 
 def get_default_provider() -> TTSProvider | None:
@@ -111,5 +113,18 @@ def _wav_duration_s(path: Path) -> float:
 
 
 def _read_wav_pcm16(path: Path) -> bytes:
+    """Read raw WAV frames at native sample rate (used by audio judges)."""
     with wave.open(str(path), "rb") as wav:
         return wav.readframes(wav.getnframes())
+
+
+def _read_wav_pcm16_16k(path: Path) -> bytes:
+    """Read WAV frames resampled to 16kHz PCM16 (required by HumeEVIClient.send_audio)."""
+    from rehearse.audio.resample import resample_pcm16
+
+    with wave.open(str(path), "rb") as wav:
+        src_rate = wav.getframerate()
+        raw = wav.readframes(wav.getnframes())
+    if src_rate == 16_000:
+        return raw
+    return resample_pcm16(raw, src_rate=src_rate, dst_rate=16_000)

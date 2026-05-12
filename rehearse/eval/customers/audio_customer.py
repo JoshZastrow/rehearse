@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from collections.abc import Callable
@@ -106,7 +107,16 @@ class AudioCustomerDriver:
             text=text,
             description=self._description(phase),
         )
-        await transport.send("audio", data=pcm)
+        # Stream in 100ms chunks (1600 bytes at 16kHz PCM16) so EVI's VAD
+        # sees a natural stream rather than one large blob.
+        chunk_size = 3200  # 100ms at 16kHz × 2 bytes
+        for i in range(0, len(pcm), chunk_size):
+            await transport.send("audio", data=pcm[i : i + chunk_size])
+            await asyncio.sleep(0.05)  # pace to ~2× real-time
+        # Trailing silence: 500ms lets EVI's VAD detect end of speech.
+        silence_500ms = b"\x00" * 16000
+        await transport.send("audio", data=silence_500ms)
+        await asyncio.sleep(0.5)
         await transport.send("control", payload={"event": "end_of_turn"})
 
     async def run(

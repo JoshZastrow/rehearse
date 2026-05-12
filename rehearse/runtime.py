@@ -272,6 +272,9 @@ class HumeEVIAdapter:
                     text=frame.text,
                     utterance_id=frame.utterance_id,
                 )
+                # TranscriptDelta is published by HumeEVIClient on assistant_end —
+                # the last event of a coach turn. Signal turn complete immediately.
+                yield CoachTurnComplete()
             elif isinstance(frame, AudioChunk) and frame.speaker == Speaker.COACH:
                 yield CoachAudioEvent(pcm16_16k=frame.pcm16_16k)
             elif isinstance(frame, ProsodyEvent) and frame.speaker == Speaker.COACH:

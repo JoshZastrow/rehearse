@@ -79,4 +79,6 @@ class VoiceRolloutJudgesEval:
         return [CompositeScorer(children=children, aggregator=aggregator)]
 
     def rollout_timeout_s(self) -> int:
-        return 180
+        # 600s covers live-audio-sandbox rollouts (EVI round-trips + TTS per turn).
+        # Text-only runtime-sandbox completes well within this budget (~90s typical).
+        return 600

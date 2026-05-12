@@ -76,7 +76,7 @@ class LiveAudioSandboxEnvironment:
         if tts is None:
             raise RuntimeError("LiveAudioSandboxEnvironment requires a TTSProvider")
         coach = self._build_coach(session_id)
-        host = RuntimeHost(store, coach, enable_audio_recording=True)
+        host = RuntimeHost(store, coach, enable_audio_recording=True, phase_timeout_s=300.0)
         customer = AudioCustomerDriver(
             scenario=scenario,
             tts=tts,
