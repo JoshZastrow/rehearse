@@ -152,6 +152,7 @@ class IntakeRecord(Strict):
     stakes: str
     user_goal: str
     desired_tone: str | None = None
+    gender_preference: str | None = None
     captured_at: datetime
 
 
