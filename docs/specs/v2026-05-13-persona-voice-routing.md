@@ -68,9 +68,15 @@ model_list:
     litellm_params:
       model: anthropic/claude-haiku-4-5-20251001
       api_key: env/ANTHROPIC_API_KEY
+
+  - model_name: audio-judge          # audio gender eval + soul quality scoring
+    litellm_params:
+      model: hosted_vllm/gemma-3-27b-it
+      api_base: env/VLLM_BASE_URL    # Modal endpoint today; self-hosted when ready
+      api_key: env/VLLM_API_KEY
 ```
 
-When self-hosted Gemma is ready for text tasks, update one entry:
+When self-hosted Gemma is ready for text tasks:
 
 ```yaml
   - model_name: routing-agent
@@ -109,24 +115,23 @@ Same interface, no extra process to run. Config toggles between SDK mode
 
 ### 3.2 Inference model split: text via LiteLLM, audio direct to Modal
 
-| Workload | Alias / Model | Client | Why |
+| Workload | Alias | Current model | Client |
 |---|---|---|---|
-| Counterparty extraction | `routing-agent` → Haiku | LiteLLM proxy | <200ms, text-only, model-swappable |
-| Soul bootstrapping | `soul-generator` → Haiku | LiteLLM proxy | Text-only, swappable |
-| Honcho Dialectic | Honcho internal | Honcho infra | Already handled |
-| Audio gender eval judge | Gemma 3 27B | Direct → Modal vLLM | Audio input — LiteLLM multimodal routing incomplete |
-| Soul quality scoring (eval) | Gemma 3 27B | Direct → Modal vLLM | Text eval, same GPU infra |
+| Counterparty extraction | `routing-agent` | Haiku 4.5 | LiteLLM proxy |
+| Soul bootstrapping | `soul-generator` | Haiku 4.5 | LiteLLM proxy |
+| Audio gender eval judge | `audio-judge` | Gemma 3 27B (Modal) | LiteLLM proxy |
+| Soul quality scoring (eval) | `audio-judge` | Gemma 3 27B (Modal) | LiteLLM proxy |
+| Honcho Dialectic | — | Honcho internal | Honcho infra |
 
-**Audio eval bypasses LiteLLM.** LiteLLM's multimodal audio routing is
-incomplete and unreliable across providers. `VLLMAudioProvider` stays as a
-direct OpenAI client pointed at Modal. This is intentional: audio eval is
-offline batch work, not on the production call path, and the direct connection
-is simpler to reason about and test. When self-hosted multimodal is stable
-enough, this becomes LiteLLM-routed too.
+LiteLLM supports multimodal audio inputs and passes them through to downstream
+providers. `VLLMAudioProvider` uses `AsyncOpenAI(base_url=LITELLM_PROXY_URL)`
+with `model="audio-judge"` — no special audio carve-out needed.
 
-**Haiku is the current model behind the aliases — not a permanent dependency.**
-The aliases `routing-agent` and `soul-generator` are stable identifiers.
-Haiku is today's assignment. The product does not hardcode model names.
+**Aliases are stable. Models are not.** `routing-agent`, `soul-generator`, and
+`audio-judge` are the identifiers used in code. Their assignments live in
+`litellm_config.yaml`. When self-hosted Gemma is ready for text tasks, update
+`routing-agent`'s entry. When a better audio model arrives, update `audio-judge`.
+No code changes in either case.
 
 **Why not always-on GPU:**
 
@@ -381,14 +386,20 @@ class GemmaJudge:
         ...
 ```
 
-**Configuration for eval runs:**
+**Configuration:**
 ```bash
+# Modal endpoint — assigned to the audio-judge alias in litellm_config.yaml
 VLLM_BASE_URL=https://your-org--rehearse-gemma-judge.modal.run/v1
 VLLM_API_KEY=<modal-api-key>
+
+# LiteLLM proxy (all callers use this)
+LITELLM_PROXY_URL=http://localhost:4000
 ```
 
-No changes to `VLLMAudioProvider`. No changes to eval tests. The endpoint is
-drop-in compatible with the existing OpenAI client in the provider.
+`VLLMAudioProvider` uses `AsyncOpenAI(base_url=LITELLM_PROXY_URL)` with
+`model="audio-judge"`. LiteLLM proxies audio content through to the Modal
+vLLM endpoint. When self-hosted inference is ready, update the `audio-judge`
+entry in `litellm_config.yaml` — no code changes anywhere.
 
 ---
 
