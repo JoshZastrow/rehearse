@@ -1,472 +1,440 @@
-# Persona Voice Routing: Gender Selection + Memory-Backed Agent Dispatch
+# Persona Voice Routing: Memory-Backed Practice Partner Selection
 
-**Status:** acknowledged
+**Status:** wip
 **Date:** 2026-05-13
 **Owner:** Josh Zastrow
 **Depends on:**
-- `v2026-05-06-persona-routing.md` — existing Hume config routing infrastructure
 - `v2026-05-12-agent-design-patterns.md` — `AgentRouter`, `CallerMemory`, `IntakeAwareRouter`
-- `v2026-05-12-consent-caller-memory.md` — `CallerMemory` protocol
 
 ---
 
-## 1. Outcomes
+## 1. Vision
 
-| # | Outcome | Verifiable by |
-|---|---|---|
-| O1 | A first-time caller is asked "would you prefer a male or female practice partner?" during intake | Transcript presence check |
-| O2 | The practice phase uses the character agent matching the caller's answer | Agent name in router dispatch log |
-| O3 | A returning caller working on the same topic is NOT asked the gender question again | Absence check in transcript |
-| O4 | A returning caller with a new topic IS asked the question | Presence check in transcript |
-| O5 | The topic→gender preference is persisted in Honcho and survives across process restarts | Multi-session test with live backend |
+Every practice partner should feel like a real person — not a generic male or female voice, but someone with a specific name, history, and way of being in the world. A caller practicing a conversation with their dad gets their actual dad's energy. Someone practicing with their executive assistant Sarah gets the Sarah they described, built from what they said about her, persistent across calls.
 
----
+The system should never ask for information it already has. If the caller says "I need to call my dad and tell him I crashed his car — he's going to be pretty mad," the intake agent knows who they're practicing with and what kind of character is needed. No gender question. No menu. The routing agent infers everything from the conversation and bootstraps a persona from a soul template on first encounter. Subsequent calls find the same persona in Honcho memory.
 
-## 2. Inputs and Outputs
-
-### Inputs to routing
-
-| Input | Source | When available |
-|---|---|---|
-| `caller_hash` | `Session.phone_number_hash` | Start of call |
-| `situation` | `IntakeRecord.situation` (transcript-derived) | End of intake phase |
-| `topic_category` | LLM classifier over `situation` | Derived from intake record |
-| `gender_preference` | Spoken by caller in response to question, or recalled from memory | During intake or from Honcho |
-
-### Outputs
-
-| Output | Destination | Shape |
-|---|---|---|
-| `agent_preference` | `CallerMemory` (Honcho peer metadata) | `{topic_category: str, gender: "male" \| "female"}` |
-| Character agent selection | `AgentRegistry` lookup via `IntakeAwareRouter` | `MaleCharacterAgent` or `FemaleCharacterAgent` |
-| Gender question spoken | Hume EVI TTS (via `send_assistant_input`) | Plain sentence |
+This spec designs the infrastructure that makes N personas possible without seeding N cases:
+- **Soul documents** define who a persona is (not what they do)
+- **PersonaStore** backed by Honcho stores bootstrapped personas and finds them semantically
+- **LLM extraction** replaces keyword-based gender inference
+- **PersonaRoutingAgent** searches memory first, bootstraps on miss
 
 ---
 
-## 3. Functional Requirements
+## 2. What the current design gets right and wrong
 
-**FR1 — Topic classifier**
-A function `classify_topic(situation: str) -> str` maps a free-text situation
-to one of a fixed set of topic categories. Initial set: `"work"`, `"relationship"`,
-`"other"`. Implemented as a Claude Haiku call with `max_tokens=10, temperature=0`.
-Falls back to `"other"` on any error or null result.
+**Right:**
+- `PersonaRoutingAgent` runs at `IntakeComplete` with a tool call — the right hook point
+- `session_settings` swaps the voice mid-call without disconnecting
+- `CallerMemory` with Honcho is the right persistence layer
 
-**FR2 — Preference lookup at intake start**
-At the start of the intake phase, the intake coach queries memory for the
-caller's stored preference for the topic derived from any prior intakes.
-If a preference exists for the inferred topic, no gender question is asked.
-
-**FR3 — Gender question during intake**
-If no prior preference exists for the current topic, the intake coach speaks:
-*"One more thing — would you prefer to practice with a male or female voice?"*
-The response is captured by a lightweight classifier (`"male"` / `"female"` /
-`"no preference"`). `"no preference"` defaults to `"female"` (current default
-Hume voice).
-
-**FR4 — Preference stored on IntakeComplete**
-When `IntakeComplete` fires, `IntakeMemoryRecorder` stores both the situation
-and the `(topic_category, gender_preference)` pair in the caller's Honcho peer
-metadata.
-
-**FR5 — IntakeAwareRouter uses preference**
-`IntakeAwareRouter.route()` receives the `IntakeRecord` artifact. It classifies
-the topic, queries memory for the preference, and returns `MaleCharacterAgent`
-or `FemaleCharacterAgent`. If memory has no preference, it falls back to
-`FemaleCharacterAgent`.
-
-**FR6 — Character agent differentiation (Phase 1 — CLM prompts)**
-`MaleCharacterAgent` and `FemaleCharacterAgent` differ only in their system
-prompt: the character is described as male or female with a matching name. The
-Hume EVI TTS voice is unchanged in Phase 1 (same Hume config for all calls).
-Actual voice swapping is Phase 2.
-
-**FR7 — Memory clear for test setup**
-`CallerMemory` gains `clear_caller(caller_hash: str) -> None` on all
-implementations. Used to reset a test caller before an eval run.
+**Wrong:**
+- `classify_gender_preference()` is a keyword matcher — fails for "my dad", "Sarah my assistant", any relationship the keyword list doesn't cover
+- `PersonaRegistry` is a static Python list — can't grow to N personas without code changes
+- The gender question fires even when the counterparty is obvious from context
+- `list_personas` tool queries a hardcoded registry, not Honcho memory
 
 ---
 
-## 4. Non-Functional Requirements
+## 3. Soul documents
 
-**NFR1 — Latency**: Topic classification adds at most 400 ms before the first
-intake word. Run in the background while the intake coach speaks the opening
-line. Do not block on it.
+A soul document defines who a practice partner is — not their job description, not their instructions, but their identity. It answers the question: if this character existed in the world, who would they choose to be?
 
-**NFR2 — Graceful degradation**: Any failure in classification, memory read,
-or preference parsing falls through to `FemaleCharacterAgent` without
-surfacing an error to the caller.
+The reference format is Claude's own soul document (Anthropic's model spec). It covers identity, values, psychological groundedness, consistency across contexts, and emotional landscape. A Rehearse persona soul document follows the same structure, adapted to a character who exists for one call at a time.
 
-**NFR3 — Test suite unchanged**: All existing tests pass with no Anthropic key
-and no Honcho. New tests that require live services are marked
-`@pytest.mark.live_api`.
+### 3.1 Soul document format
 
-**NFR4 — No PII in Honcho**: Only `topic_category` and `gender` are stored,
-never the raw `situation` string. Situation storage (for Honcho Deriver) is
-handled separately in `store_session()`.
+```markdown
+# [Name] — Soul
 
----
+## Identity
 
-## 5. Out of Scope
+Who [Name] is at their core. Not their role or job title — their essential nature.
+What shaped them. What they carry into every room.
 
-| Item | Reason |
-|---|---|
-| Actual male/female Hume TTS voices (Phase 2) | Requires mid-call config swap (`swap_config` stub); deferred |
-| More than 2 genders or "no preference" routing to a distinct agent | Scope; ship binary first |
-| Cross-topic preference generalization ("if you chose male for work, assume male for other") | Requires more signal; defer |
-| Preference changing mid-call | Not needed for MVP |
-| Preference editing by caller | No UI yet |
-| SMS-body gender pre-routing (before call connects) | Builds on Phase 2; deferred |
+Example: "David is a man who built something from nothing and doesn't forget the cost.
+He's proud — not arrogant — and holds people to standards he holds himself to first."
 
----
+## Values
 
-## 6. Approach
+What they care about most. What they'd never compromise on.
+What they'd sacrifice to protect.
 
-### Phase 1 (this spec) — CLM-level gender routing
+## How they communicate
 
-The Hume EVI session uses a single config (no voice change). Gender
-differentiation happens at the CLM layer: `IntakeAwareRouter` selects
-`MaleCharacterAgent` or `FemaleCharacterAgent`, each with a different system
-prompt persona. The practice partner says "I'm Alex, your manager" vs "I'm
-Sarah, your manager."
+Their rhythm. Their tells. What they say when they're comfortable versus threatened.
+How they use silence. How they use humor (if at all). What they avoid saying directly.
 
-This is testable via transcript analysis without audio inspection.
+## Emotional landscape
 
-### Phase 2 (future spec) — Hume config voice swap
+Their default state. What activates them — the triggers that shift their tone.
+How they handle pushback. What makes them soften. What makes them harder.
+What they look like when they're scared versus angry versus proud.
 
-When `swap_config` is implemented, pre-connect routing applies the known
-gender preference at call start for returning callers. For new callers, a
-reconnect with a different Hume config fires at the intake→practice
-transition. Phase 2 also adds a real male Hume voice config.
+## Relationship to the caller
 
-### Topic classification
+How they see the person across from them.
+What they want for that relationship — consciously and not.
+What they'd never do to them, even in conflict.
+
+## Edges
+
+Where the character ends. What breaks the frame.
+What this persona won't do, even if asked.
+What pulls them out of themselves.
+```
+
+### 3.2 The base soul template
+
+`rehearse/personas/souls/base_character.md` is the template used when bootstrapping an entirely new persona. It contains placeholder text in each section that the LLM fills in from the caller's description.
+
+The bootstrapper receives:
+- The counterparty description (extracted from intake transcript by LLM)
+- The gender
+- The name (if given)
+- The relationship context
+
+It generates a complete soul document by specializing the base template. The result is stored in Honcho under this caller's peer.
+
+### 3.3 Soul retrieval at session start
+
+At the start of the PRACTICE phase, the character agent retrieves the soul from Honcho and injects it into the system prompt:
 
 ```python
-async def classify_topic(
-    situation: str,
-    *,
-    client: AsyncAnthropic,
-    model: str = "claude-haiku-4-5-20251001",
-) -> Literal["work", "relationship", "other"]:
-    """Classify a situation string into a topic category."""
+# In CharacterAgent.system_prompt():
+soul = await self._persona_store.get_soul(
+    caller_hash=session.phone_number_hash,
+    persona_id=session.selected_persona_id,
+)
+if soul:
+    prompt = f"You are {persona.name}.\n\n{soul}\n\n---\n\n{character_prompt}"
+else:
+    prompt = character_prompt
 ```
 
-One-shot prompt listing the three categories with examples. Returns `"other"`
-on any failure. `max_tokens=10`, `temperature=0`.
+The soul is fetched once per session and cached. It is not re-fetched on every CLM turn.
 
-### Intake gender question
-
-The intake coach asks the gender question after confirming the situation, before
-practice begins. Gated on `memory.get_agent_preference(caller_hash, topic_category) is None`.
-
-Spoken by `send_assistant_input` (bypasses CLM, deterministic):
-
-> "One more thing — would you prefer to practice with a male or female voice?"
-
-Response classified by a rule-based check for "male"/"man"/"he" vs
-"female"/"woman"/"she". Ambiguous → `"female"`.
+The soul document is prepended to the character prompt, not appended. It sets who the character is before the character prompt says what they're doing. The character prompt handles the scene; the soul handles the person playing the scene.
 
 ---
 
-## 7. Interface
+## 4. PersonaStore — Honcho-backed, N personas
 
-### `CallerMemory` additions
-
-```python
-# rehearse/memory.py
-
-async def get_agent_preference(
-    self,
-    caller_hash: str,
-    topic_category: str,
-) -> Literal["male", "female"] | None:
-    """Return stored gender preference for a topic, or None if unknown."""
-    ...
-
-async def record_agent_preference(
-    self,
-    caller_hash: str,
-    topic_category: str,
-    gender: Literal["male", "female"],
-) -> None:
-    """Persist topic→gender preference for future routing."""
-    ...
-
-async def clear_caller(self, caller_hash: str) -> None:
-    """Remove all stored data for this caller. Used in test setup."""
-    ...
-```
-
-Honcho storage: `peer.aio.set_metadata({..., "agent_prefs": {"work": "male", "relationship": "female"}})`.
-
-### New agent classes
+`PersonaStore` replaces the static `PersonaRegistry`. It stores and retrieves bootstrapped personas using Honcho peer metadata and the Dialectic for semantic search.
 
 ```python
-# rehearse/agents/roles/character.py
+# rehearse/personas/store.py
 
-class MaleCharacterAgent:
-    name = "male_character"
-    _GENDER_PROMPT = "You are playing a male character. Use a male name."
+class PersonaStore:
+    """Honcho-backed persona storage with bootstrap-on-miss."""
 
-class FemaleCharacterAgent:
-    name = "female_character"
-    _GENDER_PROMPT = "You are playing a female character. Use a female name."
-```
+    def __init__(self, memory: CallerMemory) -> None:
+        self._memory = memory
 
-Both extend the existing `CharacterAgent` base; only the system prompt differs.
+    async def search(
+        self,
+        caller_hash: str,
+        description: str,
+    ) -> PersonaRecord | None:
+        """Find a previously used persona matching this description.
 
-### `IntakeAwareRouter` (already in spec, now fleshed out)
+        Uses Honcho's Dialectic to answer: "has this caller practiced with
+        a character matching [description]? If so, return their persona id
+        and details."
 
-```python
-async def route(self, session: Session, artifact: Any = None) -> RehearseAgent:
-    phase = _current_phase(session)
-    if phase != Phase.PRACTICE:
-        return await self._phase_router.route(session)
+        Returns None on first encounter or if no match is found.
+        """
+        result = await self._memory.prefetch(
+            caller_hash,
+            f"Has this caller previously practiced with a character described as: {description}? "
+            f"If yes, return the persona_id and their name."
+        )
+        if not result:
+            return None
+        return self._parse_persona_from_recall(result)
 
-    intake = await self._load_intake(session)
-    topic = await classify_topic(intake.situation, client=self._llm)
-    pref = await self._memory.get_agent_preference(
-        session.phone_number_hash or "", topic
-    )
-    if pref == "male":
-        return self._registry.get("male_character")
-    return self._registry.get("female_character")  # default
+    async def store(self, caller_hash: str, persona: PersonaRecord) -> None:
+        """Persist a persona record to Honcho metadata for future recall."""
+        # Stored as a serialized JSON blob in peer metadata under "personas"
+        current = await self._memory.get_raw_metadata(caller_hash)
+        personas = current.get("personas", {})
+        personas[persona.id] = persona.to_dict()
+        await self._memory.set_raw_metadata(caller_hash, {**current, "personas": personas})
+
+    async def get_soul(
+        self,
+        caller_hash: str,
+        persona_id: str,
+    ) -> str | None:
+        """Retrieve the soul document for a specific persona."""
+        current = await self._memory.get_raw_metadata(caller_hash)
+        personas = current.get("personas", {})
+        record = personas.get(persona_id, {})
+        return record.get("soul")
+
+    async def bootstrap(
+        self,
+        *,
+        caller_hash: str,
+        description: str,
+        gender: str,
+        name: str | None,
+        llm_client: Any,
+    ) -> PersonaRecord:
+        """Bootstrap a new persona from the caller's description and a soul template.
+
+        Generates a soul document using the LLM, assigns a voice, creates a
+        PersonaRecord, and stores it in Honcho for future recall.
+        """
+        soul = await self._generate_soul(
+            description=description,
+            gender=gender,
+            name=name,
+            llm_client=llm_client,
+        )
+        persona_id = f"{gender}_{_slug(name or description)}"
+        voice_name = "Inspiring Woman" if gender == "female" else "Wise Man"
+        persona = PersonaRecord(
+            id=persona_id,
+            name=name or _infer_name(description, gender),
+            description=description,
+            gender=gender,
+            voice_name=voice_name,
+            system_prompt_template=soul,
+            tags=[gender, "bootstrapped"],
+        )
+        await self.store(caller_hash, persona)
+        return persona
+
+    async def _generate_soul(
+        self,
+        *,
+        description: str,
+        gender: str,
+        name: str | None,
+        llm_client: Any,
+    ) -> str:
+        """Use the LLM to specialize the base soul template for this character."""
+        base_template = _load_base_soul_template()
+        prompt = (
+            f"Generate a soul document for a practice partner with the following description:\n\n"
+            f"Name: {name or 'unknown'}\n"
+            f"Gender: {gender}\n"
+            f"Description: {description}\n\n"
+            f"Use this template:\n\n{base_template}\n\n"
+            f"Fill in each section based on the description. Be specific and grounded. "
+            f"This person should feel real, not like a character archetype."
+        )
+        response = await llm_client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=800,
+            temperature=0.7,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return response.content[0].text
 ```
 
 ---
 
-## 8. Test Fixture
+## 5. PersonaRoutingAgent — general-purpose extraction
 
-### Eval scenario: three calls, one caller
+The routing agent no longer uses keyword matching or a static tool. It does two things in sequence:
 
-A synthetic `LLMCustomer` plays the caller. Calls are abbreviated: consent +
-intake + 2 practice turns + cancel (no feedback phase). Memory is cleared
-before the run via `clear_caller(test_caller_hash)`.
-
-```
-call_1:
-  topic: "ask my manager for a raise" (work)
-  caller is new → intake should ask gender question
-  caller answers: "male"
-  expected: MaleCharacterAgent selected in practice phase
-
-call_2:
-  topic: "ask my manager for a promotion" (work, same category)
-  expected: no gender question
-  expected: MaleCharacterAgent selected (from memory)
-
-call_3:
-  topic: "talk to my partner about moving in together" (relationship)
-  caller is new to this topic → intake should ask gender question
-  caller answers: "female"
-  expected: FemaleCharacterAgent selected in practice phase
-```
-
-### Fixture setup
+**Step 1 — Extract counterparty context from intake transcript.**
 
 ```python
-@pytest.fixture
-def routing_eval_memory(honcho_server: str) -> HonchoCallerMemory:
-    """Fresh memory with a known test caller hash, cleared before the run."""
-    memory = HonchoCallerMemory(base_url=honcho_server, workspace_id="rehearse-test")
-    return memory
-
-@pytest.fixture
-def test_caller() -> str:
-    return f"eval-caller-{uuid.uuid4().hex[:8]}"
-```
-
-The `honcho_server` fixture (from `conftest.py`) starts a local Honcho
-instance. Tests are skipped when `lib/honcho/` is absent.
-
----
-
-## 9. Eval Judge
-
-**Model**: `google/gemma-4-26B-A4B-it` via Modal serverless GPU (`modal_app/gemma_judge.py`)
-
-Gemma 4 26B-A4B is a Mixture-of-Experts model with 26B parameters (4B active per
-token). It accepts text and audio inputs natively via vLLM. Used via
-`VLLMAudioProvider` pointed at the Modal endpoint through LiteLLM
-(`audio-judge` alias in `litellm_config.yaml`).
-
-### 9.1 Deployment
-
-```bash
-# One-time setup
-make setup-modal        # install Modal CLI + authenticate
-
-# Deploy (idempotent — safe to run on every CI push)
-make deploy-modal       # modal deploy modal_app/gemma_judge.py
-
-# Smoke test
-make smoke-modal        # modal run modal_app/gemma_judge.py
-```
-
-The deployed URL is deterministic:
-```
-https://<workspace>--rehearse-gemma-judge-serve.modal.run
-```
-
-Add to `.env`:
-```bash
-VLLM_BASE_URL=https://<workspace>--rehearse-gemma-judge-serve.modal.run/v1
-VLLM_API_KEY=<modal-token>
-```
-
-**Cost**: ~$0 when idle. The `scaledown_window=15min` in `gemma_judge.py` keeps
-the container warm for the duration of an eval batch (typically 3-6 minutes),
-then releases the GPU. An H200 runs at ~$0.0015/GPU-second. A full 3-scenario
-eval costs ~$0.15 including cold start.
-
-### 9.2 Routing correctness judgment (text input)
-
-**Input**: intake transcript + expected routing decision
-
-```
-You are evaluating a voice coaching call transcript.
-
-Call context: {call_context}
-Expected behavior: {expected}
+extraction_prompt = """
+Read this intake transcript and extract information about the practice partner.
 
 Transcript:
 {transcript}
 
-Answer in JSON:
+Return JSON:
 {
-  "gender_question_asked": true | false,
-  "agent_selected": "male_character" | "female_character" | "unknown",
-  "routing_correct": true | false,
-  "reasoning": "<one sentence>"
+  "gender": "male" | "female" | "unknown",
+  "name": "<first name if mentioned, else null>",
+  "description": "<one sentence: who is this person to the caller>",
+  "gender_is_inferred": true | false
 }
+
+Examples:
+- "I need to call my dad" → {"gender": "male", "name": null, "description": "caller's father", "gender_is_inferred": true}
+- "I want to speak with my executive assistant Sarah" → {"gender": "female", "name": "Sarah", "description": "caller's executive assistant", "gender_is_inferred": true}
+- "I need to practice with someone" → {"gender": "unknown", "name": null, "description": "unspecified", "gender_is_inferred": false}
+
+Only set gender_is_inferred to false if the transcript gives no signal at all.
+"""
 ```
 
-### 9.3 Voice verification judgment (audio input)
+**Step 2 — Search or bootstrap.**
 
-**Input**: WAV clip of first 10 seconds of character speech in practice phase.
+```python
+async def select(self, transcript: str) -> PersonaRecord:
+    # 1. Extract counterparty context from transcript
+    extraction = await self._extract(transcript)
+    gender = extraction.get("gender", "unknown")
+    name = extraction.get("name")
+    description = extraction.get("description", "")
 
-```
-Listen to this audio clip. Is the speaker's voice male or female?
-Answer with exactly one word: "male" or "female".
-```
+    # 2. Search Honcho for a prior persona matching this description
+    if self._caller_hash:
+        prior = await self._persona_store.search(self._caller_hash, description)
+        if prior:
+            return prior
 
-Expected answer matches `session.selected_persona_id`'s gender.
-This verifies that `session_settings` actually changed the voice, not just the prompt.
+    # 3. Bootstrap a new persona from the description
+    if self._caller_hash and description and description != "unspecified":
+        return await self._persona_store.bootstrap(
+            caller_hash=self._caller_hash,
+            description=description,
+            gender=gender if gender != "unknown" else "female",
+            name=name,
+            llm_client=self._llm_client,
+        )
 
-### 9.4 Pass conditions
-
-| Check | Pass condition |
-|---|---|
-| Routing correctness | `routing_correct == true` for all 3 calls |
-| Voice verification | Gemma audio judgment matches expected gender for all 3 calls |
-| Memory check | Call 2 `gender_question_asked == false` |
-
----
-
-## 10. How to Run
-
-### Prerequisites
-
-```bash
-# 1. Deploy the Modal judge (idempotent, run once or on each code change)
-make deploy-modal
-
-# 2. Add Modal URL + credentials to .env
-# VLLM_BASE_URL=https://<workspace>--rehearse-gemma-judge-serve.modal.run/v1
-# VLLM_API_KEY=<modal-token>
-
-# 3. Start product services
-make serve       # ngrok + Honcho + rehearse server
-```
-
-### Run the eval
-
-```bash
-make eval-persona-routing
-# equivalent to:
-# uv run pytest tests/eval/test_persona_voice_routing_eval.py \
-#   -v -m "live_api and live_honcho" --timeout=180
-```
-
-Each call is capped at 90 seconds. The full three-scenario suite runs in under
-6 minutes (including one Modal cold start of ~25s on the first call).
-
-### Run a single scenario
-
-```bash
-uv run pytest tests/eval/test_persona_voice_routing_eval.py::test_new_caller_is_asked_gender -v
-```
-
-### Clear caller memory for a clean re-run
-
-```bash
-uv run python -c "
-import asyncio
-from rehearse.memory import HonchoCallerMemory
-m = HonchoCallerMemory(base_url='http://localhost:8001')
-asyncio.run(m.clear_caller('your-test-hash'))
-"
+    # 4. Final fallback: default for detected gender
+    resolved_gender = gender if gender in ("male", "female") else "female"
+    registry = PersonaRegistry(PERSONA_REGISTRY)
+    return registry.default(gender=resolved_gender)
 ```
 
 ---
 
-## 11. Artifacts Produced
+## 6. Gender question gating
 
-Each eval run writes to `sessions/<eval_session_id>/`:
+Because the routing agent extracts gender from the transcript using the LLM, the intake coach only asks the question when extraction returns `"gender_is_inferred": false`.
 
-| Artifact | Format | Contents |
+The `PersonaSelectionRecorder` checks the extraction result stored on the session before deciding whether to ask. If gender is already known from context, it sets `session.selected_persona_id` directly without prompting. If not, it leaves `gender_preference = None` and the coach asks naturally.
+
+The coach prompt is already written to ask only once and accept any answer. This gating just prevents it from asking when the answer is already in the conversation.
+
+---
+
+## 7. Full per-call flow
+
+```
+Caller: "I need to call my dad and tell him I crashed his car. He's going to be pretty mad."
+
+INTAKE PHASE:
+  IntakeProcessor watches transcript, collects user turns.
+  Coach does NOT ask gender preference (dad is clearly male).
+
+INTAKE COMPLETE:
+  PersonaSelectionRecorder fires.
+  PersonaRoutingAgent.select(transcript):
+    → extract({gender: male, name: null, description: "caller's father, upset about crashed car"})
+    → persona_store.search(caller_hash, "caller's father, upset about crashed car")
+      → Honcho: "has this caller practiced with a father figure before?"
+      → First time: not found
+    → persona_store.bootstrap(
+          caller_hash, description, gender=male, name=None, ...)
+      → LLM generates soul document for: "a father reacting to his child's mistake"
+      → PersonaRecord(id="male_callers_father_upset", voice="Wise Man", soul=...)
+      → Stored in Honcho
+  session.selected_persona_id = "male_callers_father_upset"
+
+PRACTICE TRANSITION:
+  PersonaSwapCoordinator speaks: "Just a moment while I connect you with your practice partner."
+  Simultaneously sends session_settings:
+    → voice_id = resolve_voice_id("Wise Man")
+    → system_prompt = soul + character_prompt
+
+  The practice partner picks up as the caller's dad — gruff, disappointed, but recognizably a father.
+
+SECOND CALL, SAME TOPIC:
+  PersonaRoutingAgent.select(transcript):
+    → extract({gender: male, description: "caller's father..."})
+    → persona_store.search(caller_hash, "...father...")
+      → Honcho finds "male_callers_father_upset"
+      → Returns stored PersonaRecord with same soul
+  Same voice. Same character. Consistent across calls.
+```
+
+---
+
+## 8. How to write a soul document
+
+A soul document is written when a persona is bootstrapped. The LLM writes it from the base template using what the caller said about the person. But developers can also write souls manually for any character they want to pre-define.
+
+**The base template is at:** `rehearse/personas/souls/base_character.md`
+
+**Writing guidance:**
+
+The soul document describes who a person **is**, not what they **do**. Every section should answer: if this person existed in the world and had to make a choice no script told them about, what would they do?
+
+| Section | Wrong | Right |
 |---|---|---|
-| `transcript.jsonl` | JSONL | Full turn-by-turn transcript |
-| `routing_eval_result.json` | JSON | `{call_id, gender_question_asked, agent_selected, routing_correct, reasoning}` per call |
-| `voice_eval_result.json` | JSON | `{call_id, expected_gender, gemma_judgment, pass}` per call |
-| `character_audio_clip.wav` | WAV | First 10s of character speech (Gemma audio input) |
-| `memory_state.json` | JSON | Snapshot of `agent_prefs` from Honcho after all three calls |
+| Identity | "David is a manager who oversees a team." | "David built the team from scratch and treats every failure as a personal accusation." |
+| Values | "Values honesty and hard work." | "Would rather be lied to than pitied. Hates when people waste his time more than anything." |
+| Communication | "Direct communicator." | "Speaks in short sentences when calm. Goes quiet right before he gets angry. Never raises his voice." |
+| Emotional landscape | "Gets frustrated when challenged." | "His disappointment looks like silence. He doesn't yell — he withdraws. Then he comes back harder." |
+| Relationship | "Has authority over the caller." | "Sees the caller as an extension of himself. Proud of them in ways he rarely says out loud." |
+| Edges | "May break character if asked nicely." | "Won't cry. Won't apologize first. Will stop if the caller says they need a break." |
 
-Summary printed to stdout:
+**What makes a soul document work:**
 
-```
-PASS  call_1  gender_asked=True  agent=male_character   voice=male    correct=True
-PASS  call_2  gender_asked=False agent=male_character   voice=male    correct=True
-PASS  call_3  gender_asked=True  agent=female_character voice=female  correct=True
-
-3/3 routing scenarios passed. 3/3 voice verifications passed.
-```
+- Specificity beats generality. "Hates wasted time" is more useful than "values efficiency."
+- Contradiction is realistic. A character can be both proud and cold. Don't flatten them.
+- The edges section is a gift to the LLM. Tell it exactly what won't happen — so it knows where the character's ground is.
+- Write from the inside. The document should read as if written *about* the person, not as instructions *to* an AI playing them.
 
 ---
 
-## 12. File Inventory
+## 9. System prompt injection at session start
+
+When the PRACTICE phase begins, the soul document is loaded and injected once. This is the only time Honcho is called for soul retrieval; after this point it's cached.
+
+```
+[Character prompt — what this character is doing in this scene]
+
+---
+
+[Soul document — who this character chooses to be]
+```
+
+The soul comes second so the character prompt frames the immediate context and the soul grounds the emotional truth. The LLM reads the soul as background identity that informs how the scene plays out, not as additional instructions to follow.
+
+If no soul document exists (fallback), only the character prompt is used. The practice still works — it just lacks the persistent identity layer.
+
+---
+
+## 10. What changes from the current implementation
+
+| Current | Replace with |
+|---|---|
+| `classify_gender_preference()` keyword matcher | LLM extraction in `PersonaRoutingAgent` — works for any relationship, any name |
+| `PersonaRegistry` static Python list | `PersonaStore` backed by Honcho — bootstraps on miss, recalls on return |
+| `list_personas` tool queries hardcoded registry | `search_personas` queries Honcho + `bootstrap_persona` on miss |
+| Coach always asks gender question | Coach only asks when extraction returns `gender_is_inferred: false` |
+| `MaleCharacterAgent` / `FemaleCharacterAgent` (gender-only dispatch) | `PersonaStore` result dispatches to the bootstrapped persona |
+| `get_gender_preference(caller_hash)` flat key-value | `PersonaStore.search(caller_hash, description)` semantic lookup |
+
+---
+
+## 11. File inventory (revised)
 
 | File | Change |
 |---|---|
-| `modal_app/gemma_judge.py` | **New** — Gemma 4 26B-A4B-it on Modal H200; audio enabled; `scaledown_window=15min` |
-| `litellm_config.yaml` | **New** — model aliases: `routing-agent`, `soul-generator`, `audio-judge` |
-| `rehearse/transports/litellm.py` | **New** — `LiteLLMTransport` replacing `AnthropicTransport` for text tasks |
-| `rehearse/memory.py` | Add `get_agent_preference`, `record_agent_preference`, `clear_caller` |
-| `rehearse/agents/persona_routing_agent.py` | Uses `AsyncOpenAI` + `audio-judge` alias; LiteLLM client |
-| `rehearse/agents/roles/character.py` | Add `MaleCharacterAgent`, `FemaleCharacterAgent` |
-| `rehearse/agents/registry.py` | Register both gender agents |
-| `rehearse/agents/router.py` | `IntakeAwareRouter` with LLM extraction + memory lookup |
-| `rehearse/intake.py` | Gender question gated on `CounterpartyExtraction.needs_gender_question` |
-| `rehearse/types.py` | Add `gender_preference` to `IntakeRecord` |
-| `Makefile` | Add `setup-modal`, `deploy-modal`, `smoke-modal`, `eval-persona-routing` |
-| `tests/eval/test_persona_voice_routing_eval.py` | **New** — 3-scenario routing + voice eval |
-| `tests/test_intake_gender_question.py` | **New** — classifier + question gating |
+| `rehearse/personas/store.py` | **New** — `PersonaStore` with `search`, `bootstrap`, `store`, `get_soul` |
+| `rehearse/personas/souls/base_character.md` | **New** — base soul template with placeholder sections |
+| `rehearse/agents/persona_routing_agent.py` | Replace keyword extraction with LLM extraction + `PersonaStore` lookup |
+| `rehearse/agents/persona_selection_recorder.py` | Pass `PersonaStore` to routing agent; gate gender question on extraction result |
+| `rehearse/agents/roles/character.py` | `CharacterAgent.system_prompt()` fetches soul from `PersonaStore` |
+| `rehearse/memory.py` | Add `get_raw_metadata` / `set_raw_metadata` to `CallerMemory` for persona storage |
+| `rehearse/personas/__init__.py` | Remove keyword-based `classify_gender_preference`; keep coach elicitation prompt |
+| `rehearse/intake.py` | Remove `classify_gender_preference` call + coach question detection logic |
+| `tests/test_persona_store.py` | **New** — search, bootstrap, soul retrieval |
+| `tests/test_persona_routing_agent.py` | Update to test LLM extraction + store lookup |
+| `tests/test_intake_gender_question.py` | Update: gender question only fires when extraction has no signal |
 
 ---
 
-## 13. Migration
+## 12. Open questions
 
-1. Run `uv run rehearse-hume sync` after registering the new male/female character
-   Hume configs (Phase 2 only; Phase 1 requires no new configs).
-2. Existing callers have no `agent_prefs` in Honcho metadata → falls through
-   to `FemaleCharacterAgent` as default. No disruption to live callers.
-3. `clear_caller` is only called in test fixtures; it is a no-op in `NullCallerMemory`.
-
----
-
-## 14. Open Questions
-
-| # | Question | Impact |
-|---|---|---|
-| Q1 | Should the gender question be asked once globally (any topic) or per topic category? | If global: simpler memory, but caller may want different voice for work vs relationship. Per-topic is spec'd above. |
-| Q2 | What's the right fallback voice gender when memory is empty? Female (current Hume voice) or prompt user always? | Spec above defaults to female. |
-| Q3 | For Phase 2, does config swap happen at call start (pre-routed for returning callers) or mid-call (reconnect on intake complete)? | Architectural — defer to Phase 2 spec. |
+| # | Question |
+|---|---|
+| Q1 | Should souls be versioned in Honcho? If a caller's description of their dad changes across sessions, should the soul update or stay fixed? |
+| Q2 | What is the right Honcho voice name for the male voice ("Wise Man" assumed — needs verification in Hume dashboard)? |
+| Q3 | Does `session_settings` apply before or after the current TTS utterance completes? Test empirically — affects bridge line timing. |
+| Q4 | Should `PersonaStore.search()` use the Dialectic (LLM-backed) or a flat metadata lookup? Dialectic is more flexible but adds latency (~200ms). |
