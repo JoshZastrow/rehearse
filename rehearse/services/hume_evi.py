@@ -133,6 +133,28 @@ class HumeEVIClient:
             raise RuntimeError("HumeEVIClient not connected")
         await self._socket.send_assistant_input(AssistantInput(text=text))
 
+    async def send_session_settings(
+        self,
+        *,
+        voice_id: str | None = None,
+        system_prompt: str | None = None,
+    ) -> None:
+        """Send a session_settings message to update voice or system prompt mid-call.
+
+        Hume applies the new voice_id immediately without disconnecting or
+        losing conversation context. Called by PersonaSwapCoordinator at the
+        intake→practice transition while the bridge utterance is playing.
+        """
+        if self._socket is None:
+            raise RuntimeError("HumeEVIClient not connected")
+        import json as _json
+        payload: dict = {"type": "session_settings"}
+        if voice_id:
+            payload["voice_id"] = voice_id
+        if system_prompt:
+            payload["system_prompt"] = system_prompt
+        await self._socket.send_text(_json.dumps(payload))
+
     async def run_event_loop(self, bus: FrameBus | None = None) -> None:
         """Read Hume events until the socket closes and publish runtime frames.
 

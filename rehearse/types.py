@@ -251,6 +251,7 @@ class Session(Strict):
     persona: CounterpartyPersona | None = None
     phase_timings: list[PhaseTiming] = Field(default_factory=list)
     persona_key: str = "default"
+    selected_persona_id: str | None = None
     artifact_paths: dict[str, str] = Field(default_factory=dict)
     completion_status: Literal["complete", "partial", "failed", "in_progress"] = "in_progress"
     finalized_at: datetime | None = None
