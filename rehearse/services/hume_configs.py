@@ -590,3 +590,39 @@ def _event(spec: Any) -> HumeEventMessage | None:
     if spec is None:
         return None
     return HumeEventMessage(enabled=spec.enabled, text=spec.text)
+
+
+# ---------------------------------------------------------------------------
+# Voice ID resolution — converts a voice name to Hume's stable UUID
+# ---------------------------------------------------------------------------
+
+_voice_id_cache: dict[str, str | None] = {}
+
+
+def _resolve_voice_id_from_api(voice_name: str) -> str | None:
+    """Call the Hume voices API to find the voice_id for a given voice name."""
+    try:
+        from hume import HumeClient
+        import os
+        client = HumeClient(api_key=os.environ.get("HUME_API_KEY", ""))
+        voices = client.empathic_voice.voices.list_voices()
+        for voice in (voices.custom_voices_page or []):
+            if voice.name == voice_name:
+                return voice.id
+    except Exception:
+        pass
+    return None
+
+
+def resolve_voice_id(voice_name: str) -> str | None:
+    """Return the Hume voice_id for a given voice name, with in-process cache.
+
+    Returns None when the voice is not found or the API call fails.
+    The caller should fall back to the default config voice in that case.
+    """
+    if voice_name not in _voice_id_cache:
+        try:
+            _voice_id_cache[voice_name] = _resolve_voice_id_from_api(voice_name)
+        except Exception:
+            _voice_id_cache[voice_name] = None
+    return _voice_id_cache[voice_name]
