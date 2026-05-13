@@ -28,11 +28,12 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class Phase(StrEnum):
-    """Name the three phases of one live rehearsal call."""
+    """Name the four phases of one live rehearsal call."""
 
     INTAKE = "intake"
     PRACTICE = "practice"
     FEEDBACK = "feedback"
+    SURVEY = "survey"
 
 
 class Speaker(StrEnum):
@@ -108,6 +109,7 @@ class RubricDimension(StrEnum):
     INCONGRUENCE_DETECTION = "incongruence_detection"
     PROSODY_CITATION_ACCURACY = "prosody_citation_accuracy"
     USEFULNESS_HOLISTIC = "usefulness_holistic"
+    SURVEY_RESPONSE_QUALITY = "survey_response_quality"
 
 
 class ScenarioCategory(StrEnum):
@@ -227,6 +229,38 @@ class OutcomeLabel(Strict):
     notes: str | None = None
 
 
+class SurveyQuestion(Strict):
+    """One question in the post-call survey queue."""
+
+    text: str
+    response_type: Literal["scale", "binary", "open"]
+    rubric_dimension: str
+    asked_at: datetime | None = None
+
+
+class SurveyResponse(Strict):
+    """Captured response to one survey question."""
+
+    question_text: str
+    response_type: Literal["scale", "binary", "open"]
+    rubric_dimension: str
+    captured: bool
+    value: int | bool | str | None = None
+    verbatim: str | None = None
+    captured_at: datetime | None = None
+
+
+class SurveyRecord(Strict):
+    """Session-level survey artifact written to survey.json."""
+
+    session_id: str
+    generation_method: Literal["llm", "fallback"]
+    questions: list[SurveyQuestion]
+    responses: list[SurveyResponse]
+    started_at: datetime
+    completed_at: datetime | None = None
+
+
 class ParticipantConfig(Strict):
     """Stable identity for one live-call participant."""
 
@@ -270,6 +304,7 @@ class Session(Strict):
     finalized_at: datetime | None = None
     outcome_label: OutcomeLabel | None = None
     outcome_probe_status: Literal["pending", "asked", "captured", "skipped"] | None = None
+    survey_status: Literal["generating", "in_progress", "complete", "partial", "skipped"] | None = None
     pipeline_version: str | None = None
     model_slots: dict[str, str] = Field(default_factory=dict)
     participants: list[ParticipantConfig] = Field(default_factory=list)
