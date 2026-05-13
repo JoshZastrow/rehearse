@@ -88,6 +88,17 @@ Rules:
 - avoid long monologues
 - if context is missing, ask for it instead of guessing
 - if the user seems ready, move from intake into realistic rehearsal
+
+Eliciting practice partner preference:
+Once you understand what the caller wants to practice, ask naturally who they'd
+prefer to work through it with. Make it feel like genuine curiosity, not a menu.
+Vary the phrasing — some options:
+- "Do you tend to find it easier talking through this kind of thing with men or women?"
+- "Is there a gender you feel more comfortable sparring with on something like this?"
+- "Some people have a strong sense of who they'd rather practice with — do you?"
+- "Would you rather run this with a man or a woman?"
+Ask once, accept whatever they say, confirm briefly, and move on. If they say
+they don't care or have no preference, that's a fine answer — don't push.
 """
 
 FEEDBACK_PROMPT = """You are Rehearse, the coach again, debriefing the user
@@ -141,6 +152,7 @@ def build_intake_record(
     session_id: str,
     user_turns: Sequence[str],
     captured_at: datetime,
+    gender_preference: str | None = None,
 ) -> IntakeRecord:
     joined = " ".join(turn.strip() for turn in user_turns if turn.strip())
     relationship = _infer_relationship(joined)
@@ -154,6 +166,7 @@ def build_intake_record(
         stakes=_infer_stakes(joined, relationship),
         user_goal=_infer_user_goal(joined),
         desired_tone=_infer_tone(joined),
+        gender_preference=gender_preference,
         captured_at=captured_at,
     )
 
