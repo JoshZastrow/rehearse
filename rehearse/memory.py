@@ -82,6 +82,22 @@ class CallerMemory(Protocol):
         """
         ...
 
+    async def get_gender_preference(
+        self, caller_hash: str
+    ) -> str | None:
+        """Return stored voice gender preference ('male'/'female'), or None."""
+        ...
+
+    async def record_gender_preference(
+        self, caller_hash: str, gender: str
+    ) -> None:
+        """Persist the caller's voice gender preference. Overwrites prior value."""
+        ...
+
+    async def clear_caller(self, caller_hash: str) -> None:
+        """Remove all stored data for this caller. Used in eval setup only."""
+        ...
+
 
 # ---------------------------------------------------------------------------
 # Implementations
@@ -109,14 +125,24 @@ class NullCallerMemory:
     async def prefetch(self, caller_hash: str, query: str) -> str:
         return ""
 
+    async def get_gender_preference(self, caller_hash: str) -> str | None:
+        return None
+
+    async def record_gender_preference(self, caller_hash: str, gender: str) -> None:
+        pass
+
+    async def clear_caller(self, caller_hash: str) -> None:
+        pass
+
 
 class InMemoryCallerMemory:
     """In-process memory. Used in tests."""
 
     def __init__(self) -> None:
         self._consented: set[str] = set()
-        self._intakes: dict[str, list[str]] = {}  # caller_hash → [newest, ..., oldest]
-        self._sessions: dict[str, list[dict]] = {}  # caller_hash → messages
+        self._intakes: dict[str, list[str]] = {}
+        self._sessions: dict[str, list[dict]] = {}
+        self._gender: dict[str, str] = {}
 
     async def has_prior_consent(self, caller_hash: str) -> bool:
         return caller_hash in self._consented
@@ -138,6 +164,18 @@ class InMemoryCallerMemory:
         if not msgs:
             return ""
         return "\n".join(f"{m['role']}: {m['content']}" for m in msgs[-10:])
+
+    async def get_gender_preference(self, caller_hash: str) -> str | None:
+        return self._gender.get(caller_hash)
+
+    async def record_gender_preference(self, caller_hash: str, gender: str) -> None:
+        self._gender[caller_hash] = gender
+
+    async def clear_caller(self, caller_hash: str) -> None:
+        self._consented.discard(caller_hash)
+        self._intakes.pop(caller_hash, None)
+        self._sessions.pop(caller_hash, None)
+        self._gender.pop(caller_hash, None)
 
 
 class HonchoCallerMemory:
@@ -285,6 +323,31 @@ class HonchoCallerMemory:
             )
             return ""
 
+    async def get_gender_preference(self, caller_hash: str) -> str | None:
+        try:
+            peer = await self._honcho.aio.peer(caller_hash)
+            metadata = await peer.aio.get_metadata()
+            return metadata.get("gender") or None
+        except Exception as exc:
+            log.warning("honcho.get_gender_preference.failed", caller_hash=caller_hash[:8], error=str(exc))
+            return None
+
+    async def record_gender_preference(self, caller_hash: str, gender: str) -> None:
+        try:
+            peer = await self._honcho.aio.peer(caller_hash)
+            metadata = await peer.aio.get_metadata()
+            await peer.aio.set_metadata({**metadata, "gender": gender})
+        except Exception as exc:
+            log.warning("honcho.record_gender_preference.failed", caller_hash=caller_hash[:8], error=str(exc))
+
+    async def clear_caller(self, caller_hash: str) -> None:
+        try:
+            peer = await self._honcho.aio.peer(caller_hash)
+            await peer.aio.set_metadata({})
+            log.info("honcho.clear_caller", caller_hash=caller_hash[:8])
+        except Exception as exc:
+            log.warning("honcho.clear_caller.failed", caller_hash=caller_hash[:8], error=str(exc))
+
 
 class MCPCallerMemory:
     """Connects to any MCP server implementing has_prior_consent + record_consent tools.
@@ -383,3 +446,31 @@ class MCPCallerMemory:
 
     async def record_intake(self, caller_hash: str, situation: str) -> None:
         pass
+
+    async def get_gender_preference(self, caller_hash: str) -> str | None:
+        try:
+            result = await self._call_tool("get_gender_preference", {"caller_hash": caller_hash})
+            return result.strip() or None
+        except Exception:
+            return None
+
+    async def record_gender_preference(self, caller_hash: str, gender: str) -> None:
+        try:
+            await self._call_tool("record_gender_preference", {"caller_hash": caller_hash, "gender": gender})
+        except Exception as exc:
+            log.warning("mcp.record_gender_preference.failed", caller_hash=caller_hash[:8], error=str(exc))
+
+    async def clear_caller(self, caller_hash: str) -> None:
+        try:
+            await self._call_tool("clear_caller", {"caller_hash": caller_hash})
+        except Exception as exc:
+            log.warning("mcp.clear_caller.failed", caller_hash=caller_hash[:8], error=str(exc))
+
+    async def _call_tool(self, tool_name: str, args: dict) -> str:
+        from mcp import ClientSession
+        from mcp.client.streamable_http import streamablehttp_client
+        async with streamablehttp_client(self._url) as (read, write, _):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                result = await session.call_tool(tool_name, args)
+        return result.content[0].text if result.content else ""

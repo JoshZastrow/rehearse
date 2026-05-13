@@ -38,3 +38,39 @@ class CharacterAgent:
         self, session: Session, user_text: str, agent_text: str
     ) -> None:
         pass
+
+
+class MaleCharacterAgent(CharacterAgent):
+    """Male-gendered practice partner. Voice set via session_settings at transition."""
+
+    name = "male_character"
+
+    def system_prompt(self, session: Session, memory_context: str = "") -> str:
+        persona = session.persona if session else None
+        base = character_system_prompt(persona or "Be the other person in the conversation.")
+        gender_prefix = (
+            "You are playing a male character. Use a male name (e.g. Alex, Marcus, or James) "
+            "and male pronouns. "
+        )
+        base = gender_prefix + base
+        if memory_context:
+            base = f"{base}\n\n{wrap_memory_context(memory_context)}"
+        return base
+
+
+class FemaleCharacterAgent(CharacterAgent):
+    """Female-gendered practice partner. Voice set via session_settings at transition."""
+
+    name = "female_character"
+
+    def system_prompt(self, session: Session, memory_context: str = "") -> str:
+        persona = session.persona if session else None
+        base = character_system_prompt(persona or "Be the other person in the conversation.")
+        gender_prefix = (
+            "You are playing a female character. Use a female name (e.g. Sarah, Maya, or Elena) "
+            "and female pronouns. "
+        )
+        base = gender_prefix + base
+        if memory_context:
+            base = f"{base}\n\n{wrap_memory_context(memory_context)}"
+        return base

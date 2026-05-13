@@ -54,6 +54,41 @@ class PhaseRouter:
         return self._registry.get("intake_coach")
 
 
+class PersonaAwareRouter:
+    """Routes practice phase to a gender-specific character agent.
+
+    At PRACTICE phase, reads the session's selected_persona_id to choose
+    MaleCharacterAgent or FemaleCharacterAgent. Falls back to PhaseRouter
+    for all other phases.
+    """
+
+    def __init__(self, registry: AgentRegistry) -> None:
+        self._registry = registry
+        self._phase_router = PhaseRouter(registry)
+
+    async def route(
+        self,
+        session: Session,
+        *,
+        role_hint: str | None = None,
+        artifact: Any | None = None,
+    ) -> RehearseAgent:
+        phase = _current_phase(session)
+
+        if phase == Phase.PRACTICE:
+            persona_id = getattr(session, "selected_persona_id", None)
+            if persona_id:
+                agent = self._registry.get(persona_id)
+                if agent and agent.name in ("male_character", "female_character"):
+                    return agent
+            # Fall back: check selected_persona_id gender convention
+            if persona_id and "male" in persona_id:
+                return self._registry.get("male_character")
+            return self._registry.get("female_character")
+
+        return await self._phase_router.route(session, role_hint=role_hint, artifact=artifact)
+
+
 def _current_phase(session: Session) -> Phase:
     """Return the currently active phase from session.phase_timings."""
     for timing in reversed(session.phase_timings):

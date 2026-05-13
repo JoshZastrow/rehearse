@@ -17,6 +17,59 @@ from rehearse.session import utcnow
 from rehearse.storage import LocalFilesystemStore
 from rehearse.types import Phase, Session, Speaker
 
+# Words that signal a personal preference is being expressed
+_PREFERENCE_SIGNALS = frozenset({
+    "prefer", "rather", "easier", "better", "comfortable", "tend", "usually",
+    "like", "feel", "feels", "honestly", "actually", "please", "probably",
+    "think", "reckon", "guess", "maybe", "perhaps",
+})
+
+# Gender words only count when a preference signal is present, to avoid
+# misclassifying "my manager told him" or "she runs the team" as a preference.
+_FEMALE_WORDS = frozenset({"woman", "women", "female", "lady", "ladies", "she", "her"})
+_MALE_WORDS = frozenset({"man", "men", "male", "guy", "guys", "gentleman", "he", "him"})
+
+# Keywords that suggest the coach just asked about gender preference
+_COACH_GENDER_QUESTION_SIGNALS = frozenset({
+    "men or women", "man or woman", "male or female", "gender", "who you prefer",
+    "who would you rather", "who'd you rather", "sparring with", "practice with",
+    "comfortable with",
+})
+
+
+def classify_gender_preference(text: str) -> str | None:
+    """Return 'male', 'female', or None from a user turn expressing a preference.
+
+    Conservative: only triggers when a preference-signal word AND a gender word
+    appear together. A plain gendered pronoun about a third party ('his decision')
+    returns None.
+    """
+    if not text:
+        return None
+    import re as _re
+    lowered = text.lower()
+    words = set(_re.sub(r"[^\w\s]", " ", lowered).split())
+
+    has_preference = bool(words & _PREFERENCE_SIGNALS)
+    has_female = bool(words & _FEMALE_WORDS)
+    has_male = bool(words & _MALE_WORDS)
+
+    # Short answers like "a woman" or "male please" are unambiguous
+    short = len(words) <= 4
+
+    if has_female and not has_male and (has_preference or short):
+        return "female"
+    if has_male and not has_female and (has_preference or short):
+        return "male"
+
+    return None
+
+
+def _coach_asked_gender_question(text: str) -> bool:
+    """Return True if a coach utterance looks like the gender preference question."""
+    lowered = text.lower()
+    return any(signal in lowered for signal in _COACH_GENDER_QUESTION_SIGNALS)
+
 
 class IntakeProcessor:
     """Persist structured intake and compiled persona from live transcript events."""
@@ -39,21 +92,32 @@ class IntakeProcessor:
         self._phase = Phase.INTAKE
         self._user_turns: list[str] = []
         self._intake_complete_emitted = False
+        self._coach_asked_gender = False
+        self._gender_preference: str | None = None
 
     async def run(self, frames: AsyncIterator[Frame]) -> None:
         """Consume bus frames and update intake/persona artifacts as phases change."""
         async for frame in frames:
-            if (
-                isinstance(frame, TranscriptDelta)
-                and frame.speaker == Speaker.USER
-                and frame.is_final
-                and self._phase == Phase.INTAKE
-            ):
-                self._user_turns.append(frame.text.strip())
-                await self._persist_intake()
-                if len(self._user_turns) >= 2:
-                    await self._compile_persona()
-                    await self._emit_intake_complete()
+            if isinstance(frame, TranscriptDelta) and frame.is_final and self._phase == Phase.INTAKE:
+                if frame.speaker == Speaker.COACH:
+                    # Watch for the coach asking about gender preference
+                    if _coach_asked_gender_question(frame.text):
+                        self._coach_asked_gender = True
+
+                elif frame.speaker == Speaker.USER:
+                    if self._coach_asked_gender and self._gender_preference is None:
+                        # Classify the first user turn after the gender question
+                        detected = classify_gender_preference(frame.text.strip())
+                        if detected is not None:
+                            self._gender_preference = detected
+                        self._coach_asked_gender = False  # consume the flag
+
+                    self._user_turns.append(frame.text.strip())
+                    await self._persist_intake()
+                    if len(self._user_turns) >= 2:
+                        await self._compile_persona()
+                        await self._emit_intake_complete()
+
             elif isinstance(frame, PhaseSignal):
                 self._phase = frame.to_phase
                 if frame.to_phase == Phase.PRACTICE:
@@ -70,6 +134,7 @@ class IntakeProcessor:
         if not self._user_turns:
             return
         captured_at = self._clock()
+        gender = self._gender_preference
         await self._store.update_session(
             self._session_id,
             lambda session: _apply_intake(
@@ -78,6 +143,7 @@ class IntakeProcessor:
                     session_id=self._session_id,
                     user_turns=self._user_turns,
                     captured_at=captured_at,
+                    gender_preference=gender,
                 ),
             ),
         )
