@@ -24,7 +24,7 @@ from rehearse.config import RuntimeConfig
 from rehearse.memory_manager import MemoryManager
 from rehearse.memory import NullCallerMemory
 from rehearse.new_clm_responder import NewCLMResponder
-from rehearse.types import ConsentState, Phase, PhaseTiming, Session
+from rehearse.types import ConsentState, CounterpartyPersona, Phase, PhaseTiming, Session
 from tests.fakes import FakeMemoryManager, FakeLLMTransport
 
 _CLM_FALLBACK = "Sorry, I had a brief glitch — what were you saying?"
@@ -167,6 +167,42 @@ def test_clm_responder_fallback_on_stream_error(tmp_path: Path) -> None:
     assert resp.status_code == 200
     # Fallback line is SSE-encoded; check it appears in one of the delta chunks
     assert _CLM_FALLBACK in resp.text or "glitch" in resp.text
+
+
+# ---------------------------------------------------------------------------
+# Timecard — two system blocks when session has phase_timings
+# ---------------------------------------------------------------------------
+
+
+def test_clm_responder_injects_timecard_as_second_system_block(tmp_path: Path) -> None:
+    """A session with phase_timings produces a timecard as the second system block."""
+    started = datetime(2026, 1, 1, tzinfo=UTC)
+    session = Session(
+        created_at=started,
+        consent=ConsentState.GRANTED,
+        phase_timings=[
+            PhaseTiming(phase=Phase.INTAKE, started_at=started, budget_seconds=60)
+        ],
+    )
+    session_dir = tmp_path / "sess-tc"
+    session_dir.mkdir()
+    (session_dir / "session.json").write_text(session.model_dump_json())
+
+    transport = FakeLLMTransport()
+    responder = _make_responder(tmp_path, transport=transport)
+    client = _client(tmp_path, responder)
+
+    client.post(
+        "/chat/completions",
+        params={"custom_session_id": "sess-tc"},
+        json={"messages": [], "stream": True},
+    )
+
+    assert transport.last_call is not None
+    blocks = transport.last_call["system_blocks"]
+    assert len(blocks) == 2
+    assert blocks[0]["cache_control"] == {"type": "ephemeral"}
+    assert "intake" in blocks[1]["text"].lower()
 
 
 # ---------------------------------------------------------------------------

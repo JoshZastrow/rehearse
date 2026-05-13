@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import time
-from collections.abc import AsyncIterator, Callable, Iterable
+from collections.abc import AsyncIterator, Callable
 from datetime import datetime
 from typing import Any, Protocol
 
@@ -27,13 +27,7 @@ log = structlog.get_logger(__name__)
 # rather than dropping with a clean 1000 OK close.
 CLM_FALLBACK_LINE = "Sorry, I had a brief glitch — what were you saying?"
 
-from rehearse.agents.timecard import build_time_card, render_time_card
 from rehearse.config import RuntimeConfig
-from rehearse.personas import (
-    character_system_prompt,
-    coach_system_prompt,
-    feedback_coach_system_prompt,
-)
 from rehearse.session import utcnow
 from rehearse.storage import LocalFilesystemStore
 from rehearse.types import Phase, Session
@@ -94,81 +88,6 @@ class ScriptedCLMResponder:
         reply = _scripted_reply(role=role, last_user_text=last_user_text, session=session)
         for chunk in _chunk_text(reply):
             yield chunk
-
-
-class AnthropicCLMResponder:
-    """Wrap Claude so Hume can use it as the live conversation brain."""
-
-    def __init__(
-        self,
-        api_key: str,
-        model: str,
-        store: LocalFilesystemStore,
-        *,
-        clock: Callable[[], datetime] = utcnow,
-    ) -> None:
-        """Store Anthropic credentials and create the async client lazily."""
-        self._client = AsyncAnthropic(api_key=api_key)
-        self._model = model
-        self._store = store
-        self._clock = clock
-
-    async def stream_reply(
-        self,
-        *,
-        session_id: str | None,
-        role: str,
-        request: CLMChatRequest,
-    ) -> AsyncIterator[str]:
-        """Yield text chunks from Anthropic's streaming messages API."""
-        session = await _load_session(session_id, self._store)
-        static_prompt = _system_prompt_for_role(role, session)
-        if session_id:
-            static_prompt = f"{static_prompt}\n\nSession ID: {session_id}"
-        messages = _anthropic_messages(request.messages)
-        if not messages:
-            messages = [{"role": "user", "content": "Greet the caller and start the coaching."}]
-
-        system_blocks: list[dict[str, Any]] = [
-            {
-                "type": "text",
-                "text": static_prompt,
-                "cache_control": {"type": "ephemeral"},
-            }
-        ]
-        if session is not None and session.phase_timings:
-            try:
-                card = build_time_card(session, now=self._clock())
-            except ValueError:
-                card = None
-            if card is not None:
-                system_blocks.append({"type": "text", "text": render_time_card(card)})
-
-        # Any failure inside the Anthropic call (auth, rate limit, network,
-        # mid-stream provider error) yields a deterministic fallback line.
-        # Letting the exception bubble up would close the SSE stream after
-        # the preamble chunk only — Hume sees a malformed reply and ends the
-        # session. A short fallback keeps the call alive while we recover.
-        try:
-            async with self._client.messages.stream(
-                model=self._model,
-                max_tokens=512,
-                temperature=0.4,
-                system=system_blocks,
-                messages=messages,
-            ) as stream:
-                async for text in stream.text_stream:
-                    if text:
-                        yield text
-        except Exception as exc:
-            log.warning(
-                "clm.anthropic_error",
-                session_id=session_id,
-                role=role,
-                error=str(exc),
-                error_type=type(exc).__name__,
-            )
-            yield CLM_FALLBACK_LINE
 
 
 async def validate_anthropic_credentials(client: AsyncAnthropic, model: str) -> None:
@@ -407,46 +326,13 @@ def _sse_data(payload: dict[str, Any]) -> str:
     return f"data: {json.dumps(payload)}\n\n"
 
 
-def _anthropic_messages(messages: Iterable[CLMMessage]) -> list[dict[str, str]]:
-    """Convert Hume's message history into Anthropic's message format."""
-    normalized: list[dict[str, str]] = []
-    for message in messages:
-        role = _message_role(message)
-        content = _message_content(message)
-        if not content:
-            continue
-        normalized.append({"role": role, "content": content})
-    return normalized
-
-
-def _message_role(message: CLMMessage) -> str:
-    """Return the normalized chat role for one CLM message."""
-    if message.role in {"user", "assistant"}:
-        return message.role
-    if message.type == "assistant_message":
-        return "assistant"
-    return "user"
-
-
-def _message_content(message: CLMMessage) -> str:
-    """Return the text content for one CLM message, with light prosody context."""
-    text = (message.content or "").strip()
-    if not text:
-        return ""
-    prosody_scores = {}
-    if isinstance(message.models, dict):
-        prosody_scores = (message.models.get("prosody") or {}).get("scores") or {}
-    if not prosody_scores:
-        return text
-    top_emotions = sorted(prosody_scores.items(), key=lambda item: item[1], reverse=True)[:3]
-    emotion_summary = ", ".join(f"{name}={score:.2f}" for name, score in top_emotions)
-    return f"{text}\n\nProsody cues: {emotion_summary}"
-
-
 def _last_user_text(messages: Iterable[CLMMessage]) -> str | None:
     """Return the most recent user message text from the CLM history."""
     for message in reversed(list(messages)):
-        if _message_role(message) == "user" and message.content:
+        role = message.role if message.role in {"user", "assistant"} else (
+            "assistant" if message.type == "assistant_message" else "user"
+        )
+        if role == "user" and message.content:
             return message.content.strip()
     return None
 
@@ -479,17 +365,6 @@ def _chunk_text(text: str, *, words_per_chunk: int = 8) -> list[str]:
             piece = f"{piece} "
         chunks.append(piece)
     return chunks
-
-
-def _system_prompt_for_role(role: str, session: Session | None) -> str:
-    """Return the correct system prompt for the requested CLM role."""
-    if role == "character":
-        if session and session.persona is not None:
-            return character_system_prompt(session.persona)
-        return character_system_prompt("Be the other person in the conversation.")
-    if role == "feedback_coach":
-        return feedback_coach_system_prompt()
-    return coach_system_prompt()
 
 
 async def _load_session(session_id: str | None, store: LocalFilesystemStore) -> Session | None:
