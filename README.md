@@ -161,6 +161,27 @@ make eval-voice-replay-live        # score 3 real sessions with Gemini judges
 make eval-watch RUN=<run_id>       # tail scores.jsonl with live aggregate
 ```
 
+**Browse completed runs and listen to recordings:**
+
+```bash
+# List the 10 most recent runs with per-rollout scores and audio paths
+rehearse-eval list-runs
+
+# Show more runs
+rehearse-eval list-runs --n 20
+
+# Filter to a specific scenario across all runs
+rehearse-eval list-runs --scenario peer-feedback-anxious
+
+# Filter by eval suite name
+rehearse-eval list-runs --eval voice-rollout-judges
+
+# Open the most recent audio recording for a scenario (macOS: opens in QuickTime)
+rehearse-eval list-runs --play vrj-s01-peer-feedback-anxious
+```
+
+Each rollout shows phase timings (with overrun warnings), per-dimension scores colour-coded green/yellow/red, and the path to `audio.wav`. Scores shown: `rwrd` (weighted reward), `cont` (content quality), `afct` (affect perception), `dlvr` (delivery), `nint` (interruption rate), `slnc` (silence after affect), `spch` (speech rate).
+
 **Full test suite:**
 
 ```bash
