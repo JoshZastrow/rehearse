@@ -199,13 +199,56 @@ async def validate_anthropic_credentials(client: AsyncAnthropic, model: str) -> 
 
 
 def build_clm_responder(config: RuntimeConfig) -> CLMResponder:
-    """Return the live CLM responder chosen from the runtime config."""
+    """Return the live CLM responder chosen from the runtime config.
+
+    Builds the new NewCLMResponder (transport + router + memory) when an
+    Anthropic API key is configured. Falls back to ScriptedCLMResponder for
+    local development without credentials.
+    """
     store = LocalFilesystemStore(root=config.session_root, public_base_url=config.public_base_url)
     if config.anthropic_api_key:
-        return AnthropicCLMResponder(
-            api_key=config.anthropic_api_key,
-            model=config.anthropic_model,
+        from rehearse.agents.registry import AgentRegistry
+        from rehearse.agents.roles.character import CharacterAgent
+        from rehearse.agents.roles.feedback import FeedbackCoachAgent
+        from rehearse.agents.roles.intake import IntakeCoachAgent
+        from rehearse.agents.router import PhaseRouter
+        from rehearse.memory import (
+            HonchoCallerMemory,
+            MCPCallerMemory,
+            NullCallerMemory,
+        )
+        from rehearse.memory_manager import MemoryManager
+        from rehearse.new_clm_responder import NewCLMResponder
+        from rehearse.transports.anthropic import AnthropicTransport
+
+        if config.memory_mcp_url:
+            _provider = MCPCallerMemory(config.memory_mcp_url)
+        elif config.honcho_base_url:
+            _provider = HonchoCallerMemory(
+                workspace_id=config.honcho_workspace_id,
+                base_url=config.honcho_base_url,
+            )
+        elif config.honcho_api_key:
+            _provider = HonchoCallerMemory(
+                api_key=config.honcho_api_key,
+                workspace_id=config.honcho_workspace_id,
+            )
+        else:
+            _provider = NullCallerMemory()
+
+        memory = MemoryManager(_provider)
+        transport = AnthropicTransport(api_key=config.anthropic_api_key)
+        registry = AgentRegistry()
+        registry.register(IntakeCoachAgent(memory))
+        registry.register(CharacterAgent(memory))
+        registry.register(FeedbackCoachAgent(memory))
+        router = PhaseRouter(registry)
+        return NewCLMResponder(
+            transport=transport,
+            router=router,
+            memory=memory,
             store=store,
+            model=config.anthropic_model,
         )
     return ScriptedCLMResponder(store=store)
 
