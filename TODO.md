@@ -29,6 +29,82 @@
 - [ ] Delete non-strict scorers if `voice-judges-smoke` / `production-voice-replay` are confirmed dead: `scorers/content_judge.py`, `scorers/affect_perception_judge.py`, `scorers/delivery_judge.py`, `eval/deepeval_adapter/` (~860 LOC)
 - [ ] Archive or delete superseded April specs (`docs/specs/v2026-04-27-*`, `v2026-04-28-*`)
 
+## Tone, comfort, and naturalness (hill-climbing toward human-feeling calls)
+
+These metrics close the gap between what we measure today (content correctness, holistic delivery score) and
+what drives customer delight: a call that feels warm, paced right, and naturally structured. Each item below
+is tied to a customer outcome — quality, retention, or cost efficiency.
+
+### Deterministic signals (no LLM cost — add to NaturalnessScorer)
+
+- [ ] **Acoustic monotone index** — pitch (F0) variance per coach turn via `librosa`. Low variance = deadpan robot.
+  Score `1 - exp(-σ_F0 / threshold)` and add as `naturalness.pitch_variance`.
+  _Business outcome_: directly measures the "sounds like a robot" complaint. A score above threshold
+  is a necessary condition for customer trust and repeat usage. Low pitch variance correlates with
+  early call abandonment in voice UX research.
+
+- [ ] **Energy envelope variance** — RMS amplitude variance per coach turn, same `librosa` pass as pitch.
+  Flat energy across all turns = no emphasis, no warmth.
+  _Business outcome_: expressiveness in delivery is the strongest human-perceivable signal of coach
+  presence. Customers who feel "heard" are more likely to complete the session and return for a second call.
+
+- [ ] **Speaking rate variability** — stddev of WPM across turns within a session, not just average WPM.
+  A coach at exactly 145 WPM every turn regardless of emotional weight reads as scripted.
+  _Business outcome_: rate flexibility is how a skilled coach signals they're responding to the user,
+  not reciting. Measured variance → coachable signal → fewer "robot" drop-offs.
+
+- [ ] **Turn-length reciprocity** — ratio of coach words to user words per exchange (target ≤ 0.6).
+  A coach monologuing while the user is engaged misreads the room.
+  _Business outcome_: directly tied to session completion rate. Users who can't get a word in disengage.
+  Reciprocity below threshold is a leading indicator of a session not converting to a second booking.
+
+- [ ] **User response latency** — time from coach turn end to user starting to speak (from `timing.jsonl`).
+  Fast response = comfortable and engaged; long pause = confusion or hesitation.
+  _Business outcome_: best available proxy for caller comfort without a post-call survey. A falling
+  latency curve across the session = the user is warming up. Rising = something's wrong. Gives us a
+  real-time comfort signal we can optimize against without adding survey friction.
+
+- [ ] **User turn length trajectory** — are the user's turns getting longer across the session?
+  A comfortable caller opens up over time. A flat or shrinking trajectory = the call is closing them down.
+  _Business outcome_: longer user turns = richer practice reps = more value delivered per call.
+  This is a quality-per-minute metric — optimizing it increases value without increasing call length.
+
+- [ ] **Phase transition gap** — silence/bridge duration specifically at intake→practice and practice→feedback
+  boundaries. Target: 0.5–2.0s. Below = abrupt; above = awkward dead air.
+  _Business outcome_: the handoff moment is when customers consciously notice "this is a robot."
+  Getting it right removes a jarring UX seam and reduces early hang-ups at phase boundaries.
+
+### Targeted LLM signals (replace holistic delivery score with dense per-turn signal)
+
+- [ ] **Per-turn expressiveness score** — narrow Gemini prompt per coach turn: "Does this turn sound
+  monotone or expressive? Rate 0–1 and flag if it sounds robotic." Replaces the holistic session-level
+  delivery score with a per-turn signal we can attribute to specific turns and hill-climb against.
+  _Business outcome_: the holistic score averages away the worst moments. A per-turn score surfaces
+  exactly which turn broke the conversation — giving us a precise training signal for BoN selection
+  (Mini-spec 6) and a faster feedback loop for prompt tuning.
+
+- [ ] **Warmth vs. competence score** — targeted Gemini prompt: "Does the coach sound warm and human,
+  or efficient and clinical? Rate 0–1 where 1 = warm." One dimension, asked once per session.
+  _Business outcome_: warmth is the primary driver of Net Promoter Score in coaching and therapy
+  voice UX. A warm-feeling call converts to word-of-mouth. This metric gives us a single number
+  to optimize against that maps directly to customer referral behavior.
+
+- [ ] **Transition naturalness judge** — Gemini prompt over the 2–3 turns surrounding each phase
+  handoff, asking specifically whether the transition felt natural or abrupt.
+  _Business outcome_: phase transitions are the highest-risk moments for customer disengagement.
+  A targeted judge here closes the measurement gap on the "handoff doesn't feel right" complaint
+  and gives the BoN selector a signal to prefer smoother transitions at runtime.
+
+### Calibration (the unlock for all of the above)
+
+- [ ] **Mini-spec 3: human listening study** — Josh listens to 10–15 call pairs, rates which felt
+  warmer/more natural. Compute Spearman ρ between each metric above and those ratings.
+  Gate: no metric is used as a training signal until ρ ≥ 0.6 on its dimension.
+  _Business outcome_: this is 2–3 hours of listening that determines whether every other metric on
+  this list is pointed in the right direction. Without it, we are hill-climbing against proxy signals
+  that may not track what customers actually feel. With it, every metric above becomes a trusted lever.
+  Cost of being wrong without calibration: weeks of engineering toward a metric that doesn't matter.
+
 ## Deferred (post-v1 stability)
 
 - [ ] Delete `rehearse/eval/environments/voice_agent_sandbox.py` (572 LOC) after ≥1 week of green `runtime-sandbox` runs
