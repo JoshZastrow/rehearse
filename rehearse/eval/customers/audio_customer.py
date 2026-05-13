@@ -44,6 +44,7 @@ class AudioCustomerDriver:
         self._max_tokens = max_tokens
         self._temperature = temperature
         self._max_turns = max_turns
+        self._usage: dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0}
 
     def _system_prompt(self, phase: Phase) -> str:
         template = _PHASE_PROMPTS.get(phase, _PHASE_PROMPTS[Phase.INTAKE])
@@ -82,7 +83,7 @@ class AudioCustomerDriver:
         if hasattr(client, "complete"):
             return await client.complete(system_prompt=system_prompt, history=history)
         messages = [
-            {"role": "assistant" if role == "coach" else "user", "content": text}
+            {"role": "user" if role == "coach" else "assistant", "content": text}
             for role, text in history
         ]
         if not messages or messages[-1]["role"] != "user":
@@ -94,6 +95,10 @@ class AudioCustomerDriver:
             system=system_prompt,
             messages=messages,
         )
+        usage = getattr(resp, "usage", None)
+        if usage is not None:
+            self._usage["prompt_tokens"] += getattr(usage, "input_tokens", 0)
+            self._usage["completion_tokens"] += getattr(usage, "output_tokens", 0)
         return resp.content[0].text.strip() if resp.content else ""
 
     async def _send_turn(
@@ -177,6 +182,7 @@ class AudioCustomerDriver:
             turns_sent=total_turns,
             turns_per_phase=turns_per_phase,
             error=error,
+            token_usage=dict(self._usage),
         )
         if self._run_dir is not None:
             _write_result(self._run_dir, result)
