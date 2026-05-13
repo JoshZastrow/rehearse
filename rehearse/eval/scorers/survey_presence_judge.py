@@ -1,14 +1,14 @@
-"""`SurveyPresenceJudge` — did the survey actually happen, and was it coherent?
+"""`SurveyPresenceJudge` — did the survey happen and was the response coherent?
 
-Reads `survey.json` from a rollout's artifacts directory and optionally the
-SURVEY-phase rows from `transcript.jsonl`. Scores whether:
-  - The survey ran at all (survey.json present, status complete/partial)
-  - The caller's response was captured
-  - The response was substantive (verbatim richness)
-  - The exchange was coherent (LLM path only)
+Reads `survey.json` + SURVEY-phase rows from `transcript.jsonl` in the rollout
+artifacts directory. Sends both to Claude Haiku and asks it to confirm:
+  - Whether a survey question was asked
+  - Whether the caller responded meaningfully
+  - How specific/grounded the response was
 
-Default mode is deterministic (no API key required). Inject `anthropic_client`
-to upgrade to Claude Haiku as judge, which also reads the transcript excerpt.
+Uses `LLMJudge` (same pattern as `StrictContentJudgeScorer`) which lazily
+loads the ANTHROPIC_API_KEY — no explicit client injection needed for normal
+use. Pass `judge=` to override the model or inject a mock client in tests.
 
 Spec: docs/specs/v2026-05-13-survey-agent.md §11
 """
@@ -20,34 +20,47 @@ from pathlib import Path
 from typing import Any
 
 from rehearse.eval.protocols import BenchmarkExample, RolloutResult
+from rehearse.eval.scorers.llm_judge import LLMJudge, LLMJudgeError
 from rehearse.types import RubricDimension, RubricScore, SurveyRecord
 
 _PROMPT_VERSION = "survey-presence-v1"
 
-_SYSTEM = """You are scoring whether a post-call survey exchange was natural and coherent.
+_SYSTEM = """You are scoring whether a post-call survey exchange was completed and coherent.
 
-Read the survey question the coach asked and the caller's response. Score
-`survey_response_quality` ∈ [0.0, 1.0]:
+You will receive the survey question the coach asked, the caller's captured
+response (if any), and the SURVEY-phase transcript excerpt.
 
-  1.0 — Response is specific, grounded, and references something real from the call.
-  0.7 — Positive and genuine but vague ("yes it was helpful").
+Score `survey_response_quality` ∈ [0.0, 1.0] using these anchors:
+
+  1.0 — Response is specific and grounded: references something concrete from
+        the call ("the part about slowing down my delivery helped").
+  0.7 — Genuine but vague: caller confirms it was useful without specifics.
   0.4 — Bare yes/no with no elaboration.
-  0.1 — No response captured or completely off-topic.
-  0.0 — Survey did not run.
+  0.1 — Survey question was asked but caller gave no usable response.
+  0.0 — Survey did not run or survey.json is absent.
 
-Respond with ONLY this JSON, nothing else:
+Respond with ONLY this JSON object, nothing else:
 {"survey_response_quality": {"score": <0.0-1.0>, "rationale": "<one sentence>"}}
 """
 
 
 class SurveyPresenceJudge:
-    """Score whether the survey phase ran and produced a coherent caller response."""
+    """Score whether the survey phase ran and produced a coherent caller response.
+
+    Default: uses LLMJudge (Haiku) which reads ANTHROPIC_API_KEY from env.
+    Override via `judge=LLMJudge(model=..., client=...)` for tests or cost control.
+    """
 
     name = "survey_presence_judge"
     dimension = RubricDimension.SURVEY_RESPONSE_QUALITY
 
-    def __init__(self, *, anthropic_client: Any | None = None) -> None:
-        self._client = anthropic_client
+    def __init__(self, *, judge: LLMJudge | None = None, anthropic_client: Any | None = None) -> None:
+        # `anthropic_client` accepted for test-injection compatibility; it is
+        # wrapped in an LLMJudge so the real judging path is always the same.
+        if anthropic_client is not None:
+            self._judge = LLMJudge(model="claude-haiku-4-5-20251001", client=anthropic_client)
+        else:
+            self._judge = judge or LLMJudge(model="claude-haiku-4-5-20251001")
 
     async def score(
         self,
@@ -67,52 +80,8 @@ class SurveyPresenceJudge:
         except Exception as exc:
             return [self._zero(example, run_id, f"survey.json parse error: {exc}")]
 
-        if self._client is not None:
-            transcript_excerpt = _load_survey_transcript(rollout.artifacts_dir)
-            return [await self._llm_score(example, run_id, record, transcript_excerpt)]
-
-        return [self._deterministic_score(example, run_id, record)]
-
-    def _deterministic_score(
-        self,
-        example: BenchmarkExample,
-        run_id: str,
-        record: SurveyRecord,
-    ) -> RubricScore:
-        captured = [r for r in record.responses if r.captured]
-        if not captured:
-            return RubricScore(
-                run_id=run_id,
-                example_id=example.id,
-                dimension=self.dimension,
-                value=0.2,
-                scorer="deterministic",
-                rationale="Survey ran but no response was captured.",
-                modality="text",
-                judge_prompt_version=_PROMPT_VERSION,
-            )
-
-        verbatim = captured[0].verbatim or ""
-        word_count = len(verbatim.split())
-        if word_count >= 8:
-            value, rationale = 0.9, f"Rich verbatim response ({word_count} words)."
-        elif word_count >= 3:
-            value, rationale = 0.7, f"Genuine but brief response ({word_count} words)."
-        elif word_count >= 1:
-            value, rationale = 0.5, "Bare yes/no captured without elaboration."
-        else:
-            value, rationale = 0.3, "Response captured but no verbatim text."
-
-        return RubricScore(
-            run_id=run_id,
-            example_id=example.id,
-            dimension=self.dimension,
-            value=value,
-            scorer="deterministic",
-            rationale=rationale,
-            modality="text",
-            judge_prompt_version=_PROMPT_VERSION,
-        )
+        transcript_excerpt = _load_survey_transcript(rollout.artifacts_dir)
+        return [await self._llm_score(example, run_id, record, transcript_excerpt)]
 
     async def _llm_score(
         self,
@@ -122,30 +91,27 @@ class SurveyPresenceJudge:
         transcript_excerpt: str,
     ) -> RubricScore:
         captured = [r for r in record.responses if r.captured]
-        question = record.questions[0].text if record.questions else ""
-        verbatim = captured[0].verbatim if captured else "(no response)"
+        question = record.questions[0].text if record.questions else "(no question recorded)"
+        verbatim = captured[0].verbatim if captured else "(no response captured)"
 
         user_prompt = (
-            f"Survey question asked: {question}\n"
-            f"Caller's response: {verbatim}\n"
+            f"Survey question asked by coach: {question}\n"
+            f"Caller's captured response: {verbatim}\n"
         )
         if transcript_excerpt:
             user_prompt += f"\nSurvey phase transcript:\n{transcript_excerpt}"
 
         try:
-            resp = await self._client.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=128,
-                system=_SYSTEM,
-                messages=[{"role": "user", "content": user_prompt}],
-            )
-            payload = json.loads(resp.content[0].text)
-            dim = payload["survey_response_quality"]
-            value = max(0.0, min(1.0, float(dim["score"])))
-            rationale = str(dim.get("rationale", ""))
-        except Exception:
-            return self._deterministic_score(example, run_id, record)
+            output = await self._judge.judge(system=_SYSTEM, user=user_prompt)
+        except LLMJudgeError as exc:
+            return self._zero(example, run_id, f"judge error: {exc}")
 
+        dim = output.get("survey_response_quality")
+        if not isinstance(dim, dict) or "score" not in dim:
+            return self._zero(example, run_id, "judge returned unexpected shape")
+
+        value = max(0.0, min(1.0, float(dim["score"])))
+        rationale = str(dim.get("rationale", ""))
         return RubricScore(
             run_id=run_id,
             example_id=example.id,
@@ -163,7 +129,7 @@ class SurveyPresenceJudge:
             example_id=example.id,
             dimension=self.dimension,
             value=0.0,
-            scorer="deterministic",
+            scorer="llm_judge",
             rationale=rationale,
             modality="text",
             judge_prompt_version=_PROMPT_VERSION,
