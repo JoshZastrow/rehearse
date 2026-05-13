@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import time
-from collections.abc import AsyncIterator, Callable, Iterable
+from collections.abc import AsyncIterator, Callable
 from datetime import datetime
 from typing import Any, Protocol
 
@@ -27,13 +27,7 @@ log = structlog.get_logger(__name__)
 # rather than dropping with a clean 1000 OK close.
 CLM_FALLBACK_LINE = "Sorry, I had a brief glitch — what were you saying?"
 
-from rehearse.agents.timecard import build_time_card, render_time_card
 from rehearse.config import RuntimeConfig
-from rehearse.personas import (
-    character_system_prompt,
-    coach_system_prompt,
-    feedback_coach_system_prompt,
-)
 from rehearse.session import utcnow
 from rehearse.storage import LocalFilesystemStore
 from rehearse.types import Phase, Session
@@ -96,81 +90,6 @@ class ScriptedCLMResponder:
             yield chunk
 
 
-class AnthropicCLMResponder:
-    """Wrap Claude so Hume can use it as the live conversation brain."""
-
-    def __init__(
-        self,
-        api_key: str,
-        model: str,
-        store: LocalFilesystemStore,
-        *,
-        clock: Callable[[], datetime] = utcnow,
-    ) -> None:
-        """Store Anthropic credentials and create the async client lazily."""
-        self._client = AsyncAnthropic(api_key=api_key)
-        self._model = model
-        self._store = store
-        self._clock = clock
-
-    async def stream_reply(
-        self,
-        *,
-        session_id: str | None,
-        role: str,
-        request: CLMChatRequest,
-    ) -> AsyncIterator[str]:
-        """Yield text chunks from Anthropic's streaming messages API."""
-        session = await _load_session(session_id, self._store)
-        static_prompt = _system_prompt_for_role(role, session)
-        if session_id:
-            static_prompt = f"{static_prompt}\n\nSession ID: {session_id}"
-        messages = _anthropic_messages(request.messages)
-        if not messages:
-            messages = [{"role": "user", "content": "Greet the caller and start the coaching."}]
-
-        system_blocks: list[dict[str, Any]] = [
-            {
-                "type": "text",
-                "text": static_prompt,
-                "cache_control": {"type": "ephemeral"},
-            }
-        ]
-        if session is not None and session.phase_timings:
-            try:
-                card = build_time_card(session, now=self._clock())
-            except ValueError:
-                card = None
-            if card is not None:
-                system_blocks.append({"type": "text", "text": render_time_card(card)})
-
-        # Any failure inside the Anthropic call (auth, rate limit, network,
-        # mid-stream provider error) yields a deterministic fallback line.
-        # Letting the exception bubble up would close the SSE stream after
-        # the preamble chunk only — Hume sees a malformed reply and ends the
-        # session. A short fallback keeps the call alive while we recover.
-        try:
-            async with self._client.messages.stream(
-                model=self._model,
-                max_tokens=512,
-                temperature=0.4,
-                system=system_blocks,
-                messages=messages,
-            ) as stream:
-                async for text in stream.text_stream:
-                    if text:
-                        yield text
-        except Exception as exc:
-            log.warning(
-                "clm.anthropic_error",
-                session_id=session_id,
-                role=role,
-                error=str(exc),
-                error_type=type(exc).__name__,
-            )
-            yield CLM_FALLBACK_LINE
-
-
 async def validate_anthropic_credentials(client: AsyncAnthropic, model: str) -> None:
     """Send a cheap token-count request to verify the key works at startup.
 
@@ -199,13 +118,56 @@ async def validate_anthropic_credentials(client: AsyncAnthropic, model: str) -> 
 
 
 def build_clm_responder(config: RuntimeConfig) -> CLMResponder:
-    """Return the live CLM responder chosen from the runtime config."""
+    """Return the live CLM responder chosen from the runtime config.
+
+    Builds the new NewCLMResponder (transport + router + memory) when an
+    Anthropic API key is configured. Falls back to ScriptedCLMResponder for
+    local development without credentials.
+    """
     store = LocalFilesystemStore(root=config.session_root, public_base_url=config.public_base_url)
     if config.anthropic_api_key:
-        return AnthropicCLMResponder(
-            api_key=config.anthropic_api_key,
-            model=config.anthropic_model,
+        from rehearse.agents.registry import AgentRegistry
+        from rehearse.agents.roles.character import CharacterAgent
+        from rehearse.agents.roles.feedback import FeedbackCoachAgent
+        from rehearse.agents.roles.intake import IntakeCoachAgent
+        from rehearse.agents.router import PhaseRouter
+        from rehearse.memory import (
+            HonchoCallerMemory,
+            MCPCallerMemory,
+            NullCallerMemory,
+        )
+        from rehearse.memory_manager import MemoryManager
+        from rehearse.new_clm_responder import NewCLMResponder
+        from rehearse.transports.anthropic import AnthropicTransport
+
+        if config.memory_mcp_url:
+            _provider = MCPCallerMemory(config.memory_mcp_url)
+        elif config.honcho_base_url:
+            _provider = HonchoCallerMemory(
+                workspace_id=config.honcho_workspace_id,
+                base_url=config.honcho_base_url,
+            )
+        elif config.honcho_api_key:
+            _provider = HonchoCallerMemory(
+                api_key=config.honcho_api_key,
+                workspace_id=config.honcho_workspace_id,
+            )
+        else:
+            _provider = NullCallerMemory()
+
+        memory = MemoryManager(_provider)
+        transport = AnthropicTransport(api_key=config.anthropic_api_key)
+        registry = AgentRegistry()
+        registry.register(IntakeCoachAgent(memory))
+        registry.register(CharacterAgent(memory))
+        registry.register(FeedbackCoachAgent(memory))
+        router = PhaseRouter(registry)
+        return NewCLMResponder(
+            transport=transport,
+            router=router,
+            memory=memory,
             store=store,
+            model=config.anthropic_model,
         )
     return ScriptedCLMResponder(store=store)
 
@@ -364,46 +326,13 @@ def _sse_data(payload: dict[str, Any]) -> str:
     return f"data: {json.dumps(payload)}\n\n"
 
 
-def _anthropic_messages(messages: Iterable[CLMMessage]) -> list[dict[str, str]]:
-    """Convert Hume's message history into Anthropic's message format."""
-    normalized: list[dict[str, str]] = []
-    for message in messages:
-        role = _message_role(message)
-        content = _message_content(message)
-        if not content:
-            continue
-        normalized.append({"role": role, "content": content})
-    return normalized
-
-
-def _message_role(message: CLMMessage) -> str:
-    """Return the normalized chat role for one CLM message."""
-    if message.role in {"user", "assistant"}:
-        return message.role
-    if message.type == "assistant_message":
-        return "assistant"
-    return "user"
-
-
-def _message_content(message: CLMMessage) -> str:
-    """Return the text content for one CLM message, with light prosody context."""
-    text = (message.content or "").strip()
-    if not text:
-        return ""
-    prosody_scores = {}
-    if isinstance(message.models, dict):
-        prosody_scores = (message.models.get("prosody") or {}).get("scores") or {}
-    if not prosody_scores:
-        return text
-    top_emotions = sorted(prosody_scores.items(), key=lambda item: item[1], reverse=True)[:3]
-    emotion_summary = ", ".join(f"{name}={score:.2f}" for name, score in top_emotions)
-    return f"{text}\n\nProsody cues: {emotion_summary}"
-
-
 def _last_user_text(messages: Iterable[CLMMessage]) -> str | None:
     """Return the most recent user message text from the CLM history."""
     for message in reversed(list(messages)):
-        if _message_role(message) == "user" and message.content:
+        role = message.role if message.role in {"user", "assistant"} else (
+            "assistant" if message.type == "assistant_message" else "user"
+        )
+        if role == "user" and message.content:
             return message.content.strip()
     return None
 
@@ -436,17 +365,6 @@ def _chunk_text(text: str, *, words_per_chunk: int = 8) -> list[str]:
             piece = f"{piece} "
         chunks.append(piece)
     return chunks
-
-
-def _system_prompt_for_role(role: str, session: Session | None) -> str:
-    """Return the correct system prompt for the requested CLM role."""
-    if role == "character":
-        if session and session.persona is not None:
-            return character_system_prompt(session.persona)
-        return character_system_prompt("Be the other person in the conversation.")
-    if role == "feedback_coach":
-        return feedback_coach_system_prompt()
-    return coach_system_prompt()
 
 
 async def _load_session(session_id: str | None, store: LocalFilesystemStore) -> Session | None:

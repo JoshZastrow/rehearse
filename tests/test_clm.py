@@ -16,7 +16,6 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from rehearse.agents.clm import (
-    AnthropicCLMResponder,
     CLMChatRequest,
     CLMMessage,
     CLMResponder,
@@ -135,9 +134,10 @@ def test_chat_completions_streams_openai_sse(tmp_path: Path) -> None:
 
 def test_chat_completions_handles_null_prosody_in_models() -> None:
     """Hume sends {"models": {"prosody": null}} for some message types.
-    _message_content must not raise AttributeError when prosody value is null.
+    AnthropicTransport._message_content must not raise AttributeError when prosody is null.
     """
-    from rehearse.agents.clm import _message_content
+    from rehearse.transports.anthropic import AnthropicTransport
+    _message_content = AnthropicTransport._message_content
 
     # prosody key present but value is null — this is what Hume sends for
     # messages that don't have emotion scores (e.g. the consent "yes").
@@ -406,159 +406,12 @@ def test_create_app_infers_character_role_from_practice_phase(tmp_path: Path) ->
     assert "As recruiter" in payload["choices"][0]["message"]["content"]
 
 
-class _FakeAnthropicStream:
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *_exc):
-        return False
-
-    @property
-    def text_stream(self):
-        async def _gen():
-            yield "ok"
-        return _gen()
-
-
-class _CapturingMessages:
-    def __init__(self):
-        self.last_kwargs: dict | None = None
-
-    def stream(self, **kwargs):
-        self.last_kwargs = kwargs
-        return _FakeAnthropicStream()
-
-
-class _CapturingClient:
-    def __init__(self):
-        self.messages = _CapturingMessages()
-
-
-@pytest.mark.asyncio
-async def test_anthropic_responder_sends_two_system_blocks(tmp_path):
-    started = datetime(2026, 5, 6, 12, 0, tzinfo=UTC)
-    session = Session(
-        id="sess_test",
-        created_at=started,
-        consent=ConsentState.GRANTED,
-        persona=CounterpartyPersona(
-            session_id="sess_test",
-            name=None,
-            relationship="manager",
-            personality_prompt="You are a direct manager.",
-            likely_reactions=["pushes back"],
-            compiled_at=started,
-        ),
-        phase_timings=[
-            PhaseTiming(phase=Phase.INTAKE, started_at=started, budget_seconds=60),
-        ],
-    )
-    store = LocalFilesystemStore(root=tmp_path, public_base_url="https://example.test")
-    await store.write("sess_test", "session.json", session.model_dump_json())
-
-    responder = AnthropicCLMResponder(
-        api_key="test", model="claude-test", store=store
-    )
-    fake = _CapturingClient()
-    responder._client = fake  # type: ignore[attr-defined]
-
-    request = CLMChatRequest(messages=[CLMMessage(role="user", content="hi")])
-    chunks = []
-    async for chunk in responder.stream_reply(
-        session_id="sess_test", role="coach", request=request
-    ):
-        chunks.append(chunk)
-
-    kwargs = fake.messages.last_kwargs
-    assert kwargs is not None
-    system = kwargs["system"]
-    assert isinstance(system, list)
-    assert len(system) == 2
-    assert system[0]["type"] == "text"
-    assert system[0]["cache_control"] == {"type": "ephemeral"}
-    assert "Live timing" in system[1]["text"]
-    assert "intake" in system[1]["text"].lower()
-    assert "words" in system[1]["text"].lower()
-    assert system[1].get("cache_control") is None
-
-
-@pytest.mark.asyncio
-async def test_anthropic_responder_uses_feedback_prompt_for_feedback_coach_role(tmp_path):
-    started = datetime(2026, 5, 6, 12, 0, tzinfo=UTC)
-    session = Session(
-        id="sess_fb",
-        created_at=started,
-        consent=ConsentState.GRANTED,
-        phase_timings=[
-            PhaseTiming(phase=Phase.FEEDBACK, started_at=started, budget_seconds=60),
-        ],
-    )
-    store = LocalFilesystemStore(root=tmp_path, public_base_url="https://example.test")
-    await store.write("sess_fb", "session.json", session.model_dump_json())
-
-    responder = AnthropicCLMResponder(api_key="test", model="claude-test", store=store)
-    fake = _CapturingClient()
-    responder._client = fake  # type: ignore[attr-defined]
-
-    request = CLMChatRequest(messages=[CLMMessage(role="user", content="that was hard")])
-    async for _ in responder.stream_reply(
-        session_id="sess_fb", role="feedback_coach", request=request
-    ):
-        pass
-
-    kwargs = fake.messages.last_kwargs
-    assert kwargs is not None
-    static_prompt = kwargs["system"][0]["text"]
-    assert "debriefing" in static_prompt.lower()
-    assert "drop any character" in static_prompt.lower()
-
-
-class _FailingMessages:
-    """Pretend client.messages.stream that raises before yielding any text."""
-
-    def __init__(self, exc: Exception) -> None:
-        self._exc = exc
-
-    def stream(self, **_kwargs):
-        raise self._exc
-
-
-class _FailingClient:
-    def __init__(self, exc: Exception) -> None:
-        self.messages = _FailingMessages(exc)
-
-
 def _make_auth_error():
-    """Build a real anthropic.AuthenticationError that the SDK won't choke on."""
     import anthropic
     import httpx
-
     req = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
     resp = httpx.Response(401, request=req)
-    return anthropic.AuthenticationError(
-        message="invalid x-api-key", response=resp, body=None
-    )
-
-
-@pytest.mark.asyncio
-async def test_anthropic_responder_yields_fallback_on_provider_error(tmp_path):
-    """Anthropic 401/5xx must surface as a fallback line, not a broken stream."""
-    from rehearse.agents.clm import CLM_FALLBACK_LINE
-
-    store = LocalFilesystemStore(root=tmp_path, public_base_url="https://example.test")
-    responder = AnthropicCLMResponder(api_key="bogus", model="claude-test", store=store)
-    responder._client = _FailingClient(  # type: ignore[attr-defined]
-        _make_auth_error()
-    )
-
-    request = CLMChatRequest(messages=[CLMMessage(role="user", content="hi")])
-    chunks: list[str] = []
-    async for chunk in responder.stream_reply(
-        session_id=None, role="coach", request=request
-    ):
-        chunks.append(chunk)
-
-    assert chunks == [CLM_FALLBACK_LINE]
+    return anthropic.AuthenticationError(message="invalid x-api-key", response=resp, body=None)
 
 
 @pytest.mark.asyncio

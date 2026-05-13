@@ -64,6 +64,24 @@ class CallerMemory(Protocol):
         """Persist one intake situation for future retrieval."""
         ...
 
+    async def store_session(
+        self, caller_hash: str, messages: list[dict], **kwargs
+    ) -> None:
+        """Persist a completed call transcript for future semantic recall.
+
+        Backends: Honcho stores as sessions+messages (Deriver extracts observations),
+        Hindsight indexes for semantic search, InMemory appends to buffer, Null no-ops.
+        """
+        ...
+
+    async def prefetch(self, caller_hash: str, query: str) -> str:
+        """Ask a natural-language question about this caller's history.
+
+        Returns a synthesized answer from the backend's memory system, or ""
+        for a first-time caller or a backend with no stored data yet.
+        """
+        ...
+
 
 # ---------------------------------------------------------------------------
 # Implementations
@@ -85,6 +103,12 @@ class NullCallerMemory:
     async def record_intake(self, caller_hash: str, situation: str) -> None:
         pass
 
+    async def store_session(self, caller_hash: str, messages: list[dict], **kwargs) -> None:
+        pass
+
+    async def prefetch(self, caller_hash: str, query: str) -> str:
+        return ""
+
 
 class InMemoryCallerMemory:
     """In-process memory. Used in tests."""
@@ -92,6 +116,7 @@ class InMemoryCallerMemory:
     def __init__(self) -> None:
         self._consented: set[str] = set()
         self._intakes: dict[str, list[str]] = {}  # caller_hash → [newest, ..., oldest]
+        self._sessions: dict[str, list[dict]] = {}  # caller_hash → messages
 
     async def has_prior_consent(self, caller_hash: str) -> bool:
         return caller_hash in self._consented
@@ -104,6 +129,15 @@ class InMemoryCallerMemory:
 
     async def record_intake(self, caller_hash: str, situation: str) -> None:
         self._intakes.setdefault(caller_hash, []).insert(0, situation)
+
+    async def store_session(self, caller_hash: str, messages: list[dict], **kwargs) -> None:
+        self._sessions.setdefault(caller_hash, []).extend(messages)
+
+    async def prefetch(self, caller_hash: str, query: str) -> str:
+        msgs = self._sessions.get(caller_hash, [])
+        if not msgs:
+            return ""
+        return "\n".join(f"{m['role']}: {m['content']}" for m in msgs[-10:])
 
 
 class HonchoCallerMemory:
@@ -308,3 +342,44 @@ class MCPCallerMemory:
                 caller_hash=caller_hash[:8],
                 error=str(exc),
             )
+
+    async def store_session(
+        self, caller_hash: str, messages: list[dict], **kwargs
+    ) -> None:
+        try:
+            from mcp import ClientSession
+            from mcp.client.streamable_http import streamablehttp_client
+
+            async with streamablehttp_client(self._url) as (read, write, _):
+                async with ClientSession(read, write) as session:
+                    await session.initialize()
+                    await session.call_tool(
+                        "store_session", {"caller_hash": caller_hash, "messages": messages}
+                    )
+            log.info("mcp.session_stored", caller_hash=caller_hash[:8])
+        except Exception as exc:
+            log.warning("mcp.store_session.failed", caller_hash=caller_hash[:8], error=str(exc))
+
+    async def prefetch(self, caller_hash: str, query: str) -> str:
+        try:
+            from mcp import ClientSession
+            from mcp.client.streamable_http import streamablehttp_client
+
+            async with streamablehttp_client(self._url) as (read, write, _):
+                async with ClientSession(read, write) as session:
+                    await session.initialize()
+                    result = await session.call_tool(
+                        "prefetch", {"caller_hash": caller_hash, "query": query}
+                    )
+            raw = result.content[0].text if result.content else ""
+            log.debug("mcp.prefetch", caller_hash=caller_hash[:8])
+            return raw
+        except Exception as exc:
+            log.warning("mcp.prefetch.failed", caller_hash=caller_hash[:8], error=str(exc))
+            return ""
+
+    async def get_recent_intakes(self, caller_hash: str, n: int = 3) -> list[str]:
+        return []
+
+    async def record_intake(self, caller_hash: str, situation: str) -> None:
+        pass

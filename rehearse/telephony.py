@@ -8,6 +8,7 @@ Twilio media websocket that feeds audio into Hume.
 from __future__ import annotations
 
 import asyncio
+import json
 from contextlib import suppress
 from typing import Protocol
 
@@ -361,6 +362,23 @@ def mount_twilio_routes(
                         await telemetry_task
                         if consent_state["declined"]:
                             await orchestrator.finalize(session_id, "partial")
+                        # Store call transcript in memory backend for future
+                        # Honcho Deriver processing / Hindsight indexing.
+                        if caller_hash:
+                            transcript = await _read_transcript(session_id, orchestrator.store)
+                            if transcript:
+                                try:
+                                    await _memory.store_session(
+                                        caller_hash,
+                                        transcript,
+                                        rehearse_session_id=session_id,
+                                    )
+                                except Exception as exc:
+                                    log.warning(
+                                        "telephony.store_session.failed",
+                                        session_id=session_id,
+                                        error=str(exc),
+                                    )
         except WebSocketDisconnect:
             log.info("media.disconnect", session_id=session_id)
 
@@ -401,3 +419,34 @@ async def _pump_assistant_audio(caller: TwilioCallerParticipant, bus: FrameBus) 
     async for frame in bus.subscribe():
         if isinstance(frame, AudioChunk) and frame.speaker != Speaker.USER:
             await caller.receive_audio(frame.pcm16_16k)
+
+
+async def _read_transcript(
+    session_id: str, store
+) -> list[dict]:
+    """Read transcript.jsonl and return OpenAI-format messages for memory storage.
+
+    Skips interim (non-final) utterances. Maps Speaker.USER → 'user',
+    all other speakers → 'assistant'.
+    """
+    try:
+        content = await store.read(session_id, "transcript.jsonl")
+    except FileNotFoundError:
+        return []
+    messages: list[dict] = []
+    for line in content.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            frame = json.loads(line)
+            text = (frame.get("text") or "").strip()
+            is_interim = frame.get("is_interim", False)
+            if not text or is_interim:
+                continue
+            speaker = frame.get("speaker", "user")
+            role = "user" if speaker == "user" else "assistant"
+            messages.append({"role": role, "content": text})
+        except Exception:
+            continue
+    return messages
