@@ -7,6 +7,7 @@ assistant text back in the SSE shape Hume expects from an OpenAI-compatible
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from collections.abc import AsyncIterator, Callable
@@ -174,9 +175,36 @@ def build_clm_responder(config: RuntimeConfig) -> CLMResponder:
     return ScriptedCLMResponder(store=store)
 
 
+class _SessionRegistry:
+    """Track one cancellation event per live session to stop orphaned streams.
+
+    When Hume sends a new CLM request because the caller interrupted, the
+    previous Claude generation is still running.  This registry lets the new
+    request signal the old stream to stop before it starts its own.
+    """
+
+    def __init__(self) -> None:
+        self._events: dict[str, asyncio.Event] = {}
+
+    def begin(self, session_id: str) -> asyncio.Event:
+        """Cancel any running stream for this session; return a fresh event."""
+        old = self._events.get(session_id)
+        if old is not None:
+            old.set()
+        event = asyncio.Event()
+        self._events[session_id] = event
+        return event
+
+    def done(self, session_id: str, event: asyncio.Event) -> None:
+        """Remove the entry when a stream finishes normally."""
+        if self._events.get(session_id) is event:
+            self._events.pop(session_id, None)
+
+
 def mount_clm_routes(app: FastAPI, responder: CLMResponder, config: RuntimeConfig) -> None:
     """Register the OpenAI-compatible CLM webhook endpoints on the app."""
     store = LocalFilesystemStore(root=config.session_root, public_base_url=config.public_base_url)
+    registry = _SessionRegistry()
 
     @app.post("/chat/completions")
     async def chat_completions(
@@ -188,11 +216,14 @@ def mount_clm_routes(app: FastAPI, responder: CLMResponder, config: RuntimeConfi
         """Handle Hume's recommended SSE CLM endpoint."""
         await _verify_clm_auth(config, authorization)
         resolved_role = await _resolve_role(role=role, session_id=custom_session_id, store=store)
+        cancel_event = registry.begin(custom_session_id) if custom_session_id else None
         return await _handle_clm_request(
             payload=payload,
             responder=responder,
             session_id=custom_session_id,
             role=resolved_role,
+            registry=registry,
+            cancel_event=cancel_event,
         )
 
     @app.post("/hume/clm/{session_id}")
@@ -205,11 +236,14 @@ def mount_clm_routes(app: FastAPI, responder: CLMResponder, config: RuntimeConfi
         """Handle the older path-based CLM endpoint from the runtime spec."""
         await _verify_clm_auth(config, authorization)
         resolved_role = await _resolve_role(role=role, session_id=session_id, store=store)
+        cancel_event = registry.begin(session_id)
         return await _handle_clm_request(
             payload=payload,
             responder=responder,
             session_id=session_id,
             role=resolved_role,
+            registry=registry,
+            cancel_event=cancel_event,
         )
 
 
@@ -219,6 +253,8 @@ async def _handle_clm_request(
     responder: CLMResponder,
     session_id: str | None,
     role: str,
+    registry: _SessionRegistry | None = None,
+    cancel_event: asyncio.Event | None = None,
 ) -> Response:
     """Return either an SSE stream or one fully buffered OpenAI-style response."""
     model = payload.model or role
@@ -232,6 +268,8 @@ async def _handle_clm_request(
                 ),
                 model=model,
                 session_id=session_id,
+                cancel_event=cancel_event,
+                registry=registry,
             ),
             media_type="text/event-stream",
         )
@@ -279,10 +317,18 @@ async def _stream_openai_chunks(
     *,
     model: str,
     session_id: str | None,
+    cancel_event: asyncio.Event | None = None,
+    registry: _SessionRegistry | None = None,
 ) -> AsyncIterator[str]:
-    """Wrap plain text chunks into OpenAI-compatible SSE events."""
+    """Wrap plain text chunks into OpenAI-compatible SSE events.
+
+    Stops early and closes the upstream generator if the session's cancel event
+    is set — which happens when a new CLM request arrives for the same session
+    (i.e. the caller interrupted the coach mid-response).
+    """
     response_id = _response_id(session_id)
     created = int(time.time())
+    cancelled = False
     yield _sse_data(
         {
             "id": response_id,
@@ -293,17 +339,27 @@ async def _stream_openai_chunks(
             "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
         }
     )
-    async for chunk in chunks:
-        yield _sse_data(
-            {
-                "id": response_id,
-                "object": "chat.completion.chunk",
-                "created": created,
-                "model": model,
-                "system_fingerprint": session_id,
-                "choices": [{"index": 0, "delta": {"content": chunk}, "finish_reason": None}],
-            }
-        )
+    try:
+        async for chunk in chunks:
+            if cancel_event is not None and cancel_event.is_set():
+                log.info("clm.stream_cancelled", session_id=session_id)
+                cancelled = True
+                break
+            yield _sse_data(
+                {
+                    "id": response_id,
+                    "object": "chat.completion.chunk",
+                    "created": created,
+                    "model": model,
+                    "system_fingerprint": session_id,
+                    "choices": [{"index": 0, "delta": {"content": chunk}, "finish_reason": None}],
+                }
+            )
+    finally:
+        if cancelled and hasattr(chunks, "aclose"):
+            await chunks.aclose()
+        if registry is not None and session_id is not None and cancel_event is not None:
+            registry.done(session_id, cancel_event)
     yield _sse_data(
         {
             "id": response_id,
