@@ -1,4 +1,4 @@
-.PHONY: help serve serve-memory setup setup-honcho setup-modal deploy-modal eval-list eval-voice-replay eval-voice-replay-live eval-voice-replay-dogfood eval-voice-smoke eval-voice-smoke-live eval-voice-rollout eval-voice-rollout-live eval-voice-rollout-audio eval-persona-routing eval-watch nightly-stability test lint
+.PHONY: help serve serve-memory setup setup-honcho setup-judge deploy-judge smoke-judge eval-list eval-voice-replay eval-voice-replay-live eval-voice-replay-dogfood eval-voice-smoke eval-voice-smoke-live eval-voice-rollout eval-voice-rollout-live eval-voice-rollout-audio eval-persona-routing eval-watch nightly-stability test lint
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk -F':.*?## ' '{printf "  %-28s %s\n", $$1, $$2}'
@@ -40,12 +40,12 @@ setup-honcho: ## clone + migrate Honcho for self-hosted local dev (no cloud API 
 	@echo "  HONCHO_BASE_URL=http://localhost:8001"
 	@echo "Then 'make serve' will start Honcho automatically."
 
-setup-modal: ## install Modal CLI and authenticate (run once)
+setup-judge: ## install inference backend CLI and authenticate (run once)
 	uv pip install modal
 	modal setup
 
-deploy-modal: ## deploy Gemma 4 judge to Modal (idempotent; safe to re-run)
-	modal deploy modal_app/gemma_judge.py
+deploy-judge: ## deploy LLM judge to inference backend (idempotent; safe to re-run)
+	modal deploy infra/judge.py
 	@echo ""
 	@echo "Deployed. Add to .env:"
 	@echo "  VLLM_BASE_URL=https://<workspace>--rehearse-gemma-judge-serve.modal.run/v1"
@@ -54,8 +54,8 @@ deploy-modal: ## deploy Gemma 4 judge to Modal (idempotent; safe to re-run)
 	@echo "Or get the URL automatically:"
 	@echo "  modal app url rehearse-gemma-judge"
 
-smoke-modal: ## run the smoke test against the deployed Modal judge
-	modal run modal_app/gemma_judge.py
+smoke-judge: ## run the smoke test against the deployed judge
+	modal run infra/judge.py
 
 eval-persona-routing: ## 3-scenario persona routing eval (requires Modal judge + Honcho)
 	uv run pytest tests/eval/test_persona_voice_routing_eval.py \

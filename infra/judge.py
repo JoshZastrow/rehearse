@@ -1,10 +1,10 @@
-"""Gemma 4 26B-A4B-it inference server on Modal for Rehearse eval judges.
+"""LLM inference server for Rehearse eval judges.
 
 Serves an OpenAI-compatible /v1/chat/completions endpoint that accepts both
 text and audio inputs. Used as the audio-judge alias in litellm_config.yaml.
 
 Deploy:
-    modal deploy modal_app/gemma_judge.py
+    modal deploy infra/judge.py
 
 The deployed URL is deterministic:
     https://<workspace>--rehearse-gemma-judge-serve.modal.run
@@ -13,7 +13,7 @@ Set in .env:
     VLLM_BASE_URL=https://<workspace>--rehearse-gemma-judge-serve.modal.run/v1
     VLLM_API_KEY=<modal-token>  # or any non-empty string if auth is disabled
 
-Cost: ~$0 when idle (scaledown_window=15min). Spins up on first eval request.
+Cost: ~$0 when idle (scaledown_window=30s). Spins up on first eval request.
 """
 
 import json
