@@ -86,9 +86,10 @@ class LiveAudioSandboxEnvironment:
         )
 
         error: str | None = None
+        caller_result = None
         try:
             async with coach:
-                await asyncio.gather(
+                _, caller_result = await asyncio.gather(
                     host.run(session_id=session_id, transport=transport.runtime),
                     customer.run(
                         transport=transport.customer,
@@ -104,6 +105,13 @@ class LiveAudioSandboxEnvironment:
             json.dumps(provenance, indent=2) + "\n"
         )
 
+        caller_u = (getattr(caller_result, "token_usage", None) or {}) if caller_result else {}
+        token_usage: dict[str, int] = {
+            "customer_prompt_tokens": caller_u.get("prompt_tokens", 0),
+            "customer_completion_tokens": caller_u.get("completion_tokens", 0),
+        }
+        token_usage["total_tokens"] = sum(token_usage.values())
+
         completed = datetime.now()
         return RolloutResult(
             example_id=example.id,
@@ -116,6 +124,7 @@ class LiveAudioSandboxEnvironment:
             artifacts_dir=session_dir,
             error=error,
             payload={"tts_provider": getattr(tts, "name", "unknown")},
+            token_usage=token_usage if token_usage["total_tokens"] > 0 else None,
         )
 
     def _build_coach(self, session_id: str) -> AudioCoachAdapter:
