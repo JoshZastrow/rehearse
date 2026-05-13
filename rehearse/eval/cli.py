@@ -4,9 +4,10 @@ Subcommands:
   list-evals          print registered eval names
   list-datasets       print registered dataset names
   list-environments   print registered environment names
+  list-runs           list recent runs with per-rollout scores and audio paths
   run                 execute an eval against an environment
-  show               print summary.md for a run_id
-  watch              tail scores.jsonl and render a live aggregate table
+  show                print summary.md for a run_id
+  watch               tail scores.jsonl and render a live aggregate table
 """
 
 from __future__ import annotations
@@ -21,7 +22,7 @@ from rehearse.eval.environments import list_environments
 from rehearse.eval.evals import get_eval, list_evals
 from rehearse.eval.executors import InProcessExecutor
 from rehearse.eval.providers import list_providers
-from rehearse.eval.report import ensure_run_recorded, record_run, render_report
+from rehearse.eval.report import ensure_run_recorded, list_runs, record_run, render_report
 from rehearse.eval.runner import RunConfig, execute_run
 from rehearse.eval.transports import TransportEvent
 from rehearse.eval.watch import watch as run_watch
@@ -103,6 +104,14 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
 
+    lr = sub.add_parser("list-runs", help="list recent runs and their per-rollout scores and audio paths")
+    lr.add_argument("--n", type=int, default=10, help="number of runs to show (default 10)")
+    lr.add_argument("--eval", dest="eval_filter", default=None, help="filter by eval name substring")
+    lr.add_argument("--scenario", dest="scenario_filter", default=None, help="filter rollouts by scenario id substring")
+    lr.add_argument("--play", dest="play_session", default=None, metavar="SESSION_ID",
+                    help="open the most recent audio.wav matching SESSION_ID")
+    lr.add_argument("--runs-root", default="evals/runs", type=Path)
+
     show = sub.add_parser("show", help="print summary.md for a run_id")
     show.add_argument("run_id")
     show.add_argument("--runs-root", default="evals/runs", type=Path)
@@ -147,6 +156,16 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "list-providers":
         for name in list_providers():
             print(name)
+        return 0
+
+    if args.cmd == "list-runs":
+        list_runs(
+            args.runs_root,
+            n=args.n,
+            eval_filter=args.eval_filter,
+            scenario_filter=args.scenario_filter,
+            play_session=args.play_session,
+        )
         return 0
 
     if args.cmd == "show":

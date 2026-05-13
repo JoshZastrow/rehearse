@@ -28,6 +28,7 @@ from twilio.request_validator import RequestValidator
 from twilio.rest import Client as TwilioClient
 
 from rehearse.agents.intake_recorder import IntakeMemoryRecorder
+from rehearse.agents.persona_selection_recorder import PersonaSelectionRecorder
 from rehearse.agents.persona_swap import PersonaSwapCoordinator
 from rehearse.audio.twilio_stream import TwilioCallerParticipant, TwilioStream
 from rehearse.bus import FrameBus
@@ -303,6 +304,11 @@ def mount_twilio_routes(
                         session_id, caller_hash, _memory
                     ).run(bus.subscribe())
                 )
+                persona_selection_task = asyncio.create_task(
+                    PersonaSelectionRecorder(
+                        session_id, caller_hash, _memory, orchestrator.store
+                    ).run(bus.subscribe())
+                )
                 persona_swap_task = asyncio.create_task(
                     persona_swap.run(bus.subscribe())
                 )
@@ -354,6 +360,8 @@ def mount_twilio_routes(
                         await outcome_task
                         await phase_task
                         await intake_task
+                        await intake_recorder_task
+                        await persona_selection_task
                         await persona_swap_task
                         await transcript_task
                         await prosody_task

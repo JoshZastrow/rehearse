@@ -282,22 +282,45 @@ instance. Tests are skipped when `lib/honcho/` is absent.
 
 ## 9. Eval Judge
 
-**Model**: `claude-haiku-4-5-20251001` (cheapest Anthropic text model)
+**Model**: `google/gemma-4-26B-A4B-it` via Modal serverless GPU (`modal_app/gemma_judge.py`)
 
-**Input**: call transcript text
+Gemma 4 26B-A4B is a Mixture-of-Experts model with 26B parameters (4B active per
+token). It accepts text and audio inputs natively via vLLM. Used via
+`VLLMAudioProvider` pointed at the Modal endpoint through LiteLLM
+(`audio-judge` alias in `litellm_config.yaml`).
 
-**Output** (structured JSON):
+### 9.1 Deployment
 
-```json
-{
-  "gender_question_asked": true,
-  "agent_selected": "male_character",
-  "routing_correct": true,
-  "reasoning": "Intake coach asked gender question at turn 3. ..."
-}
+```bash
+# One-time setup
+make setup-modal        # install Modal CLI + authenticate
+
+# Deploy (idempotent — safe to run on every CI push)
+make deploy-modal       # modal deploy modal_app/gemma_judge.py
+
+# Smoke test
+make smoke-modal        # modal run modal_app/gemma_judge.py
 ```
 
-**Judge prompt sketch**:
+The deployed URL is deterministic:
+```
+https://<workspace>--rehearse-gemma-judge-serve.modal.run
+```
+
+Add to `.env`:
+```bash
+VLLM_BASE_URL=https://<workspace>--rehearse-gemma-judge-serve.modal.run/v1
+VLLM_API_KEY=<modal-token>
+```
+
+**Cost**: ~$0 when idle. The `scaledown_window=15min` in `gemma_judge.py` keeps
+the container warm for the duration of an eval batch (typically 3-6 minutes),
+then releases the GPU. An H200 runs at ~$0.0015/GPU-second. A full 3-scenario
+eval costs ~$0.15 including cold start.
+
+### 9.2 Routing correctness judgment (text input)
+
+**Input**: intake transcript + expected routing decision
 
 ```
 You are evaluating a voice coaching call transcript.
@@ -308,35 +331,80 @@ Expected behavior: {expected}
 Transcript:
 {transcript}
 
-Answer in JSON with keys:
-  gender_question_asked: bool
-  agent_selected: "male_character" | "female_character" | "unknown"
-  routing_correct: bool
-  reasoning: str (one sentence)
+Answer in JSON:
+{
+  "gender_question_asked": true | false,
+  "agent_selected": "male_character" | "female_character" | "unknown",
+  "routing_correct": true | false,
+  "reasoning": "<one sentence>"
+}
 ```
 
-The judge is invoked once per call. Three calls = three judgments. Pass
-condition: all three `routing_correct == true`.
+### 9.3 Voice verification judgment (audio input)
+
+**Input**: WAV clip of first 10 seconds of character speech in practice phase.
+
+```
+Listen to this audio clip. Is the speaker's voice male or female?
+Answer with exactly one word: "male" or "female".
+```
+
+Expected answer matches `session.selected_persona_id`'s gender.
+This verifies that `session_settings` actually changed the voice, not just the prompt.
+
+### 9.4 Pass conditions
+
+| Check | Pass condition |
+|---|---|
+| Routing correctness | `routing_correct == true` for all 3 calls |
+| Voice verification | Gemma audio judgment matches expected gender for all 3 calls |
+| Memory check | Call 2 `gender_question_asked == false` |
 
 ---
 
 ## 10. How to Run
 
+### Prerequisites
+
 ```bash
-# Requires: make serve with Honcho running, ANTHROPIC_API_KEY set
-uv run pytest tests/eval/test_persona_voice_routing_eval.py \
-  -v \
-  -m "live_api and live_honcho" \
-  --timeout=120
+# 1. Deploy the Modal judge (idempotent, run once or on each code change)
+make deploy-modal
+
+# 2. Add Modal URL + credentials to .env
+# VLLM_BASE_URL=https://<workspace>--rehearse-gemma-judge-serve.modal.run/v1
+# VLLM_API_KEY=<modal-token>
+
+# 3. Start product services
+make serve       # ngrok + Honcho + rehearse server
 ```
 
-Each call is capped at 90 seconds by cancelling after the second practice
-turn. The full three-scenario suite runs in under 5 minutes.
+### Run the eval
 
-To run a single scenario:
+```bash
+make eval-persona-routing
+# equivalent to:
+# uv run pytest tests/eval/test_persona_voice_routing_eval.py \
+#   -v -m "live_api and live_honcho" --timeout=180
+```
+
+Each call is capped at 90 seconds. The full three-scenario suite runs in under
+6 minutes (including one Modal cold start of ~25s on the first call).
+
+### Run a single scenario
 
 ```bash
 uv run pytest tests/eval/test_persona_voice_routing_eval.py::test_new_caller_is_asked_gender -v
+```
+
+### Clear caller memory for a clean re-run
+
+```bash
+uv run python -c "
+import asyncio
+from rehearse.memory import HonchoCallerMemory
+m = HonchoCallerMemory(base_url='http://localhost:8001')
+asyncio.run(m.clear_caller('your-test-hash'))
+"
 ```
 
 ---
@@ -349,16 +417,18 @@ Each eval run writes to `sessions/<eval_session_id>/`:
 |---|---|---|
 | `transcript.jsonl` | JSONL | Full turn-by-turn transcript |
 | `routing_eval_result.json` | JSON | `{call_id, gender_question_asked, agent_selected, routing_correct, reasoning}` per call |
+| `voice_eval_result.json` | JSON | `{call_id, expected_gender, gemma_judgment, pass}` per call |
+| `character_audio_clip.wav` | WAV | First 10s of character speech (Gemma audio input) |
 | `memory_state.json` | JSON | Snapshot of `agent_prefs` from Honcho after all three calls |
 
 Summary printed to stdout:
 
 ```
-PASS  call_1  gender_asked=True  agent=male_character   correct=True
-PASS  call_2  gender_asked=False agent=male_character   correct=True
-PASS  call_3  gender_asked=True  agent=female_character correct=True
+PASS  call_1  gender_asked=True  agent=male_character   voice=male    correct=True
+PASS  call_2  gender_asked=False agent=male_character   voice=male    correct=True
+PASS  call_3  gender_asked=True  agent=female_character voice=female  correct=True
 
-3/3 routing scenarios passed.
+3/3 routing scenarios passed. 3/3 voice verifications passed.
 ```
 
 ---
@@ -367,16 +437,19 @@ PASS  call_3  gender_asked=True  agent=female_character correct=True
 
 | File | Change |
 |---|---|
-| `rehearse/memory.py` | Add `get_agent_preference`, `record_agent_preference`, `clear_caller` to protocol + all 4 implementations |
-| `rehearse/agents/topic_classifier.py` | **New** — `classify_topic()` |
+| `modal_app/gemma_judge.py` | **New** — Gemma 4 26B-A4B-it on Modal H200; audio enabled; `scaledown_window=15min` |
+| `litellm_config.yaml` | **New** — model aliases: `routing-agent`, `soul-generator`, `audio-judge` |
+| `rehearse/transports/litellm.py` | **New** — `LiteLLMTransport` replacing `AnthropicTransport` for text tasks |
+| `rehearse/memory.py` | Add `get_agent_preference`, `record_agent_preference`, `clear_caller` |
+| `rehearse/agents/persona_routing_agent.py` | Uses `AsyncOpenAI` + `audio-judge` alias; LiteLLM client |
 | `rehearse/agents/roles/character.py` | Add `MaleCharacterAgent`, `FemaleCharacterAgent` |
-| `rehearse/agents/registry.py` | Register both in `build_registry()` |
-| `rehearse/agents/router.py` | Flesh out `IntakeAwareRouter` with topic + memory lookup |
-| `rehearse/intake.py` | Emit gender question when no preference found; capture answer |
-| `rehearse/types.py` | Add `gender_preference: "male" \| "female" \| None` to `IntakeRecord` |
-| `tests/eval/test_persona_voice_routing_eval.py` | **New** — 3-scenario eval |
-| `tests/test_topic_classifier.py` | **New** — unit tests for classifier |
-| `tests/test_intake_gender_question.py` | **New** — unit tests for question gating logic |
+| `rehearse/agents/registry.py` | Register both gender agents |
+| `rehearse/agents/router.py` | `IntakeAwareRouter` with LLM extraction + memory lookup |
+| `rehearse/intake.py` | Gender question gated on `CounterpartyExtraction.needs_gender_question` |
+| `rehearse/types.py` | Add `gender_preference` to `IntakeRecord` |
+| `Makefile` | Add `setup-modal`, `deploy-modal`, `smoke-modal`, `eval-persona-routing` |
+| `tests/eval/test_persona_voice_routing_eval.py` | **New** — 3-scenario routing + voice eval |
+| `tests/test_intake_gender_question.py` | **New** — classifier + question gating |
 
 ---
 
