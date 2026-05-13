@@ -71,10 +71,10 @@ eval-voice-rollout: ## runtime-sandbox rollout with stub TTS (needs ANTHROPIC_AP
 	uv run rehearse-eval run --eval voice-rollout-judges --limit 3
 
 eval-voice-rollout-live: ## runtime-sandbox rollout with real Hume TTS + audio judges (needs HUME_API_KEY + ANTHROPIC_API_KEY + GOOGLE_API_KEY)
-	REHEARSE_AUDIO_JUDGE=live uv run rehearse-eval run --eval voice-rollout-judges --limit 3
+	REHEARSE_AUDIO_JUDGE=live uv run rehearse-eval run --eval voice-rollout-judges --limit 2
 
 eval-voice-rollout-audio: ## live-audio sandbox rollout through EVI (needs HUME_API_KEY + ANTHROPIC_API_KEY)
-	uv run rehearse-eval run --eval voice-rollout-judges --environment live-audio-sandbox --limit 3
+	uv run rehearse-eval run --eval voice-rollout-judges --environment live-audio-sandbox --limit 2
 
 eval-watch: ## tail scores.jsonl for a run and render a live aggregate; usage: make eval-watch RUN=<run_id>
 	@if [ -z "$(RUN)" ]; then echo "usage: make eval-watch RUN=<run_id>"; exit 1; fi
