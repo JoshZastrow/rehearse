@@ -25,3 +25,4 @@ evals/fixtures/founder-recorded/clips/*
 coverage.json
 lib/
 .gstack/
+.worktrees/
