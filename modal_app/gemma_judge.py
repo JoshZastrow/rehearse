@@ -66,10 +66,10 @@ VLLM_PORT = 8000
 @app.function(
     image=vllm_image,
     gpu="H200:1",
-    # Keep container warm for 15 minutes after last request.
-    # An eval batch finishes within this window — subsequent calls are warm.
-    # After 15 min of silence the GPU is released and billing stops.
-    scaledown_window=15 * MINUTES,
+    # Release GPU 30 seconds after the last request.
+    # Enough buffer for back-to-back calls in a single eval run.
+    # Cold start is ~25s from cache — cheaper to restart than idle.
+    scaledown_window=30,
     # Allow up to 10 minutes for the container to start (model download + compile).
     timeout=10 * MINUTES,
     volumes={
