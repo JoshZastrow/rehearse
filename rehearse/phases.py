@@ -7,6 +7,7 @@ it emits `PhaseSignal` frames on the shared bus when a transition happens.
 
 from __future__ import annotations
 
+import os
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -25,11 +26,15 @@ class PhaseBudgets:
     `*_min_dwell_seconds` is the floor a phase must run for before a cue-driven
     transition is allowed. Budget-driven transitions ignore the floor — they
     fire only after the full budget has elapsed anyway.
+
+    FEEDBACK default is 30s (was 60s); the remaining 30s is the SURVEY phase.
+    All budgets are overridable via env vars for faster test runs.
     """
 
     intake_seconds: int = 60
     practice_seconds: int = 120
-    feedback_seconds: int = 60
+    feedback_seconds: int = 30
+    survey_seconds: int = 30
     intake_min_dwell_seconds: int = 30
     practice_min_dwell_seconds: int = 90
 
@@ -39,6 +44,8 @@ class PhaseBudgets:
             return self.practice_seconds
         if phase == Phase.FEEDBACK:
             return self.feedback_seconds
+        if phase == Phase.SURVEY:
+            return self.survey_seconds
         return self.intake_seconds
 
     def min_dwell_for(self, phase: Phase) -> int:
@@ -46,6 +53,16 @@ class PhaseBudgets:
         if phase == Phase.PRACTICE:
             return self.practice_min_dwell_seconds
         return self.intake_min_dwell_seconds
+
+    @classmethod
+    def from_env(cls) -> PhaseBudgets:
+        """Build phase budgets from environment variables with safe defaults."""
+        return cls(
+            intake_seconds=int(os.environ.get("INTAKE_BUDGET_SECONDS", "60")),
+            practice_seconds=int(os.environ.get("PRACTICE_BUDGET_SECONDS", "120")),
+            feedback_seconds=int(os.environ.get("FEEDBACK_BUDGET_SECONDS", "30")),
+            survey_seconds=int(os.environ.get("SURVEY_BUDGET_SECONDS", "30")),
+        )
 
 
 class PhaseProcessor:
@@ -128,7 +145,7 @@ class PhaseProcessor:
 
     async def _maybe_advance_for_budget(self) -> None:
         """Advance the phase when the active phase has exhausted its time budget."""
-        if self._phase_started_at is None or self._current_phase == Phase.FEEDBACK:
+        if self._phase_started_at is None or self._current_phase == Phase.SURVEY:
             return
         if (
             self._current_phase == Phase.INTAKE
@@ -140,7 +157,12 @@ class PhaseProcessor:
         budget = timedelta(seconds=self._budgets.for_phase(self._current_phase))
         if self._clock() - self._phase_started_at < budget:
             return
-        next_phase = Phase.PRACTICE if self._current_phase == Phase.INTAKE else Phase.FEEDBACK
+        if self._current_phase == Phase.INTAKE:
+            next_phase = Phase.PRACTICE
+        elif self._current_phase == Phase.PRACTICE:
+            next_phase = Phase.FEEDBACK
+        else:
+            next_phase = Phase.SURVEY
         await self._transition(next_phase, reason="budget")
 
     async def _maybe_advance_for_cue(self, frame: TranscriptDelta) -> None:
