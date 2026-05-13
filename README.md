@@ -1,245 +1,244 @@
-# rehearse
+```
+ ██████╗ ███████╗██╗  ██╗███████╗ █████╗ ██████╗ ███████╗███████╗
+ ██╔══██╗██╔════╝██║  ██║██╔════╝██╔══██╗██╔══██╗██╔════╝██╔════╝
+ ██████╔╝█████╗  ███████║█████╗  ███████║██████╔╝███████╗█████╗  
+ ██╔══██╗██╔══╝  ██╔══██║██╔══╝  ██╔══██║██╔══██╗╚════██║██╔══╝  
+ ██║  ██║███████╗██║  ██║███████╗██║  ██║██║  ██║███████║███████╗
+ ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚══════╝
+```
 
-Voice agent inference engine for real-time conversation coaching.
+<p align="center"><b>Meta-conversations to help you with the ones that matter.</b></p>
 
-A 5-minute phone call: 1 minute intake, 3 minutes live practice with an AI counterparty, 1 minute feedback. Built as a prototype ML system — live sessions are the data source for continual improvement of a **purpose-built audio LLM** that replaces the off-the-shelf stack in v1.
+---
 
-The product is a coaching call. The architecture is an ML data-collection loop. Every session is simultaneously a unit of user value and a training record.
+Rehearse is a relational support call. Not a chatbot, not a journal prompt — a real phone call that helps you navigate your relationship with life.
 
-See [SPEC.md](SPEC.md) for the foundational design.
+The conversations that shape you are rarely the ones you feel ready for. A hard talk with a parent. A pitch you keep postponing. An honest moment with yourself about what you actually want. Rehearse gives you a place to try them first — five minutes on the phone with an AI counterparty who listens for what your voice is doing, not just what your words are saying.
 
-Live runtime + eval harness scaffold.
+**One call, three movements:**
 
-## Quick Start
+| Phase | Duration | What happens |
+|---|---|---|
+| Intake | ~1 min | You name the conversation you need to have and why it matters |
+| Practice | ~3 min | An AI counterparty holds the other side — pushes back, holds silence, reflects incongruence |
+| Feedback | ~1 min | You hear what shifted in your voice: pace, certainty, the moment you meant it |
+
+Every session is simultaneously a unit of care and a training record. The architecture is an ML data-collection loop; the product is a coaching call. Prosody is the signal — the gap between what you say and how your voice carries it.
+
+---
+
+## Getting Started
 
 ### Prerequisites
 
-- Python 3.11+, [uv](https://docs.astral.sh/uv/), [ngrok](https://ngrok.com/), a Twilio account, a Hume EVI account
+- Python 3.11+
+- [`uv`](https://docs.astral.sh/uv/) — fast Python package manager
+- [`ngrok`](https://ngrok.com/) — tunnel for Twilio webhooks
+- A [Twilio](https://twilio.com) account with a phone number
+- A [Hume AI](https://hume.ai) account (EVI voice + prosody)
+- An [Anthropic](https://console.anthropic.com) API key (coach brain)
+
+---
+
+## Setup
 
 ### 1. Install dependencies
 
 ```bash
+git clone https://github.com/yourusername/rehearse.git
+cd rehearse
 make setup
 ```
 
-### 2. Configure environment
+This installs Python dependencies and creates a `.env` file from the template.
+
+### 2. Configure your environment
 
 ```bash
-cp .env.example .env
-# Fill in: TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER,
-#          HUME_API_KEY, HUME_CONFIG_ID, HUME_CLM_SECRET, ANTHROPIC_API_KEY
+# Edit .env with your API keys:
+TWILIO_ACCOUNT_SID=...
+TWILIO_AUTH_TOKEN=...
+TWILIO_PHONE_NUMBER=+1...   # E.164 format
+HUME_API_KEY=...
+HUME_CONFIG_ID=...
+HUME_CLM_SECRET=...
+ANTHROPIC_API_KEY=...
 ```
 
-### 3. Set up caller memory (returning callers get a shorter consent prompt)
+### 3. Set up caller memory
 
-**Option A: Honcho cloud (recommended)**
+Returning callers hear a one-sentence reminder instead of the full consent prompt. New callers always hear the full prompt. Choose one:
+
+**Option A — Honcho cloud (recommended for production)**
 
 ```bash
 # Add to .env:
 HONCHO_API_KEY=<your-key>
 ```
 
-**Option B: Self-hosted (no cloud account needed)**
+**Option B — Self-hosted (no cloud account needed)**
 
 ```bash
 make setup-honcho
-# Then add to .env:
-# HONCHO_BASE_URL=http://localhost:8001
+# Add to .env:
+HONCHO_BASE_URL=http://localhost:8001
 ```
 
-If neither is set, `NullCallerMemory` is used — calls still work, every caller hears the full consent prompt.
+**Option C — No memory**
 
-### 4. Initialize Hume EVI configs
+Leave both unset. Calls still work; every caller hears the full consent prompt.
+
+### 4. Sync Hume EVI configs
+
+Voice, greeting, prompt, and turn-detection settings are declared in code (`rehearse/services/hume_configs.py`) and synced to the live Hume workspace in one command:
 
 ```bash
 BASE_URL=https://your-ngrok-url uv run rehearse-hume sync
 ```
 
+Run `uv run rehearse-hume diff` anytime to see what's out of sync before applying changes.
+
 ### 5. Start everything
 
 ```bash
 make serve
-# Opens ngrok tunnel, syncs Hume configs, starts rehearse server.
-# If lib/honcho/ exists, also starts local Honcho with embedded Postgres.
 ```
 
-Send an SMS to your Twilio number to trigger an outbound call.
+This opens an ngrok tunnel, syncs Hume configs, and starts the rehearse server. If `lib/honcho/` exists, it also starts local Honcho with embedded Postgres — no separate process to manage.
 
 ---
 
-## Memory Backends
+## Your First Call
 
-Returning callers hear a one-sentence reminder ("Again, this call will be transcribed...") instead of the full 55-word consent prompt. First-time callers always receive the full prompt.
+Once `make serve` is running:
 
-The `CallerMemory` protocol (`rehearse/memory.py`) is provider-agnostic — any class with `has_prior_consent` and `record_consent` satisfies it. The target protocol is MCP; any MCP-compatible memory server works.
+1. **Text your Twilio number** — any SMS triggers an outbound call to that number
+2. **Answer** — you'll hear the intake prompt
+3. **Name the conversation** you need to have ("I need to tell my sister I can't keep covering for her")
+4. **Practice** — the AI counterparty holds the other side for ~3 minutes
+5. **Listen to your feedback** — a one-minute reflection on what your voice revealed
+6. **Check your transcript** — a viewer link is sent back to you by SMS after the call
 
-| Backend | Config | Use |
-|---|---|---|
-| `HonchoCallerMemory` | `HONCHO_API_KEY` in `.env` | Honcho cloud — recommended for production |
-| `HonchoCallerMemory` (self-hosted) | `make setup-honcho` + `HONCHO_BASE_URL=http://localhost:8001` | Local Honcho with embedded Postgres — no cloud account |
-| `NullCallerMemory` | (neither key set) | Fallback — calls work, every caller gets the full prompt |
-
-Caller identity is a SHA-256 hash of the E.164 phone number — no plaintext numbers leave the runtime.
+That's it. No app to download. No account to create. Just a phone call.
 
 ---
 
-## Development
+## Running Evals
+
+The eval harness measures voice quality, coach behavior, and rollout readiness without requiring a live phone call. Most evals run offline with `ANTHROPIC_API_KEY` only.
+
+**List what's available:**
 
 ```bash
-make test                   # run full pytest suite
-make lint                   # ruff check
-make eval-voice-rollout     # eval without live services (needs ANTHROPIC_API_KEY only)
-pytest -m live_api          # tests requiring real API keys
+make eval-list
 ```
 
-Key eval targets:
+**Offline evals (free, no live APIs):**
 
 ```bash
-make eval-voice-smoke           # fixture smoke with stub judges (free)
-make eval-voice-rollout-live    # rollout with real Hume TTS + audio judges
-make eval-watch RUN=<run_id>    # tail scores.jsonl for a live run
+make eval-voice-smoke        # fixture-audio smoke test with stub judges
+make eval-voice-rollout      # runtime-sandbox rollout with stub TTS
+```
+
+**Live evals (uses real Hume TTS and Gemini/Claude judges):**
+
+```bash
+make eval-voice-smoke-live         # fixture smoke + real TTS + Gemini judges
+make eval-voice-rollout-live       # full rollout with audio judges
+make eval-voice-rollout-audio      # routes through live EVI (real voice pipeline)
+```
+
+**Score production sessions:**
+
+```bash
+make eval-voice-replay             # score 3 real sessions with stub judges
+make eval-voice-replay-live        # score 3 real sessions with Gemini judges
+```
+
+**Watch a run in progress:**
+
+```bash
+make eval-watch RUN=<run_id>       # tail scores.jsonl with live aggregate
+```
+
+**Full test suite:**
+
+```bash
+make test     # pytest
+make lint     # ruff
 ```
 
 ---
 
-- Runtime: SMS triggers an outbound call. Twilio Media Streams bridges audio to Hume EVI. A custom-language-model webhook serves coach/character turns. Transcript, prosody, audio, and telemetry artifacts persist per session. Post-call synthesis writes `story.md` + `feedback.md` and SMSes a viewer link back. End-to-end verified on a real phone call (2026-05-01). See [`docs/specs/v2026-04-28-runtime-workstream.md`](docs/specs/v2026-04-28-runtime-workstream.md).
-- Eval harness: see [`rehearse/eval/README.md`](rehearse/eval/README.md). Public shape is evals, datasets, scorers, and environments. Runs `noop` offline and has the MME-Emotion audio eval scaffold.
+## Contributing
 
-## Status (2026-05-01)
+```bash
+git clone https://github.com/yourusername/rehearse.git
+cd rehearse
+make setup
+make test     # confirm everything passes
+```
 
-| Workstream | Stage |
+**Key files to know:**
+
+| Path | What it does |
 |---|---|
-| Pydantic data contracts (`rehearse/types.py`) | ✅ frozen |
-| Eval harness skeleton | ✅ shipped |
-| MME-Emotion eval + audio environment scaffold | ✅ shipped |
-| Runtime (Twilio + owned audio bridge + Hume EVI + CLM webhook) | ✅ shipped — verified end-to-end |
+| `rehearse/app.py` | FastAPI entry — SMS/voice webhooks |
+| `rehearse/agents/` | Claude Agent SDK roles (coach + character) |
+| `rehearse/services/hume_configs.py` | All EVI persona config — declared in code |
+| `rehearse/types.py` | Pydantic contracts shared by runtime and eval harness |
+| `rehearse/eval/` | Eval harness (evals, datasets, scorers, environments) |
+| `rehearse/memory.py` | `CallerMemory` protocol + Honcho and null backends |
+| `scripts/serve.sh` | Orchestrates ngrok + Honcho + server startup |
 
-## Strategic frame
+**Hume EVI configs are code.** When you change a persona's voice, prompt, or timeouts in `rehearse/services/hume_configs.py`, run `uv run rehearse-hume sync` to apply it. The workspace stays in lockstep with the repo.
 
-Three load-bearing claims:
+**The schema is frozen by design.** Production session artifacts and eval-harness outputs share the same Pydantic types (`rehearse/types.py`). A frozen session is replayable through any stage of the pipeline. Don't break the contract.
 
-1. **Prosody is the product, not a byproduct.** The coach's value is detecting incongruence between what is said and how it is said. Transcript-only systems cannot do this.
-2. **Purpose-built model, not a wrapper.** v0 uses Claude + Hume; v1 fine-tunes an open-weights audio LLM (Gemma 4 E4B) on preference pairs mined from real sessions. The architecture stays constant; the model slots swap.
-3. **Single schema everywhere.** Production session artifacts and eval-harness outputs are the same pydantic types. A frozen session is replayable through any stage.
+**Every changed line should trace to the request.** Don't improve adjacent code, refactor things that aren't broken, or add features that weren't asked for. Keep it surgical.
 
-## Roadmap
+Open a PR when tests pass and `make eval-voice-smoke` is green.
 
-Three workstreams advance in parallel. Each ships in numbered phases; each phase is one PR with green tests + a runnable demo.
+---
 
-### Eval harness (`rehearse-eval`) — `rehearse/eval/`
-
-Plugin-shaped: evals, datasets, scorers, environments, providers, and executors are each small protocol-style units. Independent of runtime.
-
-| Phase | Status | Scope |
-|---|---|---|
-| 1 — Skeleton | ✅ shipped | Protocols, registries, runner, CLI, `LocalSubprocessExecutor`, `noop` eval, `echo` environment. |
-| A1 — MME-Emotion replacement | ✅ shipped | Removed text-only eval path, added MME-Emotion dataset/eval scaffold, deterministic recognition scorer. |
-| A2 — Provider plugin layer + Gemini provider | ✅ shipped | `AudioLLMProvider` protocol, Gemini provider wrapper, `list-providers` CLI. |
-| A3 — `multimodal-llm` environment | ✅ shipped | Audio-native environment, provider selection, vLLM provider wrapper. Real runs require media files + credentials. |
-| A4 — Reasoning scorer (Claude Opus judge) | 📝 spec'd | LLM-judge scorer. `MMEReasoningScorer` + reusable `LLMJudge` primitive. |
-| A5 — vLLM provider (Gemma 4 E4B) | 📝 spec'd | OpenAI-compatible client pointed at a self-hosted vLLM server. Gated on a live endpoint. |
-| A6 — Side-by-side comparison | 📝 spec'd | `rehearse-eval diff <run_a> <run_b>` per-dimension delta table. Gemini vs Gemma on the same clips. |
-| A7 — Scale to 100 clips | 🔮 future | Move past the v0 hand-curated subset; `scripts/fetch_mme_emotion.py` from HuggingFace. |
-| A8 — Rehearse-seed scenarios + `synthesis` / `full` environments | 🔮 future | First product-quality eval (not capability eval). Fault-recall, persona fidelity, holistic usefulness. |
-| A9 — CI gating + regression workflow | 🔮 future | PR-blocking eval delta checks. |
-
-Spec: [`docs/specs/v2026-04-27-eval-harness.md`](docs/specs/v2026-04-27-eval-harness.md), [`docs/specs/v2026-04-28-mme-emotion-and-audio-targets.md`](docs/specs/v2026-04-28-mme-emotion-and-audio-targets.md). User-facing: [`rehearse/eval/README.md`](rehearse/eval/README.md).
-
-### Runtime (`rehearse-app`) — `rehearse/app.py`, `rehearse/agents/`, owned audio runtime modules
-
-Single FastAPI service: SMS triggers an outbound call, runs an owned Twilio Media Streams to Hume EVI live-call loop with the Claude Agent SDK as the coach/character brain, persists every frame to disk, then synthesizes story + feedback post-call and SMSes a viewer link back.
-
-| Phase | Status | Scope |
-|---|---|---|
-| R1 — Skeleton + Telephony | ✅ shipped | Twilio SMS/voice/Media Streams handlers; `SessionOrchestrator`; `LocalFilesystemStore`. |
-| R2 — Owned Twilio/Hume runtime scaffold | ✅ shipped | `TwilioStream`, `HumeEVIClient`, `FrameBus`, live audio loop. |
-| R3 — Phase machine + writers | ✅ shipped | `PhaseProcessor`, transcript/prosody/audio/telemetry writers. Default budgets: 60s intake / 180s practice / 60s feedback (5-min call). |
-| R4 — Claude CLM + agents | ✅ shipped | `POST /chat/completions` CLM endpoint with `HUME_CLM_SECRET` bearer auth; coach + character responders; scripted fallback when no Anthropic key. |
-| R5 — Post-call synthesis + viewer | ✅ shipped | Replayable `SessionSynthesizer` (story + feedback), viewer route, SMS notification. End-to-end SMS-to-SMS round-trip verified 2026-05-01. |
-| R6 — Reliability + polish | 🟡 partial | Soft-cue phase transitions ✅, Twilio signature validation ✅. Open items tracked in [`docs/specs/v2026-05-06-r6-reliability-backlog.md`](docs/specs/v2026-05-06-r6-reliability-backlog.md): stream WAV to disk, Hume reconnect with backoff, `/twilio/status` finalize fallback, persist `SessionHandle` across restarts. |
-| R7 — Storage option B (S3 mirror) | 🔮 future | New `S3MirrorStore` backend. Migration trigger: first non-founder user invited. |
-| R8 — Consent + inline outcome capture | 📝 spec'd, stubs landed | Verbal consent gate during intake; on-the-line "did this rehearsal feel useful?" probe at end of feedback phase. Deterministic classifiers — no LLM. Schema fields and `rehearse/outcome.py` stubbed; full implementation per spec is the next runtime PR. Blocker for inviting non-founder callers (legal + training-data). Spec: [`docs/specs/v2026-05-01-consent-and-outcome-capture.md`](docs/specs/v2026-05-01-consent-and-outcome-capture.md). |
-
-Spec: [`docs/specs/v2026-04-28-runtime-workstream.md`](docs/specs/v2026-04-28-runtime-workstream.md), [`docs/specs/v2026-04-28-drop-pipecat.md`](docs/specs/v2026-04-28-drop-pipecat.md), with historical detail in [`docs/specs/v2026-04-27-runtime.md`](docs/specs/v2026-04-27-runtime.md).
-
-#### Hume EVI configs (`rehearse-hume`)
-
-Voice, greeting copy, prompt, timeouts, turn detection, nudges, and interruption thresholds are declared in `rehearse/services/hume_configs.py` (`PERSONAS` registry) and reconciled against the live Hume workspace via the `rehearse-hume` CLI.
-
-Run `rehearse-hume diff` or `sync` whenever you change a persona — the workspace stays in lock-step with the repo, so iteration on voice/prompt/etc. is a code change + one command, not a console click trail.
-
-```bash
-uv run rehearse-hume diff   # show planned actions; exit 1 if drift
-uv run rehearse-hume sync   # apply create/new-version actions; write sessions/.hume_configs.json
-```
-
-**When to run:**
-- Before placing a call after editing `PERSONAS` (voice swap, prompt tweak, timeout change).
-- In CI on PRs that touch `rehearse/services/hume_configs.py` (use `diff` as a gate — exit 1 means the workspace will drift if the PR lands).
-- Once after pulling a teammate's change to `PERSONAS`, so your local workspace matches.
-
-**First-run migration:** Hume's existing console-edited config is named e.g. `"Your smart companion (5/1/2026, ...)"`. Either rename it in the console to match the registry's `display_name` (`"Rehearse Coach (default)"`) before the first `sync`, or accept that `sync` will create a second config alongside it. Spec: [`docs/specs/v2026-05-06-hume-config-as-code.md`](docs/specs/v2026-05-06-hume-config-as-code.md).
-
-### ML data pipeline & training — future
-
-Consumes frozen sessions from the runtime + scored runs from the harness; produces training corpora.
-
-| Phase | Status | Scope |
-|---|---|---|
-| T1 — Preference pair mining heuristics | 🔮 future | Critic-ranked self-play rollouts; outcome-weighted pairs from sessions with positive `OutcomeLabel`. |
-| T2 — DPO on Gemma 4 E4B | 🔮 future | First fine-tune target. Success: matches Gemini on MME-Emotion at ≥2× lower cost / lower p95 latency. |
-| T3 — Critic LLM for online-eval | 🔮 future | Per-session weak labels via the same rubric. Closes the data loop. |
-| T4 — Voice model fine-tune | 🔮 not pursued in v1 | Hume stays. Per SPEC §9.3, voice model training is deferred indefinitely. |
-
-Spec: not yet written. Contingent on the runtime producing a meaningful volume of consented sessions (target: 100+).
-
-## Stack
-
-| Layer | v0 | v1 (eval-driven swap) |
-|---|---|---|
-| Voice in/out (STT + TTS + prosody events) | Hume EVI | Hume EVI (unchanged — see SPEC §9.3) |
-| Practice character brain (per-turn) | Claude Sonnet 4.6 via Hume CLM | Fine-tuned Gemma 4 E4B via Hume CLM |
-| Intake + feedback synthesis | Claude Agent SDK (Sonnet for intake, Opus for feedback) | Same; lower priority to swap |
-| Telephony | Twilio (SMS + Voice + Media Streams) | unchanged |
-| Runtime audio loop | Owned `TwilioStream` + `HumeEVIClient` + `FrameBus` | unchanged |
-| Data contracts | Pydantic v2 (`rehearse/types.py`) | unchanged — single schema everywhere |
-| Service | FastAPI + Uvicorn | unchanged |
-| Storage | Local filesystem | S3 mirror, then Postgres+S3 (per runtime spec §5) |
-| Eval — hosted baseline | Gemini 2.5 Pro (audio-native) | Gemini 2.5 Pro (still the bar to beat) |
-| Eval — open-weights candidate | Gemma 4 E4B via vLLM | Same model, fine-tuned on rehearse data |
-| Eval — judge | Claude Opus 4.7 | Claude Opus or self-hosted critic |
-
-## Repo layout
+## Architecture
 
 ```
 rehearse/
-├── SPEC.md                       # foundational design (frozen)
-├── README.md                     # this file
-├── docs/
-│   └── specs/
-│       ├── v2026-04-27-eval-harness.md
-│       ├── v2026-04-27-runtime.md
-│       ├── v2026-04-28-drop-pipecat.md
-│       ├── v2026-04-28-runtime-workstream.md
-│       └── v2026-04-28-mme-emotion-and-audio-targets.md
 ├── rehearse/                     # application package
-│   ├── types.py                  # all pydantic interfaces
-│   ├── eval/                     # eval harness (Phases 1–2 shipped)
-│   │   └── README.md
-│   ├── app.py                    # runtime FastAPI entry (spec'd)
-│   ├── agents/                   # Claude Agent SDK roles (spec'd)
-│   ├── pipeline.py               # runtime wiring entrypoint (spec'd)
-│   ├── phases.py                 # phase timing / transitions (spec'd)
-│   ├── personas.py               # prompts + compile_character (spec'd)
-│   ├── synthesis.py              # post-call story + feedback (spec'd)
-│   ├── audio/                    # Twilio audio bridge (spec'd)
-│   ├── services/                 # Hume EVI client (spec'd)
-│   └── writers/                  # artifact writers (spec'd)
-├── tests/
-├── evals/
-│   ├── datasets/                 # vendored eval datasets
-│   └── runs/                     # eval run outputs (gitignored)
-├── sessions/                     # runtime session store (gitignored)
-└── web/
-    └── viewer.html               # static artifact viewer (spec'd)
+│   ├── app.py                    # FastAPI: SMS + voice webhooks
+│   ├── agents/                   # coach + character responders (Claude Agent SDK)
+│   ├── types.py                  # shared Pydantic contracts
+│   ├── memory.py                 # CallerMemory protocol + backends
+│   ├── services/
+│   │   ├── hume_configs.py       # EVI persona registry (config as code)
+│   │   └── hume_client.py        # Hume EVI WebSocket client
+│   ├── audio/                    # Twilio Media Streams bridge
+│   ├── phases.py                 # intake / practice / feedback timing
+│   ├── synthesis.py              # post-call story + feedback generation
+│   └── eval/                     # eval harness (evals, datasets, scorers)
+├── scripts/
+│   ├── serve.sh                  # startup orchestrator
+│   └── honcho_serve.sh           # self-hosted Honcho + embedded Postgres
+├── docs/specs/                   # design specs (frozen — do not edit)
+├── web/viewer.html               # static session artifact viewer
+├── SPEC.md                       # foundational design
+└── Makefile                      # all dev commands
 ```
+
+**Stack:**
+
+| Layer | What |
+|---|---|
+| Voice (STT + TTS + prosody) | Hume EVI |
+| Coach + character brain | Claude (Sonnet for turns, Opus for feedback) |
+| Telephony | Twilio — SMS trigger, outbound call, Media Streams |
+| Caller memory | Honcho (cloud or self-hosted) |
+| Service | FastAPI + Uvicorn |
+| Eval judges | Gemini 2.5 (audio-native) + Claude Opus |
+
+---
+
+## License
+
+MIT. See [LICENSE](LICENSE).
