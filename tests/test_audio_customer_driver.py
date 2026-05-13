@@ -63,7 +63,10 @@ async def test_audio_customer_sends_audio_before_waiting_for_runtime(tmp_path: P
 
     assert event.kind == "audio"
     assert event.data == b"\x01\x00\x02\x00"
+    # Drain trailing-silence audio event(s) before the end_of_turn control event.
     eot = await transport.runtime.receive()
+    while eot.kind == "audio":
+        eot = await transport.runtime.receive()
     assert eot.kind == "control"
     assert eot.payload["event"] == "end_of_turn"
 

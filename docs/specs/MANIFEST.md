@@ -46,6 +46,10 @@ the phase you are building.
 | [`v2026-05-06-time-aware-clm.md`](v2026-05-06-time-aware-clm.md) | `done` | `implementation` | Per-turn time card injection into CLM | Shipped via commits 8601f1c → a54d91b. TimeCard built and rendered as a second cached system block on every CLM turn. |
 | [`v2026-05-11-voice-participant-protocol.md`](v2026-05-11-voice-participant-protocol.md) | `draft` | `implementation` | Voice participant abstraction layer | Defines `VoiceParticipant` + `VoiceSpeaker` protocols, `SpeakRequest` Pydantic type. Removes `hume.say` from business logic. Enables coach/caller swap without touching telephony wiring. |
 | [`v2026-05-11-live-audio-eval-sandbox.md`](v2026-05-11-live-audio-eval-sandbox.md) | `draft` | `implementation` | Live-audio eval environment | Replaces post-hoc TTS synthesis with a real EVI session per rollout. `AudioCoachAdapter` seam enables provider swap. Closes eval/serve gap for voice. Amends 05-06 roadmap Mini-spec 2 (second half). |
+| [`v2026-05-12-agent-design-patterns.md`](v2026-05-12-agent-design-patterns.md) | `acknowledged` | `implementation` | CLM refactor — transport/agent/router decomposition | Decomposes `AnthropicCLMResponder` into `LLMTransport` + `RehearseAgent` + `AgentRouter`. Prerequisite for Mini-spec 6 (BoN path extends new `CLMResponder`; `LLMTransport.generate()` required). Steps 1–7 must land before Wave D begins. |
+| [`v2026-05-13-persona-voice-routing.md`](v2026-05-13-persona-voice-routing.md) | `acknowledged` | `implementation` | Gender-based practice partner selection with memory | Intake asks male/female preference; `IntakeAwareRouter` routes to `MaleCharacterAgent` / `FemaleCharacterAgent`. Memory persists topic→gender preference per caller. Eval: 3-scenario abbreviated-call suite judged by Claude Haiku. |
+| [`v2026-05-13-vad-turn-segmentation.md`](v2026-05-13-vad-turn-segmentation.md) | `draft` | `implementation` | Voice training pipeline step 1 — per-clip audio export | Slices `audio/user/turn_*.wav` at `timing.jsonl` VAD boundaries into 3–30s clips aligned with transcript text. Emits `AudioClipRecord` rows to `pipeline/clips/clips.jsonl`. Must run before audio enhancement. |
+| [`v2026-05-13-audio-source-separation.md`](v2026-05-13-audio-source-separation.md) | `draft` | `implementation` | Voice training pipeline step 2 — source separation + 24kHz enhancement | Denoises and bandwidth-extends clips from step 1 using `resemble-enhance`. DNSMOS ≥ 3.0 quality gate. Emits `EnhancedClipRecord` rows and final `VoiceTrainingRecord` `(wav_path, text)` pairs to `pipeline/enhanced/`. |
 
 ## Workstream Map
 
@@ -60,8 +64,10 @@ the phase you are building.
 | CLM / persona / Hume config | `v2026-05-06-hume-config-as-code.md`, `v2026-05-06-time-aware-clm.md` | `v2026-04-28-hume-evi-bridge.md` |
 | Voice participant / coach swap | `v2026-05-11-voice-participant-protocol.md` | `v2026-04-28-hume-evi-bridge.md` |
 | Live-audio eval | `v2026-05-11-live-audio-eval-sandbox.md`, `v2026-05-07-runtime-eval-alignment.md` | `v2026-04-28-hume-evi-bridge.md` |
+| CLM / agent architecture | `v2026-05-12-agent-design-patterns.md` | `v2026-04-28-hume-evi-bridge.md` |
 | Consent + production data capture | `v2026-05-01-consent-and-outcome-capture.md`, `v2026-04-28-runtime-workstream.md` | `v2026-04-28-hume-evi-bridge.md` |
-| ML data pipeline | `../../SPEC.md` | No dedicated spec yet. Write one before implementation. |
+| ML data pipeline (CLM) | `../../SPEC.md` | No dedicated spec yet. Write one before implementation. |
+| ML data pipeline (voice TTS) | `v2026-05-13-vad-turn-segmentation.md`, `v2026-05-13-audio-source-separation.md` | Run in order: vad_segment → audio_enhance. Produces `VoiceTrainingRecord` rows. |
 
 ## Update Rules
 

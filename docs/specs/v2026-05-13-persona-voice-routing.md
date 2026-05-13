@@ -1,358 +1,399 @@
 # Persona Voice Routing: Gender Selection + Memory-Backed Agent Dispatch
 
-**Status:** wip
+**Status:** acknowledged
 **Date:** 2026-05-13
 **Owner:** Josh Zastrow
 **Depends on:**
 - `v2026-05-06-persona-routing.md` — existing Hume config routing infrastructure
 - `v2026-05-12-agent-design-patterns.md` — `AgentRouter`, `CallerMemory`, `IntakeAwareRouter`
+- `v2026-05-12-consent-caller-memory.md` — `CallerMemory` protocol
 
 ---
 
-## 1. Vision
-
-Rehearse should feel like calling a real person who was trained to play a specific role.
-
-A caller practicing a conversation with their angry boss shouldn't get a generic "difficult character" — they should get a persona trained on their boss's actual complaints, speech patterns, and dismissal tactics. The persona is a combination of a Hume voice, a CLM (fine-tuned model or rich system prompt), and a dataset that shaped how the character behaves.
-
-This spec builds the **Persona Registry** — the infrastructure for storing, routing to, and eventually training these characters. Phase 1 ships seed personas and routing. The fine-tuning pipeline is a future dependency.
-
----
-
-## 2. Outcomes
+## 1. Outcomes
 
 | # | Outcome | Verifiable by |
 |---|---|---|
-| O1 | A first-time caller is asked "would you prefer a male or female practice partner?" during intake | LLM judge on transcript |
-| O2 | The practice phase uses the persona matching the caller's answer | Audio judge: `VLLMAudioProvider` (Gemma) |
-| O3 | A returning caller is NOT asked the gender question again | Absence check in transcript |
-| O4 | The gender preference persists in Honcho across process restarts | Multi-session live test |
-| O5 | Voice change produces a perceptibly different voice to the audio judge | Gemma audio classification |
-| O6 | `PersonaRoutingAgent` selects the correct persona from the registry via tool call | Unit test: mock tool response |
+| O1 | A first-time caller is asked "would you prefer a male or female practice partner?" during intake | Transcript presence check |
+| O2 | The practice phase uses the character agent matching the caller's answer | Agent name in router dispatch log |
+| O3 | A returning caller working on the same topic is NOT asked the gender question again | Absence check in transcript |
+| O4 | A returning caller with a new topic IS asked the question | Presence check in transcript |
+| O5 | The topic→gender preference is persisted in Honcho and survives across process restarts | Multi-session test with live backend |
 
 ---
 
-## 3. Key Decisions
+## 2. Inputs and Outputs
 
-**Persona Registry, not a voice list.**
-Routing picks from a registry of structured persona records — each with a voice, a CLM reference, a description, and tags. The routing agent calls `list_personas()` as a tool and reads the registry. Adding a new persona requires no code change, only a new registry entry.
+### Inputs to routing
 
-**Gender preference scope: global.**
-One preference per caller, not per topic. Stored in Honcho peer metadata. Overwritable by the caller at any time.
+| Input | Source | When available |
+|---|---|---|
+| `caller_hash` | `Session.phone_number_hash` | Start of call |
+| `situation` | `IntakeRecord.situation` (transcript-derived) | End of intake phase |
+| `topic_category` | LLM classifier over `situation` | Derived from intake record |
+| `gender_preference` | Spoken by caller in response to question, or recalled from memory | During intake or from Honcho |
 
-**Voice swap mechanism: `session_settings` mid-call.**
-Hume EVI supports updating `voice_id` and `system_prompt` via a `session_settings` WebSocket message during an active chat without disconnecting or losing context. No separate Hume configs needed per persona.
+### Outputs
 
-**Routing agent: lightweight + tool call.**
-A small agent (Claude Haiku or Gemma via vLLM) runs once at `IntakeComplete`. It reads the intake transcript and calls `list_personas()`. It returns the best-matching persona record. Completes within the bridge utterance window (~2s).
-
-**Eval judge: `VLLMAudioProvider` (Gemma via vLLM).**
-Existing provider (`rehearse/eval/providers/vllm.py`, model `gemma-4-e4b`). Handles both text routing checks and audio-based voice verification. Zero marginal cost per run.
-
-**Fine-tuning pipeline: future dependency.**
-Phase 1 ships prompt-based personas. Phase 2 adds a pipeline: ingest caller-provided data → assemble dataset → fine-tune model → register persona with `clm_endpoint`. The registry schema supports this today.
-
----
-
-## 4. Persona Registry
-
-### `PersonaRecord`
-
-```python
-# rehearse/personas/registry.py
-
-@dataclass
-class PersonaRecord:
-    id: str                          # stable slug, e.g. "male_boss_direct"
-    name: str                        # display name, e.g. "Direct Male Manager"
-    description: str                 # one sentence for routing agent context
-    gender: Literal["male", "female"]
-    voice_name: str                  # Hume voice name, e.g. "Wise Man"
-    voice_id: str | None = None      # resolved lazily from Hume voices API
-    system_prompt_template: str = "" # character prompt; {relationship} interpolated
-    clm_endpoint: str | None = None  # fine-tuned model URL (Phase 2)
-    tags: list[str] = field(default_factory=list)  # ["work", "confrontational"]
-```
-
-### Seed registry
-
-```python
-PERSONA_REGISTRY: list[PersonaRecord] = [
-    PersonaRecord(
-        id="female_coach_default",
-        name="Female Practice Partner",
-        description="Warm but direct female counterparty for general rehearsal.",
-        gender="female",
-        voice_name="Inspiring Woman",
-        tags=["default", "female"],
-    ),
-    PersonaRecord(
-        id="male_coach_default",
-        name="Male Practice Partner",
-        description="Calm but direct male counterparty for general rehearsal.",
-        gender="male",
-        voice_name="Wise Man",
-        tags=["default", "male"],
-    ),
-]
-```
-
-New personas are added as `PersonaRecord` entries — no code change required. When a fine-tuned model is ready, set `clm_endpoint` and the routing agent will prefer it automatically.
-
-### `PersonaRegistry` class
-
-```python
-class PersonaRegistry:
-    def __init__(self, records: list[PersonaRecord]) -> None: ...
-
-    def list(self, *, gender: str | None = None, tags: list[str] | None = None) -> list[PersonaRecord]:
-        """Return personas filtered by gender and/or tags."""
-
-    def get(self, persona_id: str) -> PersonaRecord | None: ...
-
-    def to_tool_response(self) -> list[dict]:
-        """Serialize for the routing agent's tool call response."""
-```
+| Output | Destination | Shape |
+|---|---|---|
+| `agent_preference` | `CallerMemory` (Honcho peer metadata) | `{topic_category: str, gender: "male" \| "female"}` |
+| Character agent selection | `AgentRegistry` lookup via `IntakeAwareRouter` | `MaleCharacterAgent` or `FemaleCharacterAgent` |
+| Gender question spoken | Hume EVI TTS (via `send_assistant_input`) | Plain sentence |
 
 ---
 
-## 5. PersonaRoutingAgent
+## 3. Functional Requirements
 
-A single-turn agent that runs at `IntakeComplete`. It has one tool.
+**FR1 — Topic classifier**
+A function `classify_topic(situation: str) -> str` maps a free-text situation
+to one of a fixed set of topic categories. Initial set: `"work"`, `"relationship"`,
+`"other"`. Implemented as a Claude Haiku call with `max_tokens=10, temperature=0`.
+Falls back to `"other"` on any error or null result.
 
-```python
-# rehearse/agents/persona_routing_agent.py
+**FR2 — Preference lookup at intake start**
+At the start of the intake phase, the intake coach queries memory for the
+caller's stored preference for the topic derived from any prior intakes.
+If a preference exists for the inferred topic, no gender question is asked.
 
-class PersonaRoutingAgent:
-    """Lightweight agent that picks a persona from the registry given an intake transcript."""
+**FR3 — Gender question during intake**
+If no prior preference exists for the current topic, the intake coach speaks:
+*"One more thing — would you prefer to practice with a male or female voice?"*
+The response is captured by a lightweight classifier (`"male"` / `"female"` /
+`"no preference"`). `"no preference"` defaults to `"female"` (current default
+Hume voice).
 
-    def __init__(
-        self,
-        registry: PersonaRegistry,
-        *,
-        client: AsyncAnthropic,
-        model: str = "claude-haiku-4-5-20251001",
-    ) -> None: ...
+**FR4 — Preference stored on IntakeComplete**
+When `IntakeComplete` fires, `IntakeMemoryRecorder` stores both the situation
+and the `(topic_category, gender_preference)` pair in the caller's Honcho peer
+metadata.
 
-    async def select(
-        self,
-        transcript: str,
-        gender_hint: Literal["male", "female"] | None,
-    ) -> PersonaRecord:
-        """
-        Call the LLM with the transcript and a list_personas tool.
-        The LLM calls list_personas(), reads the results, and returns
-        the best-matching persona_id. Falls back to the default persona
-        for the given gender on any error.
-        """
-```
+**FR5 — IntakeAwareRouter uses preference**
+`IntakeAwareRouter.route()` receives the `IntakeRecord` artifact. It classifies
+the topic, queries memory for the preference, and returns `MaleCharacterAgent`
+or `FemaleCharacterAgent`. If memory has no preference, it falls back to
+`FemaleCharacterAgent`.
 
-### Tool definition
+**FR6 — Character agent differentiation (Phase 1 — CLM prompts)**
+`MaleCharacterAgent` and `FemaleCharacterAgent` differ only in their system
+prompt: the character is described as male or female with a matching name. The
+Hume EVI TTS voice is unchanged in Phase 1 (same Hume config for all calls).
+Actual voice swapping is Phase 2.
 
-```python
-{
-    "name": "list_personas",
-    "description": "Return available practice partner personas. Filter by gender or tags.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "gender": {"type": "string", "enum": ["male", "female"]},
-            "tags": {"type": "array", "items": {"type": "string"}}
-        }
-    }
-}
-```
-
-The tool handler returns `registry.to_tool_response()` — a list of persona dicts with `id`, `name`, `description`, `tags`. The LLM picks one and returns `{"persona_id": "male_boss_direct"}`.
-
-**Latency target**: ≤ 400ms. `max_tokens=30`, `temperature=0`. Runs during the bridge utterance.
+**FR7 — Memory clear for test setup**
+`CallerMemory` gains `clear_caller(caller_hash: str) -> None` on all
+implementations. Used to reset a test caller before an eval run.
 
 ---
 
-## 6. Functional Requirements
+## 4. Non-Functional Requirements
 
-**FR1 — Gender question gating.**
-At `IntakeComplete`, check `memory.get_gender_preference(caller_hash)`. If found, skip question and route using stored preference. If not found, intake coach asks during the intake conversation (after situation is captured):
+**NFR1 — Latency**: Topic classification adds at most 400 ms before the first
+intake word. Run in the background while the intake coach speaks the opening
+line. Do not block on it.
 
-> *"One more thing — would you prefer to practice with a male or female voice?"*
+**NFR2 — Graceful degradation**: Any failure in classification, memory read,
+or preference parsing falls through to `FemaleCharacterAgent` without
+surfacing an error to the caller.
 
-**FR2 — Response classification.**
-Rule-based: "male"/"man"/"he" → `"male"`; "female"/"woman"/"she" → `"female"`. Ambiguous defaults to `"female"`.
+**NFR3 — Test suite unchanged**: All existing tests pass with no Anthropic key
+and no Honcho. New tests that require live services are marked
+`@pytest.mark.live_api`.
 
-**FR3 — Preference stored.**
-`memory.record_gender_preference(caller_hash, gender)` called after the answer is captured. Honcho metadata key `"gender"`.
-
-**FR4 — Persona selected by routing agent.**
-`PersonaRoutingAgent.select(transcript, gender_hint)` runs at `IntakeComplete`. Returns a `PersonaRecord`. The gender hint constrains the tool call so the agent only sees matching-gender personas.
-
-**FR5 — Voice swap via `session_settings`.**
-`PersonaSwapCoordinator.on_intake_to_practice()`:
-1. Speaks: *"Just a moment while I connect you with your practice partner."*
-2. Resolves `voice_id` from `persona.voice_name` via Hume voices API (cached).
-3. Sends `session_settings` with `voice_id` + `system_prompt`.
-
-**FR6 — `send_session_settings` on `HumeEVIClient`.**
-
-```python
-async def send_session_settings(
-    self,
-    *,
-    voice_id: str | None = None,
-    system_prompt: str | None = None,
-) -> None:
-    payload = {"type": "session_settings"}
-    if voice_id:
-        payload["voice_id"] = voice_id
-    if system_prompt:
-        payload["system_prompt"] = system_prompt
-    await self._socket.send(json.dumps(payload))
-```
-
-**FR7 — Voice ID resolution.**
-`resolve_voice_id(voice_name: str) -> str` calls `hume.empathic_voice.voices.list()`, finds the matching entry, caches the result in memory for the process lifetime. Cache invalidated on restart.
-
-**FR8 — Memory clear for test setup.**
-`CallerMemory.clear_caller(caller_hash)` removes all stored data. Used only in eval fixtures.
+**NFR4 — No PII in Honcho**: Only `topic_category` and `gender` are stored,
+never the raw `situation` string. Situation storage (for Honcho Deriver) is
+handled separately in `store_session()`.
 
 ---
 
-## 7. Non-Functional Requirements
-
-**NFR1** — Persona routing adds ≤ 400ms before bridge line ends.
-**NFR2** — Any failure falls back to default female persona silently.
-**NFR3** — All existing tests pass with no Honcho, no vLLM, no Anthropic key.
-**NFR4** — Only `"male"` / `"female"` stored in Honcho, no raw utterances.
-
----
-
-## 8. Out of Scope
+## 5. Out of Scope
 
 | Item | Reason |
 |---|---|
-| Fine-tuning pipeline | Future spec; schema ready today |
-| Per-topic gender preferences | Deferred; global preference ships first |
-| Custom Hume voice training | Requires Hume custom voice feature |
-| Mid-call persona change after practice starts | Swap fires once at transition |
-| Music generation during transfer | Deferred to follow-up spec |
-| More than two gender options | Extend registry when needed |
+| Actual male/female Hume TTS voices (Phase 2) | Requires mid-call config swap (`swap_config` stub); deferred |
+| More than 2 genders or "no preference" routing to a distinct agent | Scope; ship binary first |
+| Cross-topic preference generalization ("if you chose male for work, assume male for other") | Requires more signal; defer |
+| Preference changing mid-call | Not needed for MVP |
+| Preference editing by caller | No UI yet |
+| SMS-body gender pre-routing (before call connects) | Builds on Phase 2; deferred |
 
 ---
 
-## 9. Eval Judge: `VLLMAudioProvider` (Gemma)
+## 6. Approach
 
-### Judgment 1 — Routing check (text)
+### Phase 1 (this spec) — CLM-level gender routing
 
-Uses `VLLMAudioProvider` in text mode. Input: transcript of intake + first two practice turns.
+The Hume EVI session uses a single config (no voice change). Gender
+differentiation happens at the CLM layer: `IntakeAwareRouter` selects
+`MaleCharacterAgent` or `FemaleCharacterAgent`, each with a different system
+prompt persona. The practice partner says "I'm Alex, your manager" vs "I'm
+Sarah, your manager."
+
+This is testable via transcript analysis without audio inspection.
+
+### Phase 2 (future spec) — Hume config voice swap
+
+When `swap_config` is implemented, pre-connect routing applies the known
+gender preference at call start for returning callers. For new callers, a
+reconnect with a different Hume config fires at the intake→practice
+transition. Phase 2 also adds a real male Hume voice config.
+
+### Topic classification
 
 ```python
-prompt = f"""
+async def classify_topic(
+    situation: str,
+    *,
+    client: AsyncAnthropic,
+    model: str = "claude-haiku-4-5-20251001",
+) -> Literal["work", "relationship", "other"]:
+    """Classify a situation string into a topic category."""
+```
+
+One-shot prompt listing the three categories with examples. Returns `"other"`
+on any failure. `max_tokens=10`, `temperature=0`.
+
+### Intake gender question
+
+The intake coach asks the gender question after confirming the situation, before
+practice begins. Gated on `memory.get_agent_preference(caller_hash, topic_category) is None`.
+
+Spoken by `send_assistant_input` (bypasses CLM, deterministic):
+
+> "One more thing — would you prefer to practice with a male or female voice?"
+
+Response classified by a rule-based check for "male"/"man"/"he" vs
+"female"/"woman"/"she". Ambiguous → `"female"`.
+
+---
+
+## 7. Interface
+
+### `CallerMemory` additions
+
+```python
+# rehearse/memory.py
+
+async def get_agent_preference(
+    self,
+    caller_hash: str,
+    topic_category: str,
+) -> Literal["male", "female"] | None:
+    """Return stored gender preference for a topic, or None if unknown."""
+    ...
+
+async def record_agent_preference(
+    self,
+    caller_hash: str,
+    topic_category: str,
+    gender: Literal["male", "female"],
+) -> None:
+    """Persist topic→gender preference for future routing."""
+    ...
+
+async def clear_caller(self, caller_hash: str) -> None:
+    """Remove all stored data for this caller. Used in test setup."""
+    ...
+```
+
+Honcho storage: `peer.aio.set_metadata({..., "agent_prefs": {"work": "male", "relationship": "female"}})`.
+
+### New agent classes
+
+```python
+# rehearse/agents/roles/character.py
+
+class MaleCharacterAgent:
+    name = "male_character"
+    _GENDER_PROMPT = "You are playing a male character. Use a male name."
+
+class FemaleCharacterAgent:
+    name = "female_character"
+    _GENDER_PROMPT = "You are playing a female character. Use a female name."
+```
+
+Both extend the existing `CharacterAgent` base; only the system prompt differs.
+
+### `IntakeAwareRouter` (already in spec, now fleshed out)
+
+```python
+async def route(self, session: Session, artifact: Any = None) -> RehearseAgent:
+    phase = _current_phase(session)
+    if phase != Phase.PRACTICE:
+        return await self._phase_router.route(session)
+
+    intake = await self._load_intake(session)
+    topic = await classify_topic(intake.situation, client=self._llm)
+    pref = await self._memory.get_agent_preference(
+        session.phone_number_hash or "", topic
+    )
+    if pref == "male":
+        return self._registry.get("male_character")
+    return self._registry.get("female_character")  # default
+```
+
+---
+
+## 8. Test Fixture
+
+### Eval scenario: three calls, one caller
+
+A synthetic `LLMCustomer` plays the caller. Calls are abbreviated: consent +
+intake + 2 practice turns + cancel (no feedback phase). Memory is cleared
+before the run via `clear_caller(test_caller_hash)`.
+
+```
+call_1:
+  topic: "ask my manager for a raise" (work)
+  caller is new → intake should ask gender question
+  caller answers: "male"
+  expected: MaleCharacterAgent selected in practice phase
+
+call_2:
+  topic: "ask my manager for a promotion" (work, same category)
+  expected: no gender question
+  expected: MaleCharacterAgent selected (from memory)
+
+call_3:
+  topic: "talk to my partner about moving in together" (relationship)
+  caller is new to this topic → intake should ask gender question
+  caller answers: "female"
+  expected: FemaleCharacterAgent selected in practice phase
+```
+
+### Fixture setup
+
+```python
+@pytest.fixture
+def routing_eval_memory(honcho_server: str) -> HonchoCallerMemory:
+    """Fresh memory with a known test caller hash, cleared before the run."""
+    memory = HonchoCallerMemory(base_url=honcho_server, workspace_id="rehearse-test")
+    return memory
+
+@pytest.fixture
+def test_caller() -> str:
+    return f"eval-caller-{uuid.uuid4().hex[:8]}"
+```
+
+The `honcho_server` fixture (from `conftest.py`) starts a local Honcho
+instance. Tests are skipped when `lib/honcho/` is absent.
+
+---
+
+## 9. Eval Judge
+
+**Model**: `claude-haiku-4-5-20251001` (cheapest Anthropic text model)
+
+**Input**: call transcript text
+
+**Output** (structured JSON):
+
+```json
+{
+  "gender_question_asked": true,
+  "agent_selected": "male_character",
+  "routing_correct": true,
+  "reasoning": "Intake coach asked gender question at turn 3. ..."
+}
+```
+
+**Judge prompt sketch**:
+
+```
 You are evaluating a voice coaching call transcript.
-Expected: {expected_behavior}
-Transcript: {transcript}
 
-Answer in JSON:
-{{"gender_question_asked": true|false, "routing_correct": true|false, "reasoning": "..."}}
-"""
+Call context: {call_context}
+Expected behavior: {expected}
+
+Transcript:
+{transcript}
+
+Answer in JSON with keys:
+  gender_question_asked: bool
+  agent_selected: "male_character" | "female_character" | "unknown"
+  routing_correct: bool
+  reasoning: str (one sentence)
 ```
 
-### Judgment 2 — Voice verification (audio)
-
-Input: WAV clip of the character's first 10 seconds in the practice phase.
-
-```python
-prompt = "Is the speaker in this audio clip male or female? Answer with one word: male or female."
-```
-
-Expected output matches the routing decision. This verifies that `session_settings` actually changed the voice.
+The judge is invoked once per call. Three calls = three judgments. Pass
+condition: all three `routing_correct == true`.
 
 ---
 
-## 10. Test Scenarios
-
-Three abbreviated calls (consent + intake + 2 practice turns + cancel). Memory cleared before run.
-
-```
-call_1  new caller
-        situation: "I need to ask my manager for a raise"
-        caller says: "male"
-        → routing agent selects male_coach_default
-        → session_settings: voice_id=wise_man, male system prompt
-        expected voice judgment: "male"
-
-call_2  same caller
-        → no gender question (from memory)
-        → same persona
-        expected voice judgment: "male"
-
-call_3  same caller, preference change
-        caller says: "actually female"
-        → routing agent selects female_coach_default
-        expected voice judgment: "female"
-        expected memory after: "female"
-```
-
----
-
-## 11. How to Run
+## 10. How to Run
 
 ```bash
+# Requires: make serve with Honcho running, ANTHROPIC_API_KEY set
 uv run pytest tests/eval/test_persona_voice_routing_eval.py \
-  -v -m "live_api and live_honcho" --timeout=120
+  -v \
+  -m "live_api and live_honcho" \
+  --timeout=120
 ```
 
-Clear a test caller:
+Each call is capped at 90 seconds by cancelling after the second practice
+turn. The full three-scenario suite runs in under 5 minutes.
+
+To run a single scenario:
+
 ```bash
-uv run python -c "
-import asyncio
-from rehearse.memory import HonchoCallerMemory
-m = HonchoCallerMemory(base_url='http://localhost:8001')
-asyncio.run(m.clear_caller('your-test-hash'))
-"
+uv run pytest tests/eval/test_persona_voice_routing_eval.py::test_new_caller_is_asked_gender -v
 ```
 
 ---
 
-## 12. Artifacts Produced
+## 11. Artifacts Produced
+
+Each eval run writes to `sessions/<eval_session_id>/`:
 
 | Artifact | Format | Contents |
 |---|---|---|
-| `transcript.jsonl` | JSONL | Full transcript |
-| `routing_eval_result.json` | JSON | Per-call: `{gender_question_asked, persona_selected, routing_correct, reasoning}` |
-| `voice_eval_result.json` | JSON | Per-call: `{expected_gender, gemma_judgment, pass}` |
-| `character_audio_clip.wav` | WAV | First 10s of character speech (Gemma input) |
-| `memory_state.json` | JSON | Honcho `gender` key after all calls |
+| `transcript.jsonl` | JSONL | Full turn-by-turn transcript |
+| `routing_eval_result.json` | JSON | `{call_id, gender_question_asked, agent_selected, routing_correct, reasoning}` per call |
+| `memory_state.json` | JSON | Snapshot of `agent_prefs` from Honcho after all three calls |
+
+Summary printed to stdout:
+
+```
+PASS  call_1  gender_asked=True  agent=male_character   correct=True
+PASS  call_2  gender_asked=False agent=male_character   correct=True
+PASS  call_3  gender_asked=True  agent=female_character correct=True
+
+3/3 routing scenarios passed.
+```
 
 ---
 
-## 13. File Inventory
+## 12. File Inventory
 
 | File | Change |
 |---|---|
-| `rehearse/personas/registry.py` | **New** — `PersonaRecord`, `PersonaRegistry`, `PERSONA_REGISTRY` |
-| `rehearse/personas/__init__.py` | **New** — package init |
-| `rehearse/agents/persona_routing_agent.py` | **New** — `PersonaRoutingAgent` with `list_personas` tool |
-| `rehearse/memory.py` | Add `get_gender_preference`, `record_gender_preference`, `clear_caller` |
+| `rehearse/memory.py` | Add `get_agent_preference`, `record_agent_preference`, `clear_caller` to protocol + all 4 implementations |
+| `rehearse/agents/topic_classifier.py` | **New** — `classify_topic()` |
 | `rehearse/agents/roles/character.py` | Add `MaleCharacterAgent`, `FemaleCharacterAgent` |
-| `rehearse/agents/registry.py` | Register both character agents |
-| `rehearse/agents/router.py` | `IntakeAwareRouter` reads gender preference + invokes routing agent |
-| `rehearse/agents/persona_swap.py` | Extend: call routing agent, send `session_settings` at PRACTICE transition |
-| `rehearse/services/hume_evi.py` | Add `send_session_settings(voice_id, system_prompt)` |
-| `rehearse/services/hume_configs.py` | Add `resolve_voice_id(voice_name)` with in-process cache |
-| `rehearse/intake.py` | Ask gender question when no preference found; store in `IntakeRecord` |
-| `rehearse/types.py` | Add `gender_preference: Literal["male","female"] \| None` to `IntakeRecord` |
-| `rehearse/config.py` | Add `rehearse_male_voice_name: str = "Wise Man"` |
-| `tests/test_persona_registry.py` | **New** — registry lookup, tag filtering, tool serialization |
-| `tests/test_persona_routing_agent.py` | **New** — tool call mocked, persona selection |
-| `tests/test_gender_memory.py` | **New** — get/record/clear gender preference |
-| `tests/test_session_settings.py` | **New** — `send_session_settings` WebSocket payload |
+| `rehearse/agents/registry.py` | Register both in `build_registry()` |
+| `rehearse/agents/router.py` | Flesh out `IntakeAwareRouter` with topic + memory lookup |
+| `rehearse/intake.py` | Emit gender question when no preference found; capture answer |
+| `rehearse/types.py` | Add `gender_preference: "male" \| "female" \| None` to `IntakeRecord` |
 | `tests/eval/test_persona_voice_routing_eval.py` | **New** — 3-scenario eval |
+| `tests/test_topic_classifier.py` | **New** — unit tests for classifier |
+| `tests/test_intake_gender_question.py` | **New** — unit tests for question gating logic |
+
+---
+
+## 13. Migration
+
+1. Run `uv run rehearse-hume sync` after registering the new male/female character
+   Hume configs (Phase 2 only; Phase 1 requires no new configs).
+2. Existing callers have no `agent_prefs` in Honcho metadata → falls through
+   to `FemaleCharacterAgent` as default. No disruption to live callers.
+3. `clear_caller` is only called in test fixtures; it is a no-op in `NullCallerMemory`.
 
 ---
 
 ## 14. Open Questions
 
-| # | Question |
-|---|---|
-| Q1 | Is "Wise Man" the correct Hume voice name for the male voice? Verify in Hume dashboard before wiring. |
-| Q2 | Does `session_settings` apply before or after the current TTS utterance finishes? Test empirically — affects bridge line timing. |
-| Q3 | Should `PersonaRoutingAgent` use the same Anthropic client as the CLM, or a separate instance with a fixed Haiku model? |
+| # | Question | Impact |
+|---|---|---|
+| Q1 | Should the gender question be asked once globally (any topic) or per topic category? | If global: simpler memory, but caller may want different voice for work vs relationship. Per-topic is spec'd above. |
+| Q2 | What's the right fallback voice gender when memory is empty? Female (current Hume voice) or prompt user always? | Spec above defaults to female. |
+| Q3 | For Phase 2, does config swap happen at call start (pre-routed for returning callers) or mid-call (reconnect on intake complete)? | Architectural — defer to Phase 2 spec. |
