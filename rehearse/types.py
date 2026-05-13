@@ -238,9 +238,21 @@ class ParticipantConfig(Strict):
 class Session(Strict):
     """Index record for a session directory.
 
-    All artifact file paths are stored in `artifact_paths` keyed by logical name
-    (e.g. 'transcript', 'prosody', 'audio', 'story', 'feedback'). The actual
-    per-frame data lives in the referenced files; `Session` is the manifest.
+    All artifact file paths are stored in `artifact_paths` keyed by logical name.
+    The actual per-frame data lives in the referenced files; `Session` is the
+    manifest. Canonical keys (all paths relative to session_dir):
+
+    Runtime artifacts (written during the live call):
+      "transcript"      → transcript.jsonl
+      "prosody"         → prosody.jsonl
+      "audio"           → audio.wav  (mixed, 16kHz PCM16)
+      "timing"          → timing.jsonl
+      "story"           → story.md
+      "feedback"        → feedback.md
+
+    Voice training pipeline (written by offline batch jobs):
+      "clips"           → pipeline/clips/clips.jsonl
+      "enhanced_audio"  → pipeline/enhanced/manifest.jsonl
     """
 
     id: str = Field(default_factory=_new_id)
@@ -355,7 +367,7 @@ class EvalRun(Strict):
 
 
 # ───────────────────────────────────────────────────────────────────────────────
-# Training — SFT examples, DPO preference pairs
+# Training — CLM (coaching model) SFT/DPO types
 # ───────────────────────────────────────────────────────────────────────────────
 
 
@@ -387,6 +399,79 @@ class PreferencePair(Strict):
     dimension: RubricDimension
     annotator: Literal["human", "critic_llm", "outcome_weighted"]
     weight: float = 1.0
+
+
+# ───────────────────────────────────────────────────────────────────────────────
+# Training — Voice model (TTS fine-tuning) pipeline types
+#
+# These types represent the output of the offline audio pipeline that converts
+# live session recordings into (audio, text) pairs for TTS fine-tuning.
+#
+# Pipeline order:
+#   AudioRecorder (live) → audio/user/turn_*.wav   [role-switch blocks, 16kHz]
+#   vad_segment  (batch) → pipeline/clips/          [per-VAD clips, 16kHz]
+#   audio_enhance (batch) → pipeline/enhanced/      [denoised + 24kHz]
+# ───────────────────────────────────────────────────────────────────────────────
+
+
+class AudioClipRecord(Strict):
+    """One VAD-segmented user clip produced by the turn-segmentation pipeline.
+
+    Rows are written to `pipeline/clips/clips.jsonl` inside the session directory.
+    All paths are relative to the session directory root.
+
+    `timing_turn_index` is the turn_index from timing.jsonl. `start_ms` and
+    `end_ms` are relative to the start of the containing `audio/user/turn_N.wav`
+    file (not the session wall-clock anchor), so they can be used directly as
+    byte offsets: `offset = start_ms / 1000 * 16000 * 2`.
+    """
+
+    session_id: str
+    clip_index: int
+    role_switch_turn: int
+    timing_turn_index: int
+    start_ms: int
+    end_ms: int
+    duration_ms: int
+    wav_path: str
+    text: str | None = None
+    transcript_missing: bool = False
+    status: Literal["accepted", "rejected_too_short", "rejected_consent"] = "accepted"
+
+
+class EnhancedClipRecord(Strict):
+    """One clip after source separation and bandwidth extension to 24kHz.
+
+    Rows are written to `pipeline/enhanced/manifest.jsonl` inside the session
+    directory. All paths are relative to the session directory root.
+    """
+
+    session_id: str
+    clip_index: int
+    source_wav_path: str
+    enhanced_wav_path: str
+    duration_s: float
+    sample_rate: int = 24_000
+    dnsmos_ovrl: float
+    status: Literal["accepted", "rejected_quality", "rejected_consent"] = "accepted"
+
+
+class VoiceTrainingRecord(Strict):
+    """One (audio, text) pair ready for TTS fine-tuning.
+
+    Produced by joining accepted AudioClipRecords with accepted EnhancedClipRecords.
+    This is the final output consumed by the fine-tuning job.
+    `wav_path` points to the 24kHz enhanced file; all paths are relative to
+    the session directory root.
+    """
+
+    session_id: str
+    clip_index: int
+    wav_path: str
+    text: str
+    duration_s: float
+    dnsmos_ovrl: float
+    phone_number_hash: str | None = None
 
 
 # ───────────────────────────────────────────────────────────────────────────────
