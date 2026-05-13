@@ -453,33 +453,33 @@ separate "candidates" directory; the candidate sets live alongside
 transcript turns in the bundle that the existing `viewer.py` already
 renders.
 
-This is intentionally a re-implementation, not a wrapper. The current
-`CLMResponder.stream_reply` interface streams tokens directly to TTS,
-which is incompatible with selecting after generation. We replace the
-single-stream path with a **buffered-then-streamed path** as the *new
-default for BoN-eligible sessions*, with the old streaming path
-preserved as a fallback for non-BoN sessions and for failure recovery.
+The BoN path is implemented as a branch **inside** `CLMResponder.stream_reply()`
+(at `rehearse/agents/clm.py`, introduced by `v2026-05-12-agent-design-patterns.md`)
+rather than as a parallel protocol. Steps 1–3 and 5 of the agent lifecycle
+(route → recall → prompt → after_turn) are unchanged. Step 4 forks on
+`bon_eligible`: non-eligible sessions call `transport.stream()` as today;
+eligible sessions call `transport.generate()` N times in parallel, select,
+then re-stream the winner. The SSE byte-stream contract to Hume is unchanged;
+the internals are not.
 
 ### Deliverables
 
 **Runtime core changes:**
-- `CoachResponder` protocol (replaces `CLMResponder` for the BoN path):
-  - `generate_candidates(prompt_state, n) -> list[Candidate]` — parallel
-    via `asyncio.gather`.
-  - `select(context, candidates) -> SelectorDecision` — runs the
-    selector.
-  - `stream(chosen) -> AsyncIterator[bytes]` — re-streams the chosen
-    candidate to the existing SSE contract Hume EVI expects.
-- The OpenAI-compatible `/v1/chat/completions` endpoint (`clm.py:131`) is
-  re-implemented to drive `CoachResponder` instead of `CLMResponder`
-  directly. The SSE byte-stream contract to Hume is unchanged; the
-  internals are not.
+- BoN branch in `CLMResponder.stream_reply()` (`rehearse/agents/clm.py`):
+  - `_generate_candidates(system_blocks, messages, n) -> list[str]` — calls
+    `transport.generate()` N times via `asyncio.gather`.
+  - `_select(context, candidates) -> SelectorDecision` — runs the selector.
+  - Re-streams the chosen candidate via `transport.stream()` (or directly
+    iterates the buffered text) to the existing SSE contract Hume EVI expects.
+- `LLMTransport.generate()` — buffered (non-streaming) completion that returns
+  the full response as a `str`. Required addition to `v2026-05-12-agent-design-patterns.md`
+  §4.1 before this spec can be implemented (see Dependencies).
 - `Selector` — Haiku-class text judge over recent context + N candidate
   texts; emits `chosen_index`, per-dimension scalar scores, rationale;
   800ms timeout with `chosen_index=0` fallback.
 - Single-candidate fallback path: both candidates fail, selector times
   out, or BoN disabled at the session level → fall through to the
-  existing single-stream `CLMResponder`. Recorded as a `bon_fallback`
+  direct `transport.stream()` path. Recorded as a `bon_fallback`
   event in the session trace.
 
 **Session-trace integration:**
@@ -507,6 +507,8 @@ preserved as a fallback for non-BoN sessions and for failure recovery.
   `rubric_version`. Reproducibility for any historical session.
 
 ### Dependencies
+- `v2026-05-12-agent-design-patterns.md` migration steps 1–7 must land first
+  (BoN extends the new `CLMResponder`; `LLMTransport.generate()` must exist).
 - Mini-spec 1 (schema for `RubricScore`, `Candidate`, `TurnCandidateSet`).
 - Mini-spec 3 (selector calibration must pass before live ship).
 - Mini-spec 4 (timing instrumentation already part of the trace; BoN
