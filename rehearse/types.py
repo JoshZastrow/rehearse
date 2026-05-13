@@ -155,6 +155,7 @@ class IntakeRecord(Strict):
     user_goal: str
     desired_tone: str | None = None
     gender_preference: str | None = None
+    topic_category: str | None = None
     captured_at: datetime
 
 
@@ -436,6 +437,87 @@ class PreferencePair(Strict):
     dimension: RubricDimension
     annotator: Literal["human", "critic_llm", "outcome_weighted"]
     weight: float = 1.0
+
+
+# ───────────────────────────────────────────────────────────────────────────────
+# Pipeline event bus — outbox pattern
+#
+# Events are written to {sessions_root}/.outbox/events.jsonl by producers and
+# consumed by workers via an asyncio.Queue backed by that file.
+#
+# Choreography chain (no orchestrator):
+#   finalize() → SessionFinalizedEvent
+#              → [VadSegmentWorker] → VadCompleteEvent
+#                                   → [AudioEnhanceWorker] → EnhancementCompleteEvent
+# ───────────────────────────────────────────────────────────────────────────────
+
+
+class OutboxEvent(Strict):
+    """Base record for one entry in the pipeline outbox file.
+
+    `status` transitions: pending → processing → done | failed.
+    Workers claim an event (set processing + claimed_at) before starting
+    work and ack/fail it after. On startup, recover_pending() re-enqueues
+    any event stuck in "processing" beyond the claim timeout.
+
+    Tracing fields:
+      `trace_id`      — generated once by the chain root (SessionFinalizedEvent)
+                        and copied verbatim onto every downstream event. All events
+                        in one pipeline run share the same trace_id, regardless of
+                        how many times the session is reprocessed.
+      `parent_event_id` — id of the specific OutboxEvent that triggered this one.
+                        None on the chain root. Together with trace_id this lets
+                        you reconstruct the full DAG from the outbox file alone,
+                        and filter every structlog line for a single pipeline run.
+    """
+
+    id: str = Field(default_factory=_new_id)
+    type: str
+    session_id: str
+    published_at: datetime
+    status: Literal["pending", "processing", "done", "failed"] = "pending"
+    claimed_at: datetime | None = None
+    completed_at: datetime | None = None
+    error: str | None = None
+    payload: dict[str, object] = Field(default_factory=dict)
+    trace_id: str = Field(default_factory=_new_id)
+    parent_event_id: str | None = None
+
+
+class SessionFinalizedEvent(OutboxEvent):
+    """Published by SessionOrchestrator.finalize() for every consented session.
+
+    Triggers VadSegmentWorker. `completion_status` and `consent` are stored
+    in `payload` on serialization via model_dump().
+    """
+
+    type: str = "session_finalized"
+    completion_status: Literal["complete", "partial", "failed"]
+    consent: ConsentState
+
+
+class VadCompleteEvent(OutboxEvent):
+    """Published by VadSegmentWorker after pipeline/clips/clips.jsonl is written.
+
+    Triggers AudioEnhanceWorker.
+    """
+
+    type: str = "vad_complete"
+    clip_count: int
+    accepted_count: int
+    rejected_too_short: int
+
+
+class EnhancementCompleteEvent(OutboxEvent):
+    """Published by AudioEnhanceWorker after pipeline/enhanced/voice_training.jsonl.
+
+    Terminal event; no downstream worker currently registered.
+    """
+
+    type: str = "enhancement_complete"
+    accepted_count: int
+    rejected_quality: int
+    total_duration_s: float
 
 
 # ───────────────────────────────────────────────────────────────────────────────

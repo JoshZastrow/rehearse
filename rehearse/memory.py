@@ -94,6 +94,18 @@ class CallerMemory(Protocol):
         """Persist the caller's voice gender preference. Overwrites prior value."""
         ...
 
+    async def get_agent_preference(
+        self, caller_hash: str, topic_category: str
+    ) -> str | None:
+        """Return stored gender preference for a topic ('male'/'female'), or None."""
+        ...
+
+    async def record_agent_preference(
+        self, caller_hash: str, topic_category: str, gender: str
+    ) -> None:
+        """Persist topic→gender preference. Overwrites prior value for that topic."""
+        ...
+
     async def clear_caller(self, caller_hash: str) -> None:
         """Remove all stored data for this caller. Used in eval setup only."""
         ...
@@ -131,6 +143,12 @@ class NullCallerMemory:
     async def record_gender_preference(self, caller_hash: str, gender: str) -> None:
         pass
 
+    async def get_agent_preference(self, caller_hash: str, topic_category: str) -> str | None:
+        return None
+
+    async def record_agent_preference(self, caller_hash: str, topic_category: str, gender: str) -> None:
+        pass
+
     async def clear_caller(self, caller_hash: str) -> None:
         pass
 
@@ -143,6 +161,7 @@ class InMemoryCallerMemory:
         self._intakes: dict[str, list[str]] = {}
         self._sessions: dict[str, list[dict]] = {}
         self._gender: dict[str, str] = {}
+        self._agent_prefs: dict[str, dict[str, str]] = {}  # {caller_hash: {topic: gender}}
 
     async def has_prior_consent(self, caller_hash: str) -> bool:
         return caller_hash in self._consented
@@ -171,11 +190,18 @@ class InMemoryCallerMemory:
     async def record_gender_preference(self, caller_hash: str, gender: str) -> None:
         self._gender[caller_hash] = gender
 
+    async def get_agent_preference(self, caller_hash: str, topic_category: str) -> str | None:
+        return self._agent_prefs.get(caller_hash, {}).get(topic_category)
+
+    async def record_agent_preference(self, caller_hash: str, topic_category: str, gender: str) -> None:
+        self._agent_prefs.setdefault(caller_hash, {})[topic_category] = gender
+
     async def clear_caller(self, caller_hash: str) -> None:
         self._consented.discard(caller_hash)
         self._intakes.pop(caller_hash, None)
         self._sessions.pop(caller_hash, None)
         self._gender.pop(caller_hash, None)
+        self._agent_prefs.pop(caller_hash, None)
 
 
 class HonchoCallerMemory:
@@ -340,6 +366,32 @@ class HonchoCallerMemory:
         except Exception as exc:
             log.warning("honcho.record_gender_preference.failed", caller_hash=caller_hash[:8], error=str(exc))
 
+    async def get_agent_preference(self, caller_hash: str, topic_category: str) -> str | None:
+        try:
+            peer = await self._honcho.aio.peer(caller_hash)
+            metadata = await peer.aio.get_metadata()
+            prefs = metadata.get("agent_prefs", {})
+            return prefs.get(topic_category) or None
+        except Exception as exc:
+            log.warning("honcho.get_agent_preference.failed", caller_hash=caller_hash[:8], error=str(exc))
+            return None
+
+    async def record_agent_preference(self, caller_hash: str, topic_category: str, gender: str) -> None:
+        try:
+            peer = await self._honcho.aio.peer(caller_hash)
+            metadata = await peer.aio.get_metadata()
+            prefs = dict(metadata.get("agent_prefs", {}))
+            prefs[topic_category] = gender
+            await peer.aio.set_metadata({**metadata, "agent_prefs": prefs})
+            log.info(
+                "honcho.agent_preference_recorded",
+                caller_hash=caller_hash[:8],
+                topic=topic_category,
+                gender=gender,
+            )
+        except Exception as exc:
+            log.warning("honcho.record_agent_preference.failed", caller_hash=caller_hash[:8], error=str(exc))
+
     async def clear_caller(self, caller_hash: str) -> None:
         try:
             peer = await self._honcho.aio.peer(caller_hash)
@@ -459,6 +511,24 @@ class MCPCallerMemory:
             await self._call_tool("record_gender_preference", {"caller_hash": caller_hash, "gender": gender})
         except Exception as exc:
             log.warning("mcp.record_gender_preference.failed", caller_hash=caller_hash[:8], error=str(exc))
+
+    async def get_agent_preference(self, caller_hash: str, topic_category: str) -> str | None:
+        try:
+            result = await self._call_tool(
+                "get_agent_preference", {"caller_hash": caller_hash, "topic_category": topic_category}
+            )
+            return result.strip() or None
+        except Exception:
+            return None
+
+    async def record_agent_preference(self, caller_hash: str, topic_category: str, gender: str) -> None:
+        try:
+            await self._call_tool(
+                "record_agent_preference",
+                {"caller_hash": caller_hash, "topic_category": topic_category, "gender": gender},
+            )
+        except Exception as exc:
+            log.warning("mcp.record_agent_preference.failed", caller_hash=caller_hash[:8], error=str(exc))
 
     async def clear_caller(self, caller_hash: str) -> None:
         try:

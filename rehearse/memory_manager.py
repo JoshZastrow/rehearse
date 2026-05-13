@@ -72,3 +72,21 @@ class MemoryManager:
 
     async def record_consent(self, caller_hash: str) -> None:
         await self._provider.record_consent(caller_hash)
+
+    # ------------------------------------------------------------------
+    # Per-topic agent preference (used by IntakeCoachAgent + IntakeAwareRouter)
+    # ------------------------------------------------------------------
+
+    async def get_agent_preference(self, caller_hash: str, topic_category: str) -> str | None:
+        """Return stored gender preference for a topic, or None."""
+        if not caller_hash:
+            return None
+        try:
+            return await self._provider.get_agent_preference(caller_hash, topic_category)
+        except Exception as exc:
+            log.warning(
+                "memory_manager.get_agent_preference.failed",
+                topic=topic_category,
+                error=str(exc),
+            )
+            return None
