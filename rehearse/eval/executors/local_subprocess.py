@@ -15,6 +15,20 @@ from pathlib import Path
 from rehearse.eval.protocols import BenchmarkExample, RolloutResult
 
 
+def _last_json_line(stdout_b: bytes) -> bytes:
+    """Return the last line of stdout that begins with '{'.
+
+    The worker's contract is that the JSON result is the final write to stdout.
+    Third-party libraries (e.g. Hume SDK via structlog) may emit log lines to
+    stdout before it, so we scan backwards rather than parsing the full buffer.
+    """
+    for line in reversed(stdout_b.splitlines()):
+        stripped = line.strip()
+        if stripped.startswith(b"{"):
+            return stripped
+    return stdout_b  # fallback: let the caller's except block handle the parse error
+
+
 class LocalSubprocessExecutor:
     """Spawn `python -m rehearse.eval.worker` per rollout. Hard timeout."""
 
@@ -77,8 +91,12 @@ class LocalSubprocessExecutor:
                 error=f"worker exit {proc.returncode}",
             )
 
+        # The worker writes one JSON line to stdout as the last thing it does.
+        # Libraries (e.g. Hume SDK structlog) may write log lines to stdout
+        # before it. Scan backwards for the last line that begins with '{'.
+        json_b = _last_json_line(stdout_b)
         try:
-            result = RolloutResult.model_validate_json(stdout_b)
+            result = RolloutResult.model_validate_json(json_b)
         except Exception as exc:
             return RolloutResult(
                 example_id=example.id,
