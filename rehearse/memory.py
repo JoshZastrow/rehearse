@@ -118,6 +118,8 @@ class HonchoCallerMemory:
     (caller hears the full prompt) and record_consent to log a warning.
     """
 
+    COACH_PEER_ID = "rehearse_coach"
+
     def __init__(
         self,
         api_key: str = "",
@@ -134,8 +136,7 @@ class HonchoCallerMemory:
 
     async def has_prior_consent(self, caller_hash: str) -> bool:
         try:
-            # honcho.peer() is sync and returns a Peer; .aio.get_metadata() is async.
-            peer = self._honcho.peer(caller_hash)
+            peer = await self._honcho.aio.peer(caller_hash)
             metadata = await peer.aio.get_metadata()
             return bool(metadata.get("consented"))
         except Exception as exc:
@@ -148,7 +149,7 @@ class HonchoCallerMemory:
 
     async def record_consent(self, caller_hash: str) -> None:
         try:
-            peer = self._honcho.peer(caller_hash)
+            peer = await self._honcho.aio.peer(caller_hash)
             await peer.aio.set_metadata({"consented": True})
             log.info("honcho.consent_recorded", caller_hash=caller_hash[:8])
         except Exception as exc:
@@ -160,7 +161,7 @@ class HonchoCallerMemory:
 
     async def get_recent_intakes(self, caller_hash: str, n: int = 3) -> list[str]:
         try:
-            peer = self._honcho.peer(caller_hash)
+            peer = await self._honcho.aio.peer(caller_hash)
             metadata = await peer.aio.get_metadata()
             intakes = metadata.get("intakes", [])
             return list(intakes)[:n] if isinstance(intakes, list) else []
@@ -174,7 +175,7 @@ class HonchoCallerMemory:
 
     async def record_intake(self, caller_hash: str, situation: str) -> None:
         try:
-            peer = self._honcho.peer(caller_hash)
+            peer = await self._honcho.aio.peer(caller_hash)
             metadata = await peer.aio.get_metadata()
             intakes: list[str] = list(metadata.get("intakes", []))
             intakes.insert(0, situation)
@@ -187,6 +188,68 @@ class HonchoCallerMemory:
                 caller_hash=caller_hash[:8],
                 error=str(exc),
             )
+
+    async def store_session(
+        self, caller_hash: str, messages: list[dict]
+    ) -> None:
+        """Store call transcript as Honcho messages for Deriver processing.
+
+        Uses sessions + messages so the Deriver can extract observations and
+        the Dialectic can answer queries about the caller in future calls.
+
+        Peer configuration:
+          caller peer — observe_me=True (default): Honcho builds a representation
+          coach peer  — observe_me=False: deterministic agent, no representation needed
+        """
+        import time
+        from honcho.api_types import PeerConfig
+        try:
+            caller_peer = await self._honcho.aio.peer(caller_hash)
+            coach_peer = await self._honcho.aio.peer(
+                self.COACH_PEER_ID,
+                configuration=PeerConfig(observe_me=False),
+            )
+            session = await self._honcho.aio.session(
+                f"rehearse-{caller_hash}-{int(time.time())}"
+            )
+            honcho_messages = [
+                caller_peer.message(m["content"]) if m["role"] == "user"
+                else coach_peer.message(m["content"])
+                for m in messages
+                if m.get("content", "").strip()
+            ]
+            if honcho_messages:
+                await session.aio.add_messages(honcho_messages)
+            log.info(
+                "honcho.session_stored",
+                caller_hash=caller_hash[:8],
+                messages=len(honcho_messages),
+            )
+        except Exception as exc:
+            log.warning(
+                "honcho.store_session.failed",
+                caller_hash=caller_hash[:8],
+                error=str(exc),
+            )
+
+    async def prefetch(self, caller_hash: str, query: str) -> str:
+        """Query the Honcho Dialectic for synthesized insights about this caller.
+
+        Calls peer.aio.chat(query) which uses Honcho's Dialectic — an LLM agent
+        that searches stored observations and returns a synthesized answer.
+        Returns "" for a first-time caller or if the Deriver hasn't run yet.
+        """
+        try:
+            peer = await self._honcho.aio.peer(caller_hash)
+            result = await peer.aio.chat(query)
+            return result or ""
+        except Exception as exc:
+            log.warning(
+                "honcho.prefetch.failed",
+                caller_hash=caller_hash[:8],
+                error=str(exc),
+            )
+            return ""
 
 
 class MCPCallerMemory:
