@@ -57,11 +57,13 @@ class PersonaSelectionRecorder:
             # 1. Get gender preference from memory
             gender = await self._memory.get_gender_preference(self._caller_hash)
 
-            # 2. Get situation from intake artifact
+            # 2. Get situation and intake details from artifact
             situation = self._extract_situation(frame)
+            intake_gender, topic = self._extract_intake_fields(frame)
 
             # 3. Run routing agent if available, else use default for gender
-            persona_id = await self._select_persona(situation or "", gender)
+            resolved_gender = intake_gender or gender
+            persona_id = await self._select_persona(situation or "", resolved_gender)
             if not persona_id:
                 return
 
@@ -71,18 +73,22 @@ class PersonaSelectionRecorder:
                 lambda s: _set_persona_id(s, persona_id),
             )
 
-            # 5. If gender preference is new, store it from the persona
-            if gender is None:
-                from rehearse.personas.registry import PERSONA_REGISTRY, PersonaRegistry
-                registry = PersonaRegistry(PERSONA_REGISTRY)
-                persona = registry.get(persona_id)
-                if persona:
-                    await self._memory.record_gender_preference(self._caller_hash, persona.gender)
+            # 5. Record per-topic preference when we have both topic and gender
+            if intake_gender and topic:
+                await self._memory.record_agent_preference(
+                    self._caller_hash, topic, intake_gender
+                )
+
+            # 6. Also record global gender preference if new (backward compat)
+            if gender is None and resolved_gender:
+                await self._memory.record_gender_preference(self._caller_hash, resolved_gender)
 
             log.info(
                 "persona_selection.recorded",
                 session_id=self._session_id,
                 persona_id=persona_id,
+                topic=topic,
+                gender=resolved_gender,
             )
         except Exception as exc:
             log.warning("persona_selection.failed", session_id=self._session_id, error=str(exc))
@@ -112,6 +118,18 @@ class PersonaSelectionRecorder:
             return data.get("situation", "").strip() or None
         except Exception:
             return None
+
+    def _extract_intake_fields(self, frame: IntakeComplete) -> tuple[str | None, str | None]:
+        """Return (gender_preference, topic_category) from the intake artifact."""
+        if frame.error or not frame.intake_path:
+            return None, None
+        try:
+            data = json.loads(open(frame.intake_path).read())
+            gender = data.get("gender_preference") or None
+            topic = data.get("topic_category") or None
+            return gender, topic
+        except Exception:
+            return None, None
 
 
 def _set_persona_id(session, persona_id: str):

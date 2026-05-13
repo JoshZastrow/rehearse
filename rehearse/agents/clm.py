@@ -131,7 +131,9 @@ def build_clm_responder(config: RuntimeConfig) -> CLMResponder:
         from rehearse.agents.roles.character import CharacterAgent, FemaleCharacterAgent, MaleCharacterAgent
         from rehearse.agents.roles.feedback import FeedbackCoachAgent
         from rehearse.agents.roles.intake import IntakeCoachAgent
-        from rehearse.agents.router import PersonaAwareRouter
+        from anthropic import AsyncAnthropic
+
+        from rehearse.agents.router import IntakeAwareRouter
         from rehearse.memory import (
             HonchoCallerMemory,
             MCPCallerMemory,
@@ -156,6 +158,7 @@ def build_clm_responder(config: RuntimeConfig) -> CLMResponder:
         else:
             _provider = NullCallerMemory()
 
+        llm_client = AsyncAnthropic(api_key=config.anthropic_api_key)
         memory = MemoryManager(_provider)
         transport = AnthropicTransport(api_key=config.anthropic_api_key)
         registry = AgentRegistry()
@@ -164,7 +167,7 @@ def build_clm_responder(config: RuntimeConfig) -> CLMResponder:
         registry.register(MaleCharacterAgent(memory))
         registry.register(FemaleCharacterAgent(memory))
         registry.register(FeedbackCoachAgent(memory))
-        router = PersonaAwareRouter(registry)
+        router = IntakeAwareRouter(registry, _provider, llm_client=llm_client)
         return NewCLMResponder(
             transport=transport,
             router=router,

@@ -162,6 +162,8 @@ def build_intake_record(
     session_id: str,
     user_turns: Sequence[str],
     captured_at: datetime,
+    gender_preference: str | None = None,
+    topic_category: str | None = None,
 ) -> IntakeRecord:
     """Build a simple deterministic intake record from user transcript turns."""
     joined = " ".join(turn.strip() for turn in user_turns if turn.strip())
@@ -176,6 +178,8 @@ def build_intake_record(
         stakes=_infer_stakes(joined, relationship),
         user_goal=_infer_user_goal(joined),
         desired_tone=_infer_tone(joined),
+        gender_preference=gender_preference,
+        topic_category=topic_category,
         captured_at=captured_at,
     )
 

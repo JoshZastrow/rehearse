@@ -25,7 +25,28 @@ class IntakeCoachAgent:
         caller_hash = session.phone_number_hash or ""
         if not caller_hash:
             return ""
-        return await self._memory.prefetch(caller_hash, self._RECALL_QUERY)
+
+        prior_context = await self._memory.prefetch(caller_hash, self._RECALL_QUERY)
+
+        # Gate the gender question based on per-topic preference.
+        intake = session.intake
+        topic = intake.topic_category if intake else None
+        if topic:
+            pref = await self._memory.get_agent_preference(caller_hash, topic)
+            if pref is not None:
+                gender_note = (
+                    f"This caller's preference for {topic} topics is already known: {pref}. "
+                    "Do NOT ask about gender preference."
+                )
+            else:
+                gender_note = (
+                    f"This caller has no stored preference for {topic} topics. "
+                    "After confirming their situation, ask: "
+                    "'One more thing — would you prefer to practice with a male or female voice?'"
+                )
+            return f"{prior_context}\n\n{gender_note}".strip() if prior_context else gender_note
+
+        return prior_context
 
     def system_prompt(self, session: Session, memory_context: str = "") -> str:
         base = coach_system_prompt()
