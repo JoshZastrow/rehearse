@@ -430,11 +430,145 @@ If no soul document exists (fallback), only the character prompt is used. The pr
 
 ---
 
-## 12. Open questions
+## 12. Soul evolution via Honcho's Deriver
+
+The soul document is not static. It evolves as Honcho's Deriver builds a representation of the practice partner peer across sessions.
+
+### 12.1 The practice partner as a Honcho Peer
+
+Every practice partner is its own Honcho Peer — not just metadata on the caller's peer. This is the fundamental requirement. The Deriver can only reason about an entity if it is a peer with messages attributed to it.
+
+**Peer ID convention:**
+```
+character_{caller_hash[:8]}_{persona_slug}
+# Example: character_abc123ef_callers_father
+```
+
+This peer ID is stable across calls. The same "dad" persona always maps to the same character peer for this caller, so the Deriver accumulates observations session over session.
+
+### 12.2 Session peer configuration
+
+When `store_session()` writes a practice session to Honcho, three peers participate:
+
+```python
+caller_peer = await honcho.aio.peer(caller_hash)
+coach_peer = await honcho.aio.peer(
+    "rehearse_coach",
+    configuration=PeerConfig(observe_me=False),  # deterministic, not modeled
+)
+character_peer = await honcho.aio.peer(
+    f"character_{caller_hash[:8]}_{persona_slug}",
+    configuration=PeerConfig(observe_me=True),   # Deriver reasons about this character
+)
+
+session = await honcho.aio.session(session_id)
+await session.aio.add_peers([
+    (caller_peer,    SessionPeerConfig(observe_me=True,  observe_others=False)),
+    (coach_peer,     SessionPeerConfig(observe_me=False, observe_others=True)),
+    (character_peer, SessionPeerConfig(observe_me=True,  observe_others=True)),
+])
+```
+
+**Why `character_peer.observe_others=True`:**
+The character peer builds its own representation of the caller. After several sessions, the character peer knows "this caller over-explains when nervous" and "tends to capitulate under moderate pushback." This is the long-term unlock — the soul evolves not just as a better model of the character, but as a better model of the relationship between this character and this specific caller.
+
+**Why `caller_peer.observe_others=False` (default):**
+The caller's peer representation reflects who the caller is and what they're working on. It does not need to model the character — that's the character peer's job. Keeping these separate ensures the Deriver's observations stay in the right peer.
+
+### 12.3 Practice phase message attribution
+
+Currently `store_session()` attributes all non-user messages to `coach_peer`. Practice phase messages must be attributed to `character_peer` instead.
+
+The session transcript has speaker tags (`Speaker.COACH`, `Speaker.CHARACTER`). `store_session()` should split on these:
+
+```python
+for msg in messages:
+    if msg["role"] == "user":
+        honcho_messages.append(caller_peer.message(msg["content"]))
+    elif msg.get("speaker") == "character":
+        honcho_messages.append(character_peer.message(msg["content"]))
+    else:
+        honcho_messages.append(coach_peer.message(msg["content"]))
+```
+
+Without this split, all assistant turns are attributed to the generic coach peer and the character peer has nothing for the Deriver to reason about.
+
+### 12.4 Two-layer soul at session start
+
+When a practice session begins, the soul document is assembled from two sources:
+
+**Layer 1 — Bootstrap soul** (generated once from the caller's description, stored in Honcho peer metadata):
+- Static. Written at bootstrap time. Does not change unless explicitly refreshed.
+- Purpose: who this character is before any practice has happened.
+
+**Layer 2 — Dialectic synthesis** (queried from the character peer at session start):
+- Dynamic. Grows as the Deriver processes more sessions.
+- Query: `"What patterns, tendencies, and emotional textures have you observed in this character across practice sessions? What makes them distinctly themselves in this relationship?"`
+- Empty on session 1. Meaningful by session 3-5.
+
+```python
+async def get_soul(self, caller_hash: str, persona_id: str) -> str:
+    persona_slug = _slug_from_id(persona_id)
+    character_peer_id = f"character_{caller_hash[:8]}_{persona_slug}"
+
+    # Layer 1: static bootstrap soul
+    stored = await self._get_stored_soul(caller_hash, persona_id)
+
+    # Layer 2: Dialectic synthesis of observed patterns
+    try:
+        character_peer = await self._honcho.aio.peer(character_peer_id)
+        evolved = await character_peer.aio.chat(
+            "What patterns, tendencies, and emotional textures have you observed "
+            "in this character across practice sessions? "
+            "What makes them distinctly themselves in this relationship?"
+        )
+    except Exception:
+        evolved = ""
+
+    if evolved:
+        return f"{stored}\n\n## What practice has revealed:\n{evolved}"
+    return stored
+```
+
+### 12.5 Soul refresh cadence
+
+The bootstrap soul (Layer 1) is refreshed every 5 sessions by re-running the soul generator with the Dialectic's current synthesis as additional input. This prevents the static soul from diverging too far from what the Deriver has learned.
+
+The trigger is in `PersonaSelectionRecorder`: after writing the session, check `metadata["sessions_with_{persona_id}"]` count. At multiples of 5, queue a soul refresh.
+
+The refresh is non-blocking — it runs after the call ends, not during. The next session picks up the updated soul.
+
+### 12.6 What the Deriver learns across sessions
+
+After 5+ sessions practicing with "dad", Honcho's Deriver will have extracted observations like:
+
+- *"This character responds with silence before escalating — the pause is the tell."*
+- *"Direct apology ('I'm sorry I wasn't careful') de-escalates consistently; indirect apology ('that probably wasn't ideal') does not."*
+- *"The character softened on two occasions when the caller acknowledged his feelings before explaining themselves."*
+- *"Emotional register shifts from disappointment to anger when the caller becomes defensive."*
+
+The Dialectic synthesizes these into a paragraph that gets injected into Layer 2 of the soul. The character becomes sharper and more specific to this relationship with each session.
+
+### 12.7 Engineering requirements summary
+
+| Requirement | Implementation |
+|---|---|
+| Practice partner is a Honcho Peer with stable ID | `character_{caller_hash[:8]}_{persona_slug}` created at bootstrap, reused each session |
+| Deriver reasons about the character peer | `PeerConfig(observe_me=True)` on character peer |
+| Character learns the caller's patterns | `SessionPeerConfig(observe_others=True)` on character peer |
+| Practice phase messages attributed to character peer | `store_session()` splits by `speaker` tag |
+| Soul = bootstrap + Dialectic synthesis | `PersonaStore.get_soul()` queries character peer at session start |
+| Soul refreshes periodically | `PersonaSelectionRecorder` queues refresh every 5 sessions |
+| Soul refresh uses accumulated Deriver insights | Soul generator re-runs with `character_peer.chat()` output as additional input |
+
+---
+
+## 13. Open questions
 
 | # | Question |
 |---|---|
-| Q1 | Should souls be versioned in Honcho? If a caller's description of their dad changes across sessions, should the soul update or stay fixed? |
-| Q2 | What is the right Honcho voice name for the male voice ("Wise Man" assumed — needs verification in Hume dashboard)? |
-| Q3 | Does `session_settings` apply before or after the current TTS utterance completes? Test empirically — affects bridge line timing. |
+| Q1 | What is the right Honcho voice name for the male voice ("Wise Man" assumed — needs verification in Hume dashboard)? |
+| Q2 | Does `session_settings` apply before or after the current TTS utterance completes? Test empirically — affects bridge line timing. |
+| Q3 | At what session count does the Dialectic produce enough signal to be useful? 3? 5? Measure empirically. |
+| Q4 | Should `observe_others=True` on the character peer be enabled from session 1, or only once the soul has stabilized? Early sessions have noisy signal. |
 | Q4 | Should `PersonaStore.search()` use the Dialectic (LLM-backed) or a flat metadata lookup? Dialectic is more flexible but adds latency (~200ms). |
