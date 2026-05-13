@@ -137,7 +137,7 @@ about prompts, memory, or routing.
 # rehearse/transports/base.py
 
 class LLMTransport(Protocol):
-    """Convert messages to provider format and stream a response."""
+    """Convert messages to provider format and stream or generate a response."""
 
     def convert_messages(self, messages: list[CLMMessage]) -> list[dict]:
         """Convert Hume CLM messages to the provider's native message list."""
@@ -153,6 +153,22 @@ class LLMTransport(Protocol):
         temperature: float = 0.4,
     ) -> AsyncIterator[str]:
         """Stream response text chunks. Yields plain text, not SSE events."""
+        ...
+
+    async def generate(
+        self,
+        *,
+        system_blocks: list[dict],
+        messages: list[dict],
+        model: str,
+        max_tokens: int = 512,
+        temperature: float = 0.4,
+    ) -> str:
+        """Return the complete response as a string (buffered, non-streaming).
+
+        Used by the BoN path in CLMResponder to collect N candidates in parallel
+        before selecting. Not suitable for real-time TTS delivery.
+        """
         ...
 ```
 
@@ -180,6 +196,18 @@ class AnthropicTransport:
             async for text in stream.text_stream:
                 if text:
                     yield text
+
+    async def generate(self, *, system_blocks, messages, model, max_tokens, temperature):
+        chunks: list[str] = []
+        async for text in self.stream(
+            system_blocks=system_blocks,
+            messages=messages,
+            model=model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+        ):
+            chunks.append(text)
+        return "".join(chunks)
 ```
 
 Swapping to Bedrock means adding `rehearse/transports/bedrock.py` with a
