@@ -49,41 +49,90 @@ The problem is threefold:
 
 ## 3. Architectural decisions
 
-### 3.1 Inference model split: Haiku for real-time, Gemma for eval
+### 3.1 LiteLLM as the standard LLM interface
 
-Two distinct inference workloads with incompatible latency requirements:
+All text-generating LLM calls in the product go through a single
+OpenAI-compatible interface backed by a LiteLLM proxy. Today that proxy routes
+to Anthropic Haiku. When a self-hosted model is ready, one config entry changes
+and every call in the product switches with it — no code changes.
 
-| Workload | Model | Infra | Why |
+```yaml
+# litellm_config.yaml — model aliases used in code
+model_list:
+  - model_name: routing-agent        # counterparty extraction
+    litellm_params:
+      model: anthropic/claude-haiku-4-5-20251001
+      api_key: env/ANTHROPIC_API_KEY
+
+  - model_name: soul-generator       # soul document generation
+    litellm_params:
+      model: anthropic/claude-haiku-4-5-20251001
+      api_key: env/ANTHROPIC_API_KEY
+```
+
+When self-hosted Gemma is ready for text tasks, update one entry:
+
+```yaml
+  - model_name: routing-agent
+    litellm_params:
+      model: hosted_vllm/gemma-3-27b-it
+      api_base: env/SELF_HOSTED_LLM_BASE_URL
+```
+
+**Client interface** — all text LLM callers use `AsyncOpenAI` pointed at the
+LiteLLM proxy. `AnthropicTransport` is replaced by `LiteLLMTransport`:
+
+```python
+# rehearse/transports/litellm.py
+class LiteLLMTransport:
+    def __init__(self, *, base_url: str, api_key: str, model: str) -> None:
+        self._client = AsyncOpenAI(base_url=base_url, api_key=api_key)
+        self._model = model
+```
+
+`PersonaRoutingAgent` and soul generation both use the same `AsyncOpenAI`
+client — not `AsyncAnthropic` directly. The model name (`routing-agent`,
+`soul-generator`) is injected from config. The alias is stable; what's behind
+it is not code.
+
+**For local development** — LiteLLM SDK mode requires no proxy server:
+
+```python
+import litellm
+response = await litellm.acompletion(
+    model="anthropic/claude-haiku-4-5-20251001", messages=[...]
+)
+```
+
+Same interface, no extra process to run. Config toggles between SDK mode
+(dev) and proxy mode (staging/production).
+
+### 3.2 Inference model split: text via LiteLLM, audio direct to Modal
+
+| Workload | Alias / Model | Client | Why |
 |---|---|---|---|
-| Counterparty extraction (call-time) | Claude Haiku 4.5 | Anthropic API | <200ms, no GPU, $0.00025/1K tok |
-| Soul bootstrapping (post-intake, async) | Claude Haiku 4.5 | Anthropic API | Creative quality sufficient, same latency |
-| Honcho Dialectic synthesis | Honcho internal | Honcho infrastructure | Already handled |
-| Audio gender eval judge | Gemma 3 27B | Modal serverless GPU | Audio-native, cheap for batch, OK cold start |
-| Soul quality scoring (eval) | Gemma 3 27B | Modal serverless GPU | Text eval, same infra |
+| Counterparty extraction | `routing-agent` → Haiku | LiteLLM proxy | <200ms, text-only, model-swappable |
+| Soul bootstrapping | `soul-generator` → Haiku | LiteLLM proxy | Text-only, swappable |
+| Honcho Dialectic | Honcho internal | Honcho infra | Already handled |
+| Audio gender eval judge | Gemma 3 27B | Direct → Modal vLLM | Audio input — LiteLLM multimodal routing incomplete |
+| Soul quality scoring (eval) | Gemma 3 27B | Direct → Modal vLLM | Text eval, same GPU infra |
 
-**Real-time path uses Haiku API exclusively.** No GPU required on the critical
-call path. Latency budget for counterparty extraction: ≤ 400ms (runs during the
-bridge utterance). Haiku averages 180ms at this token count.
+**Audio eval bypasses LiteLLM.** LiteLLM's multimodal audio routing is
+incomplete and unreliable across providers. `VLLMAudioProvider` stays as a
+direct OpenAI client pointed at Modal. This is intentional: audio eval is
+offline batch work, not on the production call path, and the direct connection
+is simpler to reason about and test. When self-hosted multimodal is stable
+enough, this becomes LiteLLM-routed too.
 
-**Eval path uses Gemma 3 27B on Modal.** Modal serverless GPU provides:
-- Cold start: ~15-30s on first invocation in a session (acceptable for evals)
-- Warm start: ~150ms per inference
-- Cost: ~$0.001/GPU-second on A100; ~$0.006 per eval call at 6s inference
-- Scale to zero between runs — zero cost when idle
-- The existing `VLLMAudioProvider` points at `VLLM_BASE_URL`; Modal provides this
-  endpoint. Zero code change to the provider.
+**Haiku is the current model behind the aliases — not a permanent dependency.**
+The aliases `routing-agent` and `soul-generator` are stable identifiers.
+Haiku is today's assignment. The product does not hardcode model names.
 
 **Why not always-on GPU:**
 
 A reserved A100 runs ~$2,800/month. An eval suite that runs 3x/day at 6 minutes
 each costs ~$1.08/day on Modal — about $32/month. The break-even is ~87x/day.
 We are nowhere near that threshold in development.
-
-**Why not use Haiku for audio eval:**
-
-Haiku does not accept audio input. The gender verification check requires a model
-that can classify voice from a WAV clip. Gemma 3 via vLLM on Modal is the only
-in-house option that satisfies both requirements.
 
 ### 3.2 PeerStore, not PersonaRegistry
 
@@ -285,9 +334,9 @@ class PersonaRoutingAgent:
         self,
         peer_store: PeerStore,
         *,
-        client: AsyncAnthropic,
+        client: AsyncOpenAI,  # LiteLLM proxy or SDK, not AsyncAnthropic directly
         caller_hash: str,
-        model: str = "claude-haiku-4-5-20251001",
+        model: str = "routing-agent",  # LiteLLM alias — model name, not provider name
     ) -> None: ...
 
     async def extract(self, transcript: str) -> CounterpartyExtraction:
@@ -600,7 +649,9 @@ Delivers: O1, O2, O3, O4 from §2.
 |---|---|
 | `rehearse/personas/peer_store.py` | **New** — `PeerStore` with `search`, `bootstrap`, `get_soul`, `record_session`, `maybe_refresh_soul` |
 | `rehearse/personas/souls/base_character.md` | **Done** — base soul template |
-| `rehearse/agents/persona_routing_agent.py` | Replace `list_personas` tool with `extract()` + `PeerStore.search/bootstrap` |
+| `rehearse/transports/litellm.py` | **New** — `LiteLLMTransport` (replaces `AnthropicTransport` for text tasks; uses `AsyncOpenAI` against LiteLLM proxy) |
+| `litellm_config.yaml` | **New** — model alias definitions (`routing-agent`, `soul-generator`); today maps to Haiku |
+| `rehearse/agents/persona_routing_agent.py` | Replace `AsyncAnthropic` client with `AsyncOpenAI`; use `model="routing-agent"` alias |
 | `rehearse/agents/persona_selection_recorder.py` | Gate gender question on `CounterpartyExtraction.needs_gender_question` |
 | `rehearse/agents/roles/character.py` | `system_prompt()` calls `peer_store.get_soul()` at session start |
 | `rehearse/memory.py` | Add `get_raw_metadata` / `set_raw_metadata` to `CallerMemory` protocol + all implementations |
@@ -660,6 +711,7 @@ Delivers: O7, O8 from §2.
 
 | # | Question | Resolution |
 |---|---|---|
+| Q0 | `AnthropicTransport` in `v2026-05-12-agent-design-patterns.md` — does it become `LiteLLMTransport`? | Yes. `AnthropicTransport` is an implementation detail of the current model choice. `LiteLLMTransport` satisfies the same `LLMTransport` Protocol and is the replacement. The CLM path uses `LiteLLMTransport` with `model="clm-coach"` (or similar alias) in `litellm_config.yaml`. |
 | Q1 | Should souls evolve? | Yes — via Deriver on character peer. §8 documents the mechanism. |
 | Q2 | Wise Man voice name? | Must verify in Hume dashboard before Phase 1 ships. Env var `REHEARSE_MALE_VOICE_NAME` overrides. |
 | Q3 | `session_settings` timing? | Test empirically in Phase 1. If it applies mid-TTS, shorten bridge line to 1 sentence. |
