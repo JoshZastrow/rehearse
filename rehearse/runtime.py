@@ -335,6 +335,7 @@ class RuntimeHost:
         phase_timeout_s: float = 60.0,
         bus: FrameBus | None = None,
         enable_audio_recording: bool = False,
+        llm_client: Any | None = None,
     ) -> None:
         self._store = store
         self._coach = coach
@@ -343,6 +344,7 @@ class RuntimeHost:
         self._phase_timeout_s = phase_timeout_s
         self._external_bus = bus
         self._enable_audio_recording = enable_audio_recording
+        self._llm_client = llm_client
         self._audio_mode = isinstance(coach, AudioCoachAdapter) and not isinstance(
             coach, TextOnlyCoachAdapter
         )
@@ -388,6 +390,7 @@ class RuntimeHost:
             phase_getter=lambda: self._current_phase,
             clock=self._clock,
             bus=bus,
+            llm_client=self._llm_client,
         )
         transcript_writer = TranscriptWriter(
             session_id,

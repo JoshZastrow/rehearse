@@ -153,6 +153,7 @@ def build_intake_record(
     user_turns: Sequence[str],
     captured_at: datetime,
     gender_preference: str | None = None,
+    topic_category: str | None = None,
 ) -> IntakeRecord:
     joined = " ".join(turn.strip() for turn in user_turns if turn.strip())
     relationship = _infer_relationship(joined)
@@ -167,6 +168,7 @@ def build_intake_record(
         user_goal=_infer_user_goal(joined),
         desired_tone=_infer_tone(joined),
         gender_preference=gender_preference,
+        topic_category=topic_category,
         captured_at=captured_at,
     )
 

@@ -216,10 +216,15 @@ def mount_twilio_routes(
             budgets=budgets,
             consent_getter=_consent_getter,
         )
+        _llm_client = None
+        if config.anthropic_api_key:
+            from anthropic import AsyncAnthropic
+            _llm_client = AsyncAnthropic(api_key=config.anthropic_api_key)
         intake_processor = IntakeProcessor(
             session_id,
             orchestrator.store,
             phase_getter=lambda: phase_processor.current_phase,
+            llm_client=_llm_client,
         )
         try:
             async with TwilioStream(ws) as twilio, HumeEVIParticipant(

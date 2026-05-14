@@ -7,8 +7,12 @@ session-specific character persona when the call enters practice.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator, Callable
 from datetime import datetime
+from typing import Any
+
+import structlog
 
 from rehearse.bus import FrameBus
 from rehearse.frames import Frame, IntakeComplete, PhaseSignal, TranscriptDelta
@@ -16,6 +20,8 @@ from rehearse.personas import build_intake_record, compile_character
 from rehearse.session import utcnow
 from rehearse.storage import LocalFilesystemStore
 from rehearse.types import Phase, Session, Speaker
+
+log = structlog.get_logger(__name__)
 
 # Words that signal a personal preference is being expressed
 _PREFERENCE_SIGNALS = frozenset({
@@ -82,6 +88,7 @@ class IntakeProcessor:
         phase_getter: Callable[[], Phase],
         clock: Callable[[], datetime] = utcnow,
         bus: FrameBus | None = None,
+        llm_client: Any | None = None,
     ) -> None:
         """Store the session id, manifest store, and current-phase callback."""
         self._session_id = session_id
@@ -89,11 +96,13 @@ class IntakeProcessor:
         self._phase_getter = phase_getter
         self._clock = clock
         self._bus = bus
+        self._llm_client = llm_client
         self._phase = Phase.INTAKE
         self._user_turns: list[str] = []
         self._intake_complete_emitted = False
         self._coach_asked_gender = False
         self._gender_preference: str | None = None
+        self._topic_task: asyncio.Task[str] | None = None
 
     async def run(self, frames: AsyncIterator[Frame]) -> None:
         """Consume bus frames and update intake/persona artifacts as phases change."""
@@ -113,6 +122,8 @@ class IntakeProcessor:
                         self._coach_asked_gender = False  # consume the flag
 
                     self._user_turns.append(frame.text.strip())
+                    if len(self._user_turns) == 1:
+                        self._start_topic_classification()
                     await self._persist_intake()
                     if len(self._user_turns) >= 2:
                         await self._compile_persona()
@@ -129,12 +140,36 @@ class IntakeProcessor:
             await self._compile_persona()
             await self._emit_intake_complete()
 
+    def _start_topic_classification(self) -> None:
+        """Kick off topic classification in the background after the first user turn.
+
+        Runs concurrently while the coach speaks — result is picked up by the
+        next _persist_intake call. Skipped when no LLM client is configured.
+        """
+        if self._llm_client is None or self._topic_task is not None:
+            return
+        situation = " ".join(self._user_turns)
+        from rehearse.agents.topic import classify_topic
+        self._topic_task = asyncio.create_task(
+            classify_topic(situation, client=self._llm_client)
+        )
+
+    def _resolved_topic(self) -> str | None:
+        """Return classified topic if the background task has completed."""
+        if self._topic_task is not None and self._topic_task.done():
+            try:
+                return self._topic_task.result()
+            except Exception as exc:
+                log.warning("intake.topic_classification_failed", error=str(exc))
+        return None
+
     async def _persist_intake(self) -> None:
         """Write the latest intake guess into the session manifest."""
         if not self._user_turns:
             return
         captured_at = self._clock()
         gender = self._gender_preference
+        topic = self._resolved_topic()
         await self._store.update_session(
             self._session_id,
             lambda session: _apply_intake(
@@ -144,6 +179,7 @@ class IntakeProcessor:
                     user_turns=self._user_turns,
                     captured_at=captured_at,
                     gender_preference=gender,
+                    topic_category=topic,
                 ),
             ),
         )

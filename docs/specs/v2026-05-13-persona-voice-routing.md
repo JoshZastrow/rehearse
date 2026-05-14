@@ -1,472 +1,729 @@
-# Persona Voice Routing: Gender Selection + Memory-Backed Agent Dispatch
+# Persona Voice Routing: Memory-Backed Practice Partner Selection
 
-**Status:** acknowledged
+**Status:** wip
 **Date:** 2026-05-13
 **Owner:** Josh Zastrow
-**Depends on:**
-- `v2026-05-06-persona-routing.md` — existing Hume config routing infrastructure
-- `v2026-05-12-agent-design-patterns.md` — `AgentRouter`, `CallerMemory`, `IntakeAwareRouter`
-- `v2026-05-12-consent-caller-memory.md` — `CallerMemory` protocol
+**Depends on:** `v2026-05-12-agent-design-patterns.md`
 
 ---
 
-## 1. Outcomes
+## 1. Problem
 
-| # | Outcome | Verifiable by |
+Every call to Rehearse assigns the same generic practice partner: a neutral voice
+with no history and no memory of who the caller has practiced with before.
+
+When a caller says *"I need to call my dad and tell him I crashed his car — he's
+going to be pretty mad,"* the system should recognize that the practice partner is
+a specific person — a father — not a menu option. It should not ask the caller to
+choose a gender. It should not start from zero on the second call.
+
+The problem is threefold:
+
+1. **Counterparty inference is rule-based.** `classify_gender_preference()` matches
+   keywords. It fails for "my dad", "Sarah my assistant", or anything outside a
+   hardcoded list.
+
+2. **Personas are static code.** `PersonaRegistry` is a Python list. Adding a new
+   persona requires a code change and a deploy. It cannot grow to N personas.
+
+3. **Nothing is remembered.** Each call bootstraps a fresh character with no
+   knowledge of who this caller practiced with last time, or how that character
+   behaved, or what the caller learned.
+
+---
+
+## 2. Outcomes
+
+| # | Outcome | Acceptance test |
 |---|---|---|
-| O1 | A first-time caller is asked "would you prefer a male or female practice partner?" during intake | Transcript presence check |
-| O2 | The practice phase uses the character agent matching the caller's answer | Agent name in router dispatch log |
-| O3 | A returning caller working on the same topic is NOT asked the gender question again | Absence check in transcript |
-| O4 | A returning caller with a new topic IS asked the question | Presence check in transcript |
-| O5 | The topic→gender preference is persisted in Honcho and survives across process restarts | Multi-session test with live backend |
+| O1 | Counterparty gender and name inferred from transcript without keyword matching | LLM extraction returns correct gender for "my dad", "Sarah my assistant", "my manager Tom" |
+| O2 | Gender question only asked when the transcript has no signal | Intake transcript with clear counterparty → no question asked; ambiguous transcript → question asked |
+| O3 | First-encounter counterparty bootstraps a persona and soul from description | `PeerStore.bootstrap()` called on first encounter; `PersonaRecord` + soul stored in Honcho |
+| O4 | Second encounter retrieves the same persona from Honcho memory | `PeerStore.search()` finds prior persona via Dialectic; same voice and soul used |
+| O5 | Practice partner has a Honcho Peer with observations accumulating across sessions | Character peer exists in Honcho; Deriver produces observations after session 3+ |
+| O6 | Soul document at session start = bootstrap soul + Dialectic synthesis | `PeerStore.get_soul()` returns merged text; Layer 2 grows with sessions |
+| O7 | Audio gender eval judge verifies voice actually changed | Gemma 3 via Modal judges WAV clip; `voice_eval_result.json` produced per eval run |
+| O8 | Eval infra costs ~$0 when idle | Modal serverless GPU scales to zero between eval runs |
 
 ---
 
-## 2. Inputs and Outputs
+## 3. Architectural decisions
 
-### Inputs to routing
+### 3.1 LiteLLM as the standard LLM interface
 
-| Input | Source | When available |
-|---|---|---|
-| `caller_hash` | `Session.phone_number_hash` | Start of call |
-| `situation` | `IntakeRecord.situation` (transcript-derived) | End of intake phase |
-| `topic_category` | LLM classifier over `situation` | Derived from intake record |
-| `gender_preference` | Spoken by caller in response to question, or recalled from memory | During intake or from Honcho |
+All text-generating LLM calls in the product go through a single
+OpenAI-compatible interface backed by a LiteLLM proxy. Today that proxy routes
+to Anthropic Haiku. When a self-hosted model is ready, one config entry changes
+and every call in the product switches with it — no code changes.
 
-### Outputs
+```yaml
+# litellm_config.yaml — model aliases used in code
+model_list:
+  - model_name: routing-agent        # counterparty extraction
+    litellm_params:
+      model: anthropic/claude-haiku-4-5-20251001
+      api_key: env/ANTHROPIC_API_KEY
 
-| Output | Destination | Shape |
-|---|---|---|
-| `agent_preference` | `CallerMemory` (Honcho peer metadata) | `{topic_category: str, gender: "male" \| "female"}` |
-| Character agent selection | `AgentRegistry` lookup via `IntakeAwareRouter` | `MaleCharacterAgent` or `FemaleCharacterAgent` |
-| Gender question spoken | Hume EVI TTS (via `send_assistant_input`) | Plain sentence |
+  - model_name: soul-generator       # soul document generation
+    litellm_params:
+      model: anthropic/claude-haiku-4-5-20251001
+      api_key: env/ANTHROPIC_API_KEY
 
----
+  - model_name: audio-judge          # audio gender eval + soul quality scoring
+    litellm_params:
+      model: hosted_vllm/gemma-3-27b-it
+      api_base: env/VLLM_BASE_URL    # Modal endpoint today; self-hosted when ready
+      api_key: env/VLLM_API_KEY
+```
 
-## 3. Functional Requirements
+When self-hosted Gemma is ready for text tasks:
 
-**FR1 — Topic classifier**
-A function `classify_topic(situation: str) -> str` maps a free-text situation
-to one of a fixed set of topic categories. Initial set: `"work"`, `"relationship"`,
-`"other"`. Implemented as a Claude Haiku call with `max_tokens=10, temperature=0`.
-Falls back to `"other"` on any error or null result.
+```yaml
+  - model_name: routing-agent
+    litellm_params:
+      model: hosted_vllm/gemma-3-27b-it
+      api_base: env/SELF_HOSTED_LLM_BASE_URL
+```
 
-**FR2 — Preference lookup at intake start**
-At the start of the intake phase, the intake coach queries memory for the
-caller's stored preference for the topic derived from any prior intakes.
-If a preference exists for the inferred topic, no gender question is asked.
-
-**FR3 — Gender question during intake**
-If no prior preference exists for the current topic, the intake coach speaks:
-*"One more thing — would you prefer to practice with a male or female voice?"*
-The response is captured by a lightweight classifier (`"male"` / `"female"` /
-`"no preference"`). `"no preference"` defaults to `"female"` (current default
-Hume voice).
-
-**FR4 — Preference stored on IntakeComplete**
-When `IntakeComplete` fires, `IntakeMemoryRecorder` stores both the situation
-and the `(topic_category, gender_preference)` pair in the caller's Honcho peer
-metadata.
-
-**FR5 — IntakeAwareRouter uses preference**
-`IntakeAwareRouter.route()` receives the `IntakeRecord` artifact. It classifies
-the topic, queries memory for the preference, and returns `MaleCharacterAgent`
-or `FemaleCharacterAgent`. If memory has no preference, it falls back to
-`FemaleCharacterAgent`.
-
-**FR6 — Character agent differentiation (Phase 1 — CLM prompts)**
-`MaleCharacterAgent` and `FemaleCharacterAgent` differ only in their system
-prompt: the character is described as male or female with a matching name. The
-Hume EVI TTS voice is unchanged in Phase 1 (same Hume config for all calls).
-Actual voice swapping is Phase 2.
-
-**FR7 — Memory clear for test setup**
-`CallerMemory` gains `clear_caller(caller_hash: str) -> None` on all
-implementations. Used to reset a test caller before an eval run.
-
----
-
-## 4. Non-Functional Requirements
-
-**NFR1 — Latency**: Topic classification adds at most 400 ms before the first
-intake word. Run in the background while the intake coach speaks the opening
-line. Do not block on it.
-
-**NFR2 — Graceful degradation**: Any failure in classification, memory read,
-or preference parsing falls through to `FemaleCharacterAgent` without
-surfacing an error to the caller.
-
-**NFR3 — Test suite unchanged**: All existing tests pass with no Anthropic key
-and no Honcho. New tests that require live services are marked
-`@pytest.mark.live_api`.
-
-**NFR4 — No PII in Honcho**: Only `topic_category` and `gender` are stored,
-never the raw `situation` string. Situation storage (for Honcho Deriver) is
-handled separately in `store_session()`.
-
----
-
-## 5. Out of Scope
-
-| Item | Reason |
-|---|---|
-| Actual male/female Hume TTS voices (Phase 2) | Requires mid-call config swap (`swap_config` stub); deferred |
-| More than 2 genders or "no preference" routing to a distinct agent | Scope; ship binary first |
-| Cross-topic preference generalization ("if you chose male for work, assume male for other") | Requires more signal; defer |
-| Preference changing mid-call | Not needed for MVP |
-| Preference editing by caller | No UI yet |
-| SMS-body gender pre-routing (before call connects) | Builds on Phase 2; deferred |
-
----
-
-## 6. Approach
-
-### Phase 1 (this spec) — CLM-level gender routing
-
-The Hume EVI session uses a single config (no voice change). Gender
-differentiation happens at the CLM layer: `IntakeAwareRouter` selects
-`MaleCharacterAgent` or `FemaleCharacterAgent`, each with a different system
-prompt persona. The practice partner says "I'm Alex, your manager" vs "I'm
-Sarah, your manager."
-
-This is testable via transcript analysis without audio inspection.
-
-### Phase 2 (future spec) — Hume config voice swap
-
-When `swap_config` is implemented, pre-connect routing applies the known
-gender preference at call start for returning callers. For new callers, a
-reconnect with a different Hume config fires at the intake→practice
-transition. Phase 2 also adds a real male Hume voice config.
-
-### Topic classification
+**Client interface** — all text LLM callers use `AsyncOpenAI` pointed at the
+LiteLLM proxy. `AnthropicTransport` is replaced by `LiteLLMTransport`:
 
 ```python
-async def classify_topic(
-    situation: str,
-    *,
-    client: AsyncAnthropic,
-    model: str = "claude-haiku-4-5-20251001",
-) -> Literal["work", "relationship", "other"]:
-    """Classify a situation string into a topic category."""
+# rehearse/transports/litellm.py
+class LiteLLMTransport:
+    def __init__(self, *, base_url: str, api_key: str, model: str) -> None:
+        self._client = AsyncOpenAI(base_url=base_url, api_key=api_key)
+        self._model = model
 ```
 
-One-shot prompt listing the three categories with examples. Returns `"other"`
-on any failure. `max_tokens=10`, `temperature=0`.
+`PersonaRoutingAgent` and soul generation both use the same `AsyncOpenAI`
+client — not `AsyncAnthropic` directly. The model name (`routing-agent`,
+`soul-generator`) is injected from config. The alias is stable; what's behind
+it is not code.
 
-### Intake gender question
+**For local development** — LiteLLM SDK mode requires no proxy server:
 
-The intake coach asks the gender question after confirming the situation, before
-practice begins. Gated on `memory.get_agent_preference(caller_hash, topic_category) is None`.
+```python
+import litellm
+response = await litellm.acompletion(
+    model="anthropic/claude-haiku-4-5-20251001", messages=[...]
+)
+```
 
-Spoken by `send_assistant_input` (bypasses CLM, deterministic):
+Same interface, no extra process to run. Config toggles between SDK mode
+(dev) and proxy mode (staging/production).
 
-> "One more thing — would you prefer to practice with a male or female voice?"
+### 3.2 Inference model split: text via LiteLLM, audio direct to Modal
 
-Response classified by a rule-based check for "male"/"man"/"he" vs
-"female"/"woman"/"she". Ambiguous → `"female"`.
+| Workload | Alias | Current model | Client |
+|---|---|---|---|
+| Counterparty extraction | `routing-agent` | Haiku 4.5 | LiteLLM proxy |
+| Soul bootstrapping | `soul-generator` | Haiku 4.5 | LiteLLM proxy |
+| Audio gender eval judge | `audio-judge` | Gemma 3 27B (Modal) | LiteLLM proxy |
+| Soul quality scoring (eval) | `audio-judge` | Gemma 3 27B (Modal) | LiteLLM proxy |
+| Honcho Dialectic | — | Honcho internal | Honcho infra |
+
+LiteLLM supports multimodal audio inputs and passes them through to downstream
+providers. `VLLMAudioProvider` uses `AsyncOpenAI(base_url=LITELLM_PROXY_URL)`
+with `model="audio-judge"` — no special audio carve-out needed.
+
+**Aliases are stable. Models are not.** `routing-agent`, `soul-generator`, and
+`audio-judge` are the identifiers used in code. Their assignments live in
+`litellm_config.yaml`. When self-hosted Gemma is ready for text tasks, update
+`routing-agent`'s entry. When a better audio model arrives, update `audio-judge`.
+No code changes in either case.
+
+**Why not always-on GPU:**
+
+A reserved A100 runs ~$2,800/month. An eval suite that runs 3x/day at 6 minutes
+each costs ~$1.08/day on Modal — about $32/month. The break-even is ~87x/day.
+We are nowhere near that threshold in development.
+
+### 3.2 PeerStore, not PersonaRegistry
+
+The entity being managed is a **Honcho Peer** — a practice partner who persists
+across sessions and accumulates a representation over time. The class that manages
+these peers is `PeerStore`. Naming it `PersonaStore` obscures the underlying
+model: each practice partner IS a Honcho Peer, and the store creates, finds, and
+reads Honcho Peers.
+
+`PersonaRegistry` (the static Python list) is deleted. It cannot represent N
+characters and offers no path to memory-backed evolution.
 
 ---
 
-## 7. Interface
+## 4. Data contracts
 
-### `CallerMemory` additions
+### 4.1 Honcho peer model
 
-```python
-# rehearse/memory.py
+| Peer | ID format | `observe_me` | `observe_others` | Purpose |
+|---|---|---|---|---|
+| Caller | `{caller_hash}` | `True` | `False` | Deriver builds caller representation |
+| Coach | `rehearse_coach` | `False` | `True` | Deterministic; not modeled |
+| Character | `character_{caller_hash[:8]}_{persona_slug}` | `True` | `True` | Deriver builds character representation; character learns caller patterns |
 
-async def get_agent_preference(
-    self,
-    caller_hash: str,
-    topic_category: str,
-) -> Literal["male", "female"] | None:
-    """Return stored gender preference for a topic, or None if unknown."""
-    ...
+Character peers are created at bootstrap and reused across all sessions for that
+caller-character pair. A caller who practices with "dad" twice has one character
+peer whose representation deepens after each session.
 
-async def record_agent_preference(
-    self,
-    caller_hash: str,
-    topic_category: str,
-    gender: Literal["male", "female"],
-) -> None:
-    """Persist topic→gender preference for future routing."""
-    ...
+### 4.2 Caller peer metadata schema
 
-async def clear_caller(self, caller_hash: str) -> None:
-    """Remove all stored data for this caller. Used in test setup."""
-    ...
-```
+All persona records are stored as structured metadata on the caller's Honcho peer:
 
-Honcho storage: `peer.aio.set_metadata({..., "agent_prefs": {"work": "male", "relationship": "female"}})`.
-
-### New agent classes
-
-```python
-# rehearse/agents/roles/character.py
-
-class MaleCharacterAgent:
-    name = "male_character"
-    _GENDER_PROMPT = "You are playing a male character. Use a male name."
-
-class FemaleCharacterAgent:
-    name = "female_character"
-    _GENDER_PROMPT = "You are playing a female character. Use a female name."
-```
-
-Both extend the existing `CharacterAgent` base; only the system prompt differs.
-
-### `IntakeAwareRouter` (already in spec, now fleshed out)
-
-```python
-async def route(self, session: Session, artifact: Any = None) -> RehearseAgent:
-    phase = _current_phase(session)
-    if phase != Phase.PRACTICE:
-        return await self._phase_router.route(session)
-
-    intake = await self._load_intake(session)
-    topic = await classify_topic(intake.situation, client=self._llm)
-    pref = await self._memory.get_agent_preference(
-        session.phone_number_hash or "", topic
-    )
-    if pref == "male":
-        return self._registry.get("male_character")
-    return self._registry.get("female_character")  # default
-```
-
----
-
-## 8. Test Fixture
-
-### Eval scenario: three calls, one caller
-
-A synthetic `LLMCustomer` plays the caller. Calls are abbreviated: consent +
-intake + 2 practice turns + cancel (no feedback phase). Memory is cleared
-before the run via `clear_caller(test_caller_hash)`.
-
-```
-call_1:
-  topic: "ask my manager for a raise" (work)
-  caller is new → intake should ask gender question
-  caller answers: "male"
-  expected: MaleCharacterAgent selected in practice phase
-
-call_2:
-  topic: "ask my manager for a promotion" (work, same category)
-  expected: no gender question
-  expected: MaleCharacterAgent selected (from memory)
-
-call_3:
-  topic: "talk to my partner about moving in together" (relationship)
-  caller is new to this topic → intake should ask gender question
-  caller answers: "female"
-  expected: FemaleCharacterAgent selected in practice phase
-```
-
-### Fixture setup
-
-```python
-@pytest.fixture
-def routing_eval_memory(honcho_server: str) -> HonchoCallerMemory:
-    """Fresh memory with a known test caller hash, cleared before the run."""
-    memory = HonchoCallerMemory(base_url=honcho_server, workspace_id="rehearse-test")
-    return memory
-
-@pytest.fixture
-def test_caller() -> str:
-    return f"eval-caller-{uuid.uuid4().hex[:8]}"
-```
-
-The `honcho_server` fixture (from `conftest.py`) starts a local Honcho
-instance. Tests are skipped when `lib/honcho/` is absent.
-
----
-
-## 9. Eval Judge
-
-**Model**: `google/gemma-4-26B-A4B-it` via Modal serverless GPU (`modal_app/gemma_judge.py`)
-
-Gemma 4 26B-A4B is a Mixture-of-Experts model with 26B parameters (4B active per
-token). It accepts text and audio inputs natively via vLLM. Used via
-`VLLMAudioProvider` pointed at the Modal endpoint through LiteLLM
-(`audio-judge` alias in `litellm_config.yaml`).
-
-### 9.1 Deployment
-
-```bash
-# One-time setup
-make setup-modal        # install Modal CLI + authenticate
-
-# Deploy (idempotent — safe to run on every CI push)
-make deploy-modal       # modal deploy modal_app/gemma_judge.py
-
-# Smoke test
-make smoke-modal        # modal run modal_app/gemma_judge.py
-```
-
-The deployed URL is deterministic:
-```
-https://<workspace>--rehearse-gemma-judge-serve.modal.run
-```
-
-Add to `.env`:
-```bash
-VLLM_BASE_URL=https://<workspace>--rehearse-gemma-judge-serve.modal.run/v1
-VLLM_API_KEY=<modal-token>
-```
-
-**Cost**: ~$0 when idle. The `scaledown_window=15min` in `gemma_judge.py` keeps
-the container warm for the duration of an eval batch (typically 3-6 minutes),
-then releases the GPU. An H200 runs at ~$0.0015/GPU-second. A full 3-scenario
-eval costs ~$0.15 including cold start.
-
-### 9.2 Routing correctness judgment (text input)
-
-**Input**: intake transcript + expected routing decision
-
-```
-You are evaluating a voice coaching call transcript.
-
-Call context: {call_context}
-Expected behavior: {expected}
-
-Transcript:
-{transcript}
-
-Answer in JSON:
+```json
 {
-  "gender_question_asked": true | false,
-  "agent_selected": "male_character" | "female_character" | "unknown",
-  "routing_correct": true | false,
-  "reasoning": "<one sentence>"
+  "consented": true,
+  "gender": "male",
+  "personas": {
+    "male_callers_father": {
+      "id": "male_callers_father",
+      "name": "David",
+      "description": "caller's father, upset about crashed car",
+      "gender": "male",
+      "voice_name": "Wise Man",
+      "soul": "# David — Soul\n\n## Identity\n...",
+      "sessions": 3,
+      "created_at": "2026-05-13T14:00:00Z",
+      "soul_refreshed_at": "2026-05-13T14:00:00Z"
+    }
+  }
 }
 ```
 
-### 9.3 Voice verification judgment (audio input)
+`soul` is the bootstrap soul (Layer 1). It is refreshed every 5 sessions by
+re-running the soul generator with accumulated Dialectic insights as input.
 
-**Input**: WAV clip of first 10 seconds of character speech in practice phase.
+### 4.3 Session message attribution
+
+Practice phase messages must be attributed to the character peer — not the coach
+peer — so the Deriver builds the character's representation from their words.
+
+`store_session()` receives the transcript as `[{"role", "content", "speaker"}]`.
+Split by `speaker` tag:
+
+| `speaker` value | Attributed to |
+|---|---|
+| `"user"` | `caller_peer` |
+| `"coach"` | `coach_peer` |
+| `"character"` | `character_peer` |
+| anything else | `coach_peer` |
+
+### 4.4 Soul document structure
+
+Six sections. Stored as plain Markdown. Generated once by Haiku from the base
+template (`rehearse/personas/souls/base_character.md`) and the caller's
+description. Refreshed every 5 sessions using Dialectic synthesis as additional
+input.
 
 ```
-Listen to this audio clip. Is the speaker's voice male or female?
+# [Name] — Soul
+
+## Identity        — essential nature; what shaped them
+## Values          — what they'd never compromise
+## How they communicate  — rhythm, tells, silences
+## Emotional landscape   — triggers, how they soften/harden
+## Relationship to the caller  — what they want for this relationship
+## Edges           — where the character ends; what breaks the frame
+```
+
+---
+
+## 5. Component interfaces
+
+### 5.1 `PeerStore`
+
+```python
+# rehearse/personas/peer_store.py
+
+class PeerStore:
+    """Manages practice partner Honcho Peers: creation, retrieval, soul."""
+
+    def __init__(self, honcho: Honcho, llm_client: AsyncAnthropic) -> None: ...
+
+    async def search(
+        self,
+        caller_hash: str,
+        description: str,
+    ) -> PersonaRecord | None:
+        """Find a prior persona matching this description via Dialectic.
+
+        Query: "Has this caller practiced with a character described as
+        [description]? Return their persona_id and name if yes."
+
+        Returns None on first encounter or ambiguous match.
+        Latency: 200-400ms (Dialectic call). Run at IntakeComplete.
+        """
+
+    async def bootstrap(
+        self,
+        *,
+        caller_hash: str,
+        description: str,
+        gender: Literal["male", "female"],
+        name: str | None,
+    ) -> PersonaRecord:
+        """Create a new practice partner peer and generate their soul.
+
+        1. Generate soul document via Haiku (base template + description)
+        2. Create character Honcho peer (character_{caller_hash[:8]}_{slug})
+        3. Store PersonaRecord in caller peer metadata["personas"]
+        4. Return PersonaRecord
+
+        Latency: ~600ms (soul generation). Run async after IntakeComplete.
+        """
+
+    async def get_soul(
+        self,
+        caller_hash: str,
+        persona_id: str,
+    ) -> str:
+        """Return the two-layer soul for a persona.
+
+        Layer 1: Bootstrap soul from caller peer metadata (static).
+        Layer 2: Dialectic synthesis from character peer (grows with sessions).
+
+        Merged: "{layer_1}\n\n## What practice has revealed:\n{layer_2}"
+        Layer 2 is empty on session 1; meaningful by session 3-5.
+
+        Latency: ~300ms (one Dialectic call). Called once per session start.
+        """
+
+    async def record_session(
+        self,
+        caller_hash: str,
+        persona_id: str,
+        session_id: str,
+        messages: list[dict],
+    ) -> None:
+        """Store session transcript with correct peer attribution.
+
+        Creates Honcho session with caller + coach + character peers.
+        Splits message attribution by speaker tag.
+        Increments session counter; triggers soul refresh at multiples of 5.
+        """
+
+    async def maybe_refresh_soul(
+        self,
+        caller_hash: str,
+        persona_id: str,
+    ) -> None:
+        """Refresh the bootstrap soul if session count is a multiple of 5.
+
+        Non-blocking: runs post-call. Queries character peer Dialectic for
+        accumulated observations and regenerates soul with that context.
+        """
+```
+
+### 5.2 `CounterpartyExtraction` (data class)
+
+```python
+@dataclass
+class CounterpartyExtraction:
+    gender: Literal["male", "female", "unknown"]
+    name: str | None
+    description: str
+    gender_is_inferred: bool  # False only if transcript has no signal at all
+
+    @property
+    def needs_gender_question(self) -> bool:
+        return not self.gender_is_inferred or self.gender == "unknown"
+```
+
+### 5.3 `PersonaRoutingAgent`
+
+```python
+class PersonaRoutingAgent:
+    """Extracts counterparty context and resolves a PersonaRecord."""
+
+    def __init__(
+        self,
+        peer_store: PeerStore,
+        *,
+        client: AsyncOpenAI,  # LiteLLM proxy or SDK, not AsyncAnthropic directly
+        caller_hash: str,
+        model: str = "routing-agent",  # LiteLLM alias — model name, not provider name
+    ) -> None: ...
+
+    async def extract(self, transcript: str) -> CounterpartyExtraction:
+        """One LLM call. Returns counterparty gender, name, description.
+        max_tokens=80, temperature=0. Latency: ~150ms.
+        """
+
+    async def select(self, transcript: str) -> PersonaRecord:
+        """Extract → search Honcho → bootstrap on miss → return PersonaRecord."""
+```
+
+### 5.4 Modal eval judge
+
+The `VLLMAudioProvider` (`rehearse/eval/providers/vllm.py`) is unchanged. It
+calls any OpenAI-compatible endpoint at `VLLM_BASE_URL`. For eval runs, set
+`VLLM_BASE_URL` to the Modal deployment endpoint.
+
+**Modal deployment (`modal_app/gemma_judge.py`):**
+
+```python
+import modal
+
+app = modal.App("rehearse-gemma-judge")
+image = modal.Image.debian_slim().pip_install("vllm>=0.4", "huggingface_hub")
+
+@app.cls(
+    gpu="A100-80GB",
+    image=image,
+    timeout=300,
+    container_idle_timeout=60,  # scale to zero after 60s idle
+)
+class GemmaJudge:
+    @modal.enter()
+    def load(self):
+        from vllm import LLM
+        self.llm = LLM("google/gemma-3-27b-it", dtype="bfloat16")
+
+    @modal.web_endpoint(method="POST")
+    async def chat_completions(self, request: dict) -> dict:
+        """OpenAI-compatible /v1/chat/completions endpoint.
+        VLLMAudioProvider points at this via VLLM_BASE_URL."""
+        ...
+```
+
+**Configuration:**
+```bash
+# Modal endpoint — assigned to the audio-judge alias in litellm_config.yaml
+VLLM_BASE_URL=https://your-org--rehearse-gemma-judge.modal.run/v1
+VLLM_API_KEY=<modal-api-key>
+
+# LiteLLM proxy (all callers use this)
+LITELLM_PROXY_URL=http://localhost:4000
+```
+
+`VLLMAudioProvider` uses `AsyncOpenAI(base_url=LITELLM_PROXY_URL)` with
+`model="audio-judge"`. LiteLLM proxies audio content through to the Modal
+vLLM endpoint. When self-hosted inference is ready, update the `audio-judge`
+entry in `litellm_config.yaml` — no code changes anywhere.
+
+---
+
+## 6. Per-call flows
+
+### 6.1 First encounter — "I need to call my dad"
+
+```
+INTAKE:
+  Transcript: "I need to call my dad and tell him I crashed his car."
+  IntakeProcessor collects user turns.
+  No gender question (inference will handle it).
+
+INTAKE COMPLETE:
+  PersonaRoutingAgent.extract(transcript)
+  → {gender: "male", name: null,
+     description: "caller's father, upset about car crash",
+     gender_is_inferred: true}
+
+  PersonaRoutingAgent.select():
+  → peer_store.search(caller_hash, "caller's father, upset...")
+    → Dialectic: "Has this caller practiced with this character?" → None
+  → peer_store.bootstrap(caller_hash, description, gender="male", name=None)
+    → Haiku generates soul: "David is a man who built something..."
+    → character peer created: character_abc123ef_callers_father
+    → soul + record stored in caller peer metadata["personas"]
+  → returns PersonaRecord(id="male_callers_father", voice="Wise Man", ...)
+
+  session.selected_persona_id = "male_callers_father"
+
+PRACTICE TRANSITION:
+  peer_store.get_soul(caller_hash, "male_callers_father")
+  → Layer 1: bootstrap soul (David, father, accountability...)
+  → Layer 2: character peer Dialectic → "" (no sessions yet)
+  → returns Layer 1 only
+
+  PersonaSwapCoordinator speaks bridge line.
+  session_settings: {voice_id: <wise_man_id>, system_prompt: soul + scene}
+
+END OF CALL:
+  peer_store.record_session(caller_hash, "male_callers_father", session_id, transcript)
+  → Honcho session created with caller + coach + character peers
+  → Practice messages attributed to character_abc123ef_callers_father
+  → Deriver queued to process character peer observations
+  → peer_store.maybe_refresh_soul() — sessions=1, no refresh yet
+```
+
+### 6.2 Return call — same caller, same topic
+
+```
+INTAKE COMPLETE:
+  PersonaRoutingAgent.select():
+  → peer_store.search(caller_hash, "caller's father, upset about car")
+    → Dialectic: "Yes — practiced with male_callers_father (David)"
+    → returns stored PersonaRecord
+  → No bootstrap needed.
+
+PRACTICE START:
+  peer_store.get_soul(caller_hash, "male_callers_father")
+  → Layer 1: same bootstrap soul
+  → Layer 2: character peer Dialectic (session 3+):
+    "This father goes silent before escalating. Direct apology de-escalates.
+    Softened twice when caller acknowledged feelings before explaining."
+  → returns Layer 1 + "## What practice has revealed:\n{Layer 2}"
+```
+
+### 6.3 New topic, same caller — "I want to speak with my executive assistant Sarah"
+
+```
+PersonaRoutingAgent.extract():
+→ {gender: "female", name: "Sarah",
+   description: "caller's executive assistant",
+   gender_is_inferred: true}
+
+peer_store.search(caller_hash, "executive assistant named Sarah") → None
+
+peer_store.bootstrap(caller_hash, "executive assistant", gender="female", name="Sarah")
+→ soul: "Sarah is professional and warm. She manages up as naturally as she manages down..."
+→ character peer: character_abc123ef_sarah_exec_assistant
+→ stored under caller peer: metadata["personas"]["female_sarah_exec_assistant"]
+```
+
+---
+
+## 7. Soul document: writing guide
+
+A soul document defines who the practice partner **is** — not what they do in
+the scene, but who they choose to be. Every section should be answerable from
+inside the character: *if this person had to make a choice the script didn't
+cover, what would they do?*
+
+**Six sections. Wrong vs right:**
+
+| Section | Wrong | Right |
+|---|---|---|
+| Identity | "David is a manager." | "David built the team from scratch. He treats every failure as a personal accusation." |
+| Values | "Values hard work and honesty." | "Would rather be lied to than pitied. Hates wasted time more than anything." |
+| Communication | "Direct communicator." | "Short sentences when calm. Goes quiet right before he gets angry. Never raises his voice." |
+| Emotional landscape | "Gets frustrated when challenged." | "Disappointment looks like silence. He doesn't yell — he withdraws, then comes back harder." |
+| Relationship | "Has authority over the caller." | "Sees the caller as an extension of himself. Proud of them in ways he rarely says out loud." |
+| Edges | "May break character if asked." | "Won't cry. Won't apologize first. Will stop if the caller says they need a break." |
+
+**Rules:**
+- Specificity beats generality at every level.
+- Contradiction is realistic — a character can be both proud and cold. Don't flatten.
+- The Edges section is the agent's safety rail. Explicit edges let the model stay
+  in character confidently because it knows exactly where the ground is.
+- Write from the inside. The document should read as written *about* the person,
+  not as instructions *to* an AI.
+
+**Base template:** `rehearse/personas/souls/base_character.md`
+
+---
+
+## 8. Soul evolution via Honcho Deriver
+
+The soul is not static. It evolves as Honcho's Deriver processes messages from
+the character peer across sessions.
+
+### 8.1 What the Deriver learns
+
+After 3-5 sessions, observations about the character peer include:
+
+- *"This character escalates with silence, not volume."*
+- *"Direct apology ('I was careless') de-escalates consistently; indirect apology ('that wasn't ideal') does not."*
+- *"The character softened on two occasions when the caller acknowledged feelings before explaining."*
+- *"Caller's defensive posture consistently triggers a harder response from this character."*
+
+These are extracted automatically by the Deriver from the character peer's
+messages across sessions. No manual annotation required.
+
+### 8.2 Two-layer soul assembly
+
+```
+Layer 1 (static)   Bootstrap soul — who this character is before any practice
+Layer 2 (dynamic)  character_peer.chat("What patterns have you observed in this
+                   character across sessions?") — grows with Deriver observations
+
+Merged output:
+  {layer_1}
+
+  ## What practice has revealed:
+  {layer_2}
+```
+
+Layer 2 is queried at PRACTICE start. It is empty on session 1 and meaningful
+by session 3-5. If the Dialectic returns nothing (new character, no observations),
+only Layer 1 is used and the call proceeds normally.
+
+### 8.3 Soul refresh cadence
+
+Every 5 sessions, the bootstrap soul (Layer 1) is regenerated using the Dialectic
+synthesis as additional context. This keeps Layer 1 from diverging too far from
+what has been observed.
+
+Trigger: `PeerStore.record_session()` increments `metadata["personas"][id]["sessions"]`.
+At multiples of 5, queue `maybe_refresh_soul()` as a background task post-call.
+The refresh is non-blocking — the next session picks up the updated soul.
+
+### 8.4 `observe_others` activation
+
+`character_peer.observe_others=True` is set from session 3 onwards. Sessions 1-2
+establish a baseline for both peers; early observations are noisy. From session 3,
+the character peer builds its own representation of the caller — eventually knowing
+"this caller over-explains when nervous" and adapting accordingly.
+
+---
+
+## 9. Eval judge specification
+
+### 9.1 Three-scenario eval suite
+
+```
+call_1  New caller, any topic
+        → PersonaRoutingAgent extracts counterparty
+        → peer_store.bootstrap() called (first encounter)
+        → soul generated and stored
+        Judge checks: counterparty extracted correctly, bootstrap fired
+
+call_2  Same caller, same counterparty
+        → peer_store.search() finds prior persona
+        → No bootstrap
+        → Same voice used
+        Judge checks: no re-bootstrap, same persona_id in session
+
+call_3  Same caller, new counterparty (different person entirely)
+        → search returns None
+        → bootstrap fires for new persona
+        → Different voice if different gender
+        Judge checks: new persona created, correct voice
+```
+
+### 9.2 Gemma audio judge (via Modal)
+
+**Routing correctness judgment (text):**
+
+Input: intake transcript + `routing_eval_result.json`
+
+```
+You are evaluating a voice coaching call. Given the intake transcript and the
+routing decision made, determine whether the routing was correct.
+
+Transcript: {transcript}
+Routing decision: {result}
+
+Return JSON: {"routing_correct": bool, "reasoning": str}
+```
+
+**Voice verification judgment (audio):**
+
+Input: WAV clip of first 10s of character speech in practice phase.
+
+```
+Listen to this audio. Is the speaker male or female?
 Answer with exactly one word: "male" or "female".
 ```
 
-Expected answer matches `session.selected_persona_id`'s gender.
-This verifies that `session_settings` actually changed the voice, not just the prompt.
+Expected answer matches `persona.gender`.
 
-### 9.4 Pass conditions
-
-| Check | Pass condition |
-|---|---|
-| Routing correctness | `routing_correct == true` for all 3 calls |
-| Voice verification | Gemma audio judgment matches expected gender for all 3 calls |
-| Memory check | Call 2 `gender_question_asked == false` |
-
----
-
-## 10. How to Run
-
-### Prerequisites
+### 9.3 Running evals
 
 ```bash
-# 1. Deploy the Modal judge (idempotent, run once or on each code change)
-make deploy-modal
+# Deploy Modal judge once (idempotent)
+modal deploy modal_app/gemma_judge.py
 
-# 2. Add Modal URL + credentials to .env
-# VLLM_BASE_URL=https://<workspace>--rehearse-gemma-judge-serve.modal.run/v1
-# VLLM_API_KEY=<modal-token>
-
-# 3. Start product services
-make serve       # ngrok + Honcho + rehearse server
-```
-
-### Run the eval
-
-```bash
-make eval-persona-routing
-# equivalent to:
-# uv run pytest tests/eval/test_persona_voice_routing_eval.py \
-#   -v -m "live_api and live_honcho" --timeout=180
-```
-
-Each call is capped at 90 seconds. The full three-scenario suite runs in under
-6 minutes (including one Modal cold start of ~25s on the first call).
-
-### Run a single scenario
-
-```bash
-uv run pytest tests/eval/test_persona_voice_routing_eval.py::test_new_caller_is_asked_gender -v
-```
-
-### Clear caller memory for a clean re-run
-
-```bash
-uv run python -c "
-import asyncio
-from rehearse.memory import HonchoCallerMemory
-m = HonchoCallerMemory(base_url='http://localhost:8001')
-asyncio.run(m.clear_caller('your-test-hash'))
-"
+# Run eval suite
+VLLM_BASE_URL=https://your-org--rehearse-gemma-judge.modal.run/v1 \
+VLLM_API_KEY=<key> \
+uv run pytest tests/eval/test_persona_voice_routing_eval.py \
+  -v -m "live_api and live_honcho" --timeout=180
 ```
 
 ---
 
-## 11. Artifacts Produced
+## 10. Non-functional requirements
 
-Each eval run writes to `sessions/<eval_session_id>/`:
-
-| Artifact | Format | Contents |
+| Requirement | Target | Fallback |
 |---|---|---|
-| `transcript.jsonl` | JSONL | Full turn-by-turn transcript |
-| `routing_eval_result.json` | JSON | `{call_id, gender_question_asked, agent_selected, routing_correct, reasoning}` per call |
-| `voice_eval_result.json` | JSON | `{call_id, expected_gender, gemma_judgment, pass}` per call |
-| `character_audio_clip.wav` | WAV | First 10s of character speech (Gemma audio input) |
-| `memory_state.json` | JSON | Snapshot of `agent_prefs` from Honcho after all three calls |
-
-Summary printed to stdout:
-
-```
-PASS  call_1  gender_asked=True  agent=male_character   voice=male    correct=True
-PASS  call_2  gender_asked=False agent=male_character   voice=male    correct=True
-PASS  call_3  gender_asked=True  agent=female_character voice=female  correct=True
-
-3/3 routing scenarios passed. 3/3 voice verifications passed.
-```
+| Counterparty extraction latency | ≤ 400ms | Falls back to gender question if extraction times out |
+| Soul retrieval at session start | ≤ 500ms (Layer 1 + Layer 2) | Uses Layer 1 only if Dialectic times out |
+| Soul bootstrap latency | ≤ 800ms (async, post-intake) | Uses default soul template on timeout |
+| `session_settings` voice swap | Before bridge line ends | No voice swap; character prompt still correct |
+| Modal cold start | ≤ 30s (eval only) | Retry with 30s timeout; acceptable for batch eval |
+| Cost per eval run (3 scenarios) | ≤ $0.10 | N/A |
+| Cost when idle | $0.00 (Modal scales to zero) | N/A |
 
 ---
 
-## 12. File Inventory
+## 11. Implementation phases
+
+### Phase 1 — Core routing + PeerStore (this PR)
+
+Delivers: O1, O2, O3, O4 from §2.
+
+**Changes:**
 
 | File | Change |
 |---|---|
-| `modal_app/gemma_judge.py` | **New** — Gemma 4 26B-A4B-it on Modal H200; audio enabled; `scaledown_window=15min` |
-| `litellm_config.yaml` | **New** — model aliases: `routing-agent`, `soul-generator`, `audio-judge` |
-| `rehearse/transports/litellm.py` | **New** — `LiteLLMTransport` replacing `AnthropicTransport` for text tasks |
-| `rehearse/memory.py` | Add `get_agent_preference`, `record_agent_preference`, `clear_caller` |
-| `rehearse/agents/persona_routing_agent.py` | Uses `AsyncOpenAI` + `audio-judge` alias; LiteLLM client |
-| `rehearse/agents/roles/character.py` | Add `MaleCharacterAgent`, `FemaleCharacterAgent` |
-| `rehearse/agents/registry.py` | Register both gender agents |
-| `rehearse/agents/router.py` | `IntakeAwareRouter` with LLM extraction + memory lookup |
-| `rehearse/intake.py` | Gender question gated on `CounterpartyExtraction.needs_gender_question` |
-| `rehearse/types.py` | Add `gender_preference` to `IntakeRecord` |
-| `Makefile` | Add `setup-modal`, `deploy-modal`, `smoke-modal`, `eval-persona-routing` |
-| `tests/eval/test_persona_voice_routing_eval.py` | **New** — 3-scenario routing + voice eval |
-| `tests/test_intake_gender_question.py` | **New** — classifier + question gating |
+| `rehearse/personas/peer_store.py` | **New** — `PeerStore` with `search`, `bootstrap`, `get_soul`, `record_session`, `maybe_refresh_soul` |
+| `rehearse/personas/souls/base_character.md` | **Done** — base soul template |
+| `rehearse/transports/litellm.py` | **New** — `LiteLLMTransport` (replaces `AnthropicTransport` for text tasks; uses `AsyncOpenAI` against LiteLLM proxy) |
+| `litellm_config.yaml` | **New** — model alias definitions (`routing-agent`, `soul-generator`); today maps to Haiku |
+| `rehearse/agents/persona_routing_agent.py` | Replace `AsyncAnthropic` client with `AsyncOpenAI`; use `model="routing-agent"` alias |
+| `rehearse/agents/persona_selection_recorder.py` | Gate gender question on `CounterpartyExtraction.needs_gender_question` |
+| `rehearse/agents/roles/character.py` | `system_prompt()` calls `peer_store.get_soul()` at session start |
+| `rehearse/memory.py` | Add `get_raw_metadata` / `set_raw_metadata` to `CallerMemory` protocol + all implementations |
+| `rehearse/personas/__init__.py` | Remove `classify_gender_preference`; keep coach elicitation prompt |
+| `rehearse/intake.py` | Remove keyword detection; gender question gated by `PersonaSelectionRecorder` |
+
+**Tests:**
+
+| File | What it covers |
+|---|---|
+| `tests/test_peer_store.py` | search, bootstrap, get_soul (layers), record_session attribution |
+| `tests/test_persona_routing_agent.py` | LLM extraction correctness; search-before-bootstrap order |
+| `tests/test_intake_gender_question.py` | Question fires on ambiguous transcript; silent on "my dad" |
+
+### Phase 2 — Soul evolution + Deriver (follow-on)
+
+Delivers: O5, O6 from §2.
+
+**Changes:**
+
+- `PeerStore.record_session()`: add character peer with `observe_me=True`; split message attribution by `speaker` tag
+- `PeerStore.get_soul()`: add Layer 2 Dialectic query on character peer
+- `PeerStore.maybe_refresh_soul()`: implement refresh at multiples of 5 sessions
+- `CallerMemory.store_session()`: pass `speaker` tags through so PeerStore can split attribution
+
+**Tests:**
+
+- `tests/test_peer_store_evolution.py`: session 1 has empty Layer 2; session 5 triggers refresh
+- `tests/test_agent_memory_multisession.py`: end-to-end soul evolution over 3 sessions
+
+### Phase 3 — Modal eval judge
+
+Delivers: O7, O8 from §2.
+
+**Changes:**
+
+- `modal_app/gemma_judge.py`: Gemma 3 27B on A100, OpenAI-compatible endpoint
+- `tests/eval/test_persona_voice_routing_eval.py`: 3-scenario eval using `VLLMAudioProvider`
+- `.env.example`: add `VLLM_BASE_URL` + `VLLM_API_KEY` for eval runs
 
 ---
 
-## 13. Migration
+## 12. Artifacts produced by eval
 
-1. Run `uv run rehearse-hume sync` after registering the new male/female character
-   Hume configs (Phase 2 only; Phase 1 requires no new configs).
-2. Existing callers have no `agent_prefs` in Honcho metadata → falls through
-   to `FemaleCharacterAgent` as default. No disruption to live callers.
-3. `clear_caller` is only called in test fixtures; it is a no-op in `NullCallerMemory`.
-
----
-
-## 14. Open Questions
-
-| # | Question | Impact |
+| Artifact | Format | Contents |
 |---|---|---|
-| Q1 | Should the gender question be asked once globally (any topic) or per topic category? | If global: simpler memory, but caller may want different voice for work vs relationship. Per-topic is spec'd above. |
-| Q2 | What's the right fallback voice gender when memory is empty? Female (current Hume voice) or prompt user always? | Spec above defaults to female. |
-| Q3 | For Phase 2, does config swap happen at call start (pre-routed for returning callers) or mid-call (reconnect on intake complete)? | Architectural — defer to Phase 2 spec. |
+| `transcript.jsonl` | JSONL | Full transcript per call |
+| `routing_eval_result.json` | JSON | `{call_id, persona_id, bootstrap_fired, routing_correct, reasoning}` |
+| `voice_eval_result.json` | JSON | `{call_id, expected_gender, gemma_judgment, pass}` |
+| `character_audio_clip.wav` | WAV | First 10s of character speech (Gemma input) |
+| `peer_store_state.json` | JSON | Caller peer metadata snapshot after all calls |
+| `soul_evolution.json` | JSON | Layer 1 + Layer 2 per call, showing Deriver growth |
+
+---
+
+## 13. Open questions (resolved)
+
+| # | Question | Resolution |
+|---|---|---|
+| Q0 | `AnthropicTransport` in `v2026-05-12-agent-design-patterns.md` — does it become `LiteLLMTransport`? | Yes. `AnthropicTransport` is an implementation detail of the current model choice. `LiteLLMTransport` satisfies the same `LLMTransport` Protocol and is the replacement. The CLM path uses `LiteLLMTransport` with `model="clm-coach"` (or similar alias) in `litellm_config.yaml`. |
+| Q1 | Should souls evolve? | Yes — via Deriver on character peer. §8 documents the mechanism. |
+| Q2 | Wise Man voice name? | Must verify in Hume dashboard before Phase 1 ships. Env var `REHEARSE_MALE_VOICE_NAME` overrides. |
+| Q3 | `session_settings` timing? | Test empirically in Phase 1. If it applies mid-TTS, shorten bridge line to 1 sentence. |
+| Q4 | When to enable `observe_others`? | Session 3 onwards. Sessions 1-2 are noisy; session 3 has enough signal. |
