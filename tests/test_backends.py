@@ -211,3 +211,32 @@ async def test_managed_backend_say_delegates_to_inject_speech():
         await backend.start("s1", bus)
         await backend.say(SpeakRequest(text="Hi there."))
         assert spoken == ["Hi there."]
+
+
+def test_create_backend_managed_returns_managed_backend():
+    from pathlib import Path
+    from rehearse.backends.factory import create_backend
+    from rehearse.backends.managed import ManagedBackend
+    from rehearse.config import RuntimeConfig
+    cfg = RuntimeConfig(
+        twilio_account_sid="x", twilio_auth_token="x",
+        twilio_from_number="+1", public_base_url="https://x.com",
+        hume_api_key="k", hume_config_id="c", session_root=Path("/tmp"),
+        backend_type="managed",
+    )
+    backend = create_backend(cfg)
+    assert isinstance(backend, ManagedBackend)
+
+
+def test_create_backend_unknown_raises():
+    from pathlib import Path
+    from rehearse.backends.factory import create_backend
+    from rehearse.config import RuntimeConfig
+    cfg = RuntimeConfig(
+        twilio_account_sid="x", twilio_auth_token="x",
+        twilio_from_number="+1", public_base_url="https://x.com",
+        hume_api_key="k", hume_config_id="c", session_root=Path("/tmp"),
+        backend_type="unknown",
+    )
+    with pytest.raises(ValueError, match="Unknown backend_type"):
+        create_backend(cfg)
