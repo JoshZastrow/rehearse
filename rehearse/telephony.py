@@ -39,9 +39,9 @@ from rehearse.intake import IntakeProcessor
 from rehearse.memory import CallerMemory, HonchoCallerMemory, MCPCallerMemory, NullCallerMemory
 from rehearse.outcome import OutcomeProbe, OutcomeProbeConfig
 from rehearse.phases import PhaseBudgets, PhaseProcessor
-from rehearse.services.hume_evi import HumeEVIParticipant
+from rehearse.backends.factory import create_backend
 from rehearse.session import SessionOrchestrator, TriggerEvent, utcnow
-from rehearse.types import Session, Speaker
+from rehearse.types import ParticipantConfig, Session, Speaker
 from rehearse.writers import (
     AudioRecorder,
     ProsodyWriter,
@@ -227,15 +227,14 @@ def mount_twilio_routes(
             llm_client=_llm_client,
         )
         try:
-            async with TwilioStream(ws) as twilio, HumeEVIParticipant(
-                api_key=config.hume_api_key,
-                config_id=config.hume_config_id,
-                session_id=session_id,
-            ) as coach:
+            backend = create_backend(config)
+            async with TwilioStream(ws) as twilio, backend:
                 caller = TwilioCallerParticipant(twilio, session_id)
                 await orchestrator.store.update_session(
                     session_id,
-                    lambda s: _set_participants(s, [caller.config, coach.config]),
+                    lambda s: _set_participants(
+                        s, [caller.config, _backend_participant_config(session_id, config)]
+                    ),
                 )
 
                 async def _on_decline() -> None:
@@ -274,7 +273,7 @@ def mount_twilio_routes(
                     session_id,
                     orchestrator.store,
                     bus,
-                    speaker=coach,
+                    speaker=backend,
                     on_decline=_on_decline,
                     config=ConsentGateConfig(
                         prompt_timeout_seconds=config.consent_prompt_timeout_seconds,
@@ -286,7 +285,7 @@ def mount_twilio_routes(
                 outcome_probe = OutcomeProbe(
                     session_id,
                     orchestrator.store,
-                    speaker=coach,
+                    speaker=backend,
                     config=OutcomeProbeConfig(
                         response_timeout_seconds=config.outcome_response_timeout_seconds,
                         reprompt_limit=config.outcome_reprompt_limit,
@@ -298,7 +297,8 @@ def mount_twilio_routes(
                 persona_swap = PersonaSwapCoordinator(
                     session_id,
                     orchestrator.store,
-                    speaker=coach,
+                    speaker=backend,
+                    backend=backend,
                 )
                 consent_task = asyncio.create_task(consent_gate.run(bus.subscribe()))
                 outcome_task = asyncio.create_task(outcome_probe.run(bus.subscribe()))
@@ -342,12 +342,12 @@ def mount_twilio_routes(
                     ).run(bus.subscribe())
                 )
                 assistant_task = asyncio.create_task(_pump_assistant_audio(caller, bus))
-                coach_task = asyncio.create_task(coach.run(bus))
+                backend_task = asyncio.create_task(backend.start(session_id, bus))
                 try:
                     async for chunk in caller.audio_stream(bus):
-                        if consent_state["declined"] or coach_task.done():
+                        if consent_state["declined"]:
                             break
-                        await coach.receive_audio(chunk)
+                        await backend.send_caller_audio(chunk)
                 finally:
                     # Shield cleanup from external cancellation (e.g. starlette
                     # TestClient closes the anyio CancelScope immediately after
@@ -356,11 +356,11 @@ def mount_twilio_routes(
                     with anyio.CancelScope(shield=True):
                         await bus.aclose()
                         assistant_task.cancel()
-                        coach_task.cancel()
+                        backend_task.cancel()
                         with suppress(asyncio.CancelledError):
                             await assistant_task
                         with suppress(asyncio.CancelledError):
-                            await coach_task
+                            await backend_task
                         await consent_task
                         await outcome_task
                         await phase_task
@@ -425,6 +425,15 @@ def _set_participants(session, participants):
     """Persist the live-call participant identities on the session manifest."""
     session.participants = participants
     return session
+
+
+def _backend_participant_config(session_id: str, config: RuntimeConfig) -> ParticipantConfig:
+    """Return a ParticipantConfig for the active conversation backend."""
+    return ParticipantConfig(
+        participant_id=session_id,
+        role="coach",
+        backend=config.backend_type,
+    )
 
 
 async def _pump_assistant_audio(caller: TwilioCallerParticipant, bus: FrameBus) -> None:

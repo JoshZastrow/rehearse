@@ -309,105 +309,62 @@ def test_media_websocket_bridges_twilio_to_fake_hume(
         Session(id="test-session", created_at=datetime.now(UTC)).model_dump_json(indent=2)
     )
 
-    class FakeHumeEVIParticipant:
+    class FakeBackend:
         seen_audio: list[bytes] = []
-
-        def __init__(self, *, api_key: str, config_id: str, session_id: str) -> None:
-            self._session_id = session_id
-            assert api_key == "hume_test_key"
-            assert config_id == "cfg_test"
+        _session_id: str = ""
 
         async def __aenter__(self):
             return self
 
-        async def __aexit__(self, *_args):
+        async def __aexit__(self, *_):
             return None
+
+        async def start(self, session_id: str, bus) -> None:
+            import asyncio
+            self._session_id = session_id
+            from rehearse.frames import AudioChunk, ProsodyEvent, TranscriptDelta
+            from rehearse.types import ProsodyScores, Speaker
+            await bus.publish(TranscriptDelta(
+                session_id=session_id, utterance_id="user-consent",
+                speaker=Speaker.USER, text="yes", is_final=True, ts_start=0.0, ts_end=0.05,
+            ))
+            await bus.publish(TranscriptDelta(
+                session_id=session_id, utterance_id="user-1",
+                speaker=Speaker.USER, text="user said hello", is_final=True, ts_start=0.0, ts_end=0.1,
+            ))
+            await bus.publish(ProsodyEvent(
+                session_id=session_id, utterance_id="user-1",
+                speaker=Speaker.USER,
+                scores=ProsodyScores(arousal=0.3, valence=0.1, emotions={"joy": 0.2}),
+                ts_start=0.0, ts_end=0.1,
+            ))
+            await bus.publish(TranscriptDelta(
+                session_id=session_id, utterance_id="coach-1",
+                speaker=Speaker.COACH, text="coach reply", is_final=True, ts_start=0.2, ts_end=0.3,
+            ))
+            await bus.publish(AudioChunk(
+                session_id=session_id, speaker=Speaker.COACH,
+                pcm16_16k=struct.pack("<8h", 0, 50, 100, 150, 200, 150, 100, 50), ts=0.0,
+            ))
+            # Do not block — let telephony.py drive the call to completion
+
+        async def send_caller_audio(self, pcm: bytes) -> None:
+            self.__class__.seen_audio.append(pcm)
+
+        async def inject_speech(self, text: str) -> None:
+            pass
+
+        async def swap_persona(self, persona) -> None:
+            pass
 
         async def say(self, request) -> None:
-            return None
+            pass
 
-        @property
-        def config(self) -> ParticipantConfig:
-            return ParticipantConfig(
-                participant_id=self._session_id,
-                role="coach",
-                backend="fake_hume",
-            )
-
-        async def send_audio(self, pcm16_16k: bytes) -> None:
-            await self.receive_audio(pcm16_16k)
-
-        async def receive_audio(self, pcm16_16k: bytes) -> None:
-            self.seen_audio.append(pcm16_16k)
-
-        async def run(self, bus) -> None:
-            await bus.publish(
-                TranscriptDelta(
-                    session_id=self._session_id,
-                    utterance_id="user-consent",
-                    speaker=Speaker.USER,
-                    text="yes",
-                    is_final=True,
-                    ts_start=0.0,
-                    ts_end=0.05,
-                )
-            )
-            await bus.publish(
-                TranscriptDelta(
-                    session_id=self._session_id,
-                    utterance_id="user-1",
-                    speaker=Speaker.USER,
-                    text="user said hello",
-                    is_final=True,
-                    ts_start=0.0,
-                    ts_end=0.1,
-                )
-            )
-            await bus.publish(
-                ProsodyEvent(
-                    session_id=self._session_id,
-                    utterance_id="user-1",
-                    speaker=Speaker.USER,
-                    scores=ProsodyScores(arousal=0.3, valence=0.1, emotions={"joy": 0.2}),
-                    ts_start=0.0,
-                    ts_end=0.1,
-                )
-            )
-            await bus.publish(
-                TranscriptDelta(
-                    session_id=self._session_id,
-                    utterance_id="coach-1",
-                    speaker=Speaker.COACH,
-                    text="coach reply",
-                    is_final=True,
-                    ts_start=0.2,
-                    ts_end=0.3,
-                )
-            )
-            await bus.publish(
-                TranscriptDelta(
-                    session_id=self._session_id,
-                    utterance_id="user-2",
-                    speaker=Speaker.USER,
-                    text="Let's practice asking for more salary and equity.",
-                    is_final=True,
-                    ts_start=0.31,
-                    ts_end=0.4,
-                )
-            )
-            await bus.publish(
-                AudioChunk(
-                    session_id=self._session_id,
-                    speaker=Speaker.COACH,
-                    pcm16_16k=struct.pack("<8h", 0, 50, 100, 150, 200, 150, 100, 50),
-                    ts=0.0,
-                )
-            )
-            await asyncio.Event().wait()
+        async def close(self) -> None:
+            pass
 
     from rehearse import telephony as telephony_module
-
-    monkeypatch.setattr(telephony_module, "HumeEVIParticipant", FakeHumeEVIParticipant)
+    monkeypatch.setattr(telephony_module, "create_backend", lambda cfg: FakeBackend())
 
     pcm8k = struct.pack("<4h", 0, 1000, -1000, 0)
     payload = base64.b64encode(encode_pcm16(pcm8k)).decode("ascii")
@@ -427,7 +384,7 @@ def test_media_websocket_bridges_twilio_to_fake_hume(
         outbound = ws.receive_json()
         ws.send_json({"event": "stop"})
 
-    assert FakeHumeEVIParticipant.seen_audio
+    assert FakeBackend.seen_audio
     assert outbound["event"] == "media"
     assert outbound["streamSid"] == "MZ123"
     assert (session_dir / "transcript.jsonl").exists()
@@ -454,11 +411,10 @@ def test_media_websocket_handles_hume_normal_close(
         Session(id="test-hume-close", created_at=datetime.now(UTC)).model_dump_json(indent=2)
     )
 
-    class FakeHumeClosesNormally:
-        def __init__(self, *, api_key: str, config_id: str, session_id: str, **_) -> None:
+    class FakeBackendClosesNormally:
+        def __init__(self) -> None:
+            self._session_id = ""
             self._bus = None
-            self._session_id = session_id
-            self._closing = False
 
         async def __aenter__(self):
             return self
@@ -466,26 +422,13 @@ def test_media_websocket_handles_hume_normal_close(
         async def __aexit__(self, *_):
             return None
 
-        @property
-        def config(self) -> ParticipantConfig:
-            return ParticipantConfig(
-                participant_id=self._session_id,
-                role="coach",
-                backend="fake_hume_close",
-            )
-
-        async def say(self, request) -> None:
-            pass
-
-        async def receive_audio(self, pcm16_16k: bytes) -> None:
-            if self._closing:
-                return
-            if self._bus is None:
-                return
-            # First audio chunk → publish consent grant so the gate resolves.
-            await self._bus.publish(
+        async def start(self, session_id: str, bus) -> None:
+            self._session_id = session_id
+            self._bus = bus
+            # Publish consent grant so the gate resolves.
+            await bus.publish(
                 TranscriptDelta(
-                    session_id=self._session_id,
+                    session_id=session_id,
                     utterance_id="user-consent",
                     speaker=Speaker.USER,
                     text="yes",
@@ -494,20 +437,31 @@ def test_media_websocket_handles_hume_normal_close(
                     ts_end=0.05,
                 )
             )
-
-        async def run(self, bus) -> None:
-            self._bus = bus
-            # Simulate Hume closing the socket cleanly after a short delay.
+            # Simulate backend closing cleanly after a short delay.
             await asyncio.sleep(0.05)
-            self._closing = True
             from rehearse.frames import EndOfCall
             await bus.publish(
-                EndOfCall(session_id=self._session_id, reason="hangup", ts=0.05)
+                EndOfCall(session_id=session_id, reason="hangup", ts=0.05)
             )
+
+        async def send_caller_audio(self, pcm: bytes) -> None:
+            pass
+
+        async def inject_speech(self, text: str) -> None:
+            pass
+
+        async def swap_persona(self, persona) -> None:
+            pass
+
+        async def say(self, request) -> None:
+            pass
+
+        async def close(self) -> None:
+            pass
 
     from rehearse import telephony as telephony_module
 
-    monkeypatch.setattr(telephony_module, "HumeEVIParticipant", FakeHumeClosesNormally)
+    monkeypatch.setattr(telephony_module, "create_backend", lambda cfg: FakeBackendClosesNormally())
 
     pcm8k = struct.pack("<4h", 0, 1000, -1000, 0)
     payload = base64.b64encode(encode_pcm16(pcm8k)).decode("ascii")
