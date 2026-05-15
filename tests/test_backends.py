@@ -306,3 +306,37 @@ async def test_bus_publisher_translates_interim_frame():
 
     assert frames[0].is_final is False
     assert frames[0].speaker == Speaker.USER
+
+
+@pytest.mark.asyncio
+async def test_pipeline_backend_satisfies_protocol():
+    """PipelineBackend satisfies ConversationBackend structural protocol."""
+    from rehearse.backends.base import ConversationBackend
+    from rehearse.backends.pipeline import PipelineBackend
+    backend = PipelineBackend(
+        speech_mode="modular",
+        stt_model="whisper-tiny",
+        tts_model="kokoro",
+        clm_url="http://localhost:0/chat/completions",
+    )
+    assert isinstance(backend, ConversationBackend)
+    assert hasattr(backend, "start")
+    assert hasattr(backend, "send_caller_audio")
+    assert hasattr(backend, "inject_speech")
+    assert hasattr(backend, "swap_persona")
+    assert hasattr(backend, "close")
+
+
+def test_create_backend_pipeline_returns_pipeline_backend():
+    from pathlib import Path
+    from rehearse.backends.factory import create_backend
+    from rehearse.backends.pipeline import PipelineBackend
+    from rehearse.config import RuntimeConfig
+    cfg = RuntimeConfig(
+        twilio_account_sid="x", twilio_auth_token="x",
+        twilio_from_number="+1", public_base_url="https://x.com",
+        hume_api_key="k", hume_config_id="c", session_root=Path("/tmp"),
+        backend_type="pipeline",
+    )
+    backend = create_backend(cfg)
+    assert isinstance(backend, PipelineBackend)

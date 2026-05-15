@@ -25,7 +25,7 @@ def create_backend(config: RuntimeConfig) -> ConversationBackend:
                 speech_mode=config.pipeline_speech_mode,
                 stt_model=config.pipeline_stt_model,
                 tts_model=config.pipeline_tts_model,
-                clm_url=f"http://localhost:{getattr(config, 'port', 8080)}/chat/completions",
+                clm_url="http://localhost:8080/chat/completions",
             )
         case _:
             raise ValueError(f"Unknown backend_type: {config.backend_type!r}")
