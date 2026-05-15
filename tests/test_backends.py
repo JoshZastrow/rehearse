@@ -240,3 +240,69 @@ def test_create_backend_unknown_raises():
     )
     with pytest.raises(ValueError, match="Unknown backend_type"):
         create_backend(cfg)
+
+
+@pytest.mark.asyncio
+async def test_bus_publisher_translates_transcription_frame():
+    """Pipecat TranscriptionFrame → Rehearse TranscriptDelta(is_final=True)."""
+    from rehearse.backends.bus_publisher import BusPublisher
+    from rehearse.bus import FrameBus
+    from rehearse.frames import TranscriptDelta
+    from rehearse.types import Speaker
+
+    bus = FrameBus("s1")
+    frames: list = []
+
+    async def collect():
+        async for f in bus.subscribe():
+            frames.append(f)
+
+    collect_task = asyncio.create_task(collect())
+    await asyncio.sleep(0.01)  # Let subscriber attach
+
+    publisher = BusPublisher(session_id="s1", bus=bus)
+
+    class TranscriptionFrame:
+        text = "hello there"
+        user_id = "user"
+
+    await publisher.on_transcription(TranscriptionFrame())
+    await bus.aclose()
+    await collect_task
+
+    assert len(frames) == 1
+    assert isinstance(frames[0], TranscriptDelta)
+    assert frames[0].speaker == Speaker.USER
+    assert frames[0].is_final is True
+    assert frames[0].text == "hello there"
+
+
+@pytest.mark.asyncio
+async def test_bus_publisher_translates_interim_frame():
+    """Pipecat InterimTranscriptionFrame → TranscriptDelta(is_final=False)."""
+    from rehearse.backends.bus_publisher import BusPublisher
+    from rehearse.bus import FrameBus
+    from rehearse.frames import TranscriptDelta
+    from rehearse.types import Speaker
+
+    bus = FrameBus("s1")
+    frames: list = []
+
+    async def collect():
+        async for f in bus.subscribe():
+            frames.append(f)
+
+    collect_task = asyncio.create_task(collect())
+    await asyncio.sleep(0.01)  # Let subscriber attach
+
+    publisher = BusPublisher(session_id="s1", bus=bus)
+
+    class InterimTranscriptionFrame:
+        text = "hel"
+
+    await publisher.on_interim_transcription(InterimTranscriptionFrame())
+    await bus.aclose()
+    await collect_task
+
+    assert frames[0].is_final is False
+    assert frames[0].speaker == Speaker.USER
