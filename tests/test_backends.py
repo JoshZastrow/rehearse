@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-from rehearse.types import Speaker
 
 
 def test_persona_spec_is_constructable():
