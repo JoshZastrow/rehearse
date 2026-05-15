@@ -44,14 +44,14 @@ class PersonaSwapCoordinator:
         speaker: VoiceSpeaker,
         *,
         bridges: Mapping[Phase, str] | None = None,
-        hume_client: Any | None = None,
+        backend: Any | None = None,
     ) -> None:
         """Bind the session id, manifest store, speak function, and bridge copy."""
         self._session_id = session_id
         self._store = store
         self._speaker = speaker
         self._bridges = bridges or _DEFAULT_BRIDGES
-        self._hume_client = hume_client
+        self._backend = backend
 
     async def run(self, frames: AsyncIterator[Frame]) -> None:
         """Consume bus frames and speak bridge lines on phase transitions."""
@@ -66,7 +66,7 @@ class PersonaSwapCoordinator:
 
             # At the intake→practice transition, send session_settings to
             # swap the voice if a persona was selected for this session.
-            if frame.to_phase == Phase.PRACTICE and self._hume_client is not None:
+            if frame.to_phase == Phase.PRACTICE and self._backend is not None:
                 await self._swap_voice_for_session()
 
             text = await self._render(template)
@@ -88,13 +88,14 @@ class PersonaSwapCoordinator:
             )
 
     async def _swap_voice_for_session(self) -> None:
-        """Send session_settings to swap voice if a persona is set on the session."""
+        """Build a PersonaSpec from the session manifest and call backend.swap_persona()."""
         try:
             payload = await self._store.read(self._session_id, "session.json")
             session = Session.model_validate_json(payload)
             persona_id = getattr(session, "selected_persona_id", None)
             if not persona_id:
                 return
+            from rehearse.backends.base import PersonaSpec
             from rehearse.personas.registry import PERSONA_REGISTRY, PersonaRegistry
             from rehearse.services.hume_configs import resolve_voice_id
             registry = PersonaRegistry(PERSONA_REGISTRY)
@@ -102,16 +103,17 @@ class PersonaSwapCoordinator:
             if persona is None:
                 return
             voice_id = resolve_voice_id(persona.voice_name)
-            system_prompt = persona.system_prompt_template or None
-            await self._hume_client.send_session_settings(
-                voice_id=voice_id,
-                system_prompt=system_prompt,
-            )
+            spec: PersonaSpec = {
+                "name": persona.display_name or persona_id,
+                "gender": persona.gender,
+                "system_prompt": persona.system_prompt_template or "",
+                "voice_ref": voice_id,
+            }
+            await self._backend.swap_persona(spec)
             log.info(
                 "persona_swap.voice_swapped",
                 session_id=self._session_id,
                 persona_id=persona_id,
-                voice_name=persona.voice_name,
             )
         except Exception as exc:
             log.warning("persona_swap.voice_swap_failed", session_id=self._session_id, error=str(exc))
