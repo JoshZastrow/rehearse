@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 
@@ -32,3 +34,20 @@ def test_conversation_backend_protocol_exists():
     assert hasattr(ConversationBackend, "inject_speech")
     assert hasattr(ConversationBackend, "swap_persona")
     assert hasattr(ConversationBackend, "close")
+
+
+@pytest.mark.asyncio
+async def test_null_prosody_service_returns_zeroed_scores():
+    from rehearse.backends.prosody import NullProsodyService
+    from rehearse.types import ProsodyScores
+    svc = NullProsodyService()
+    scores = await svc.score(b"\x00" * 320)
+    assert isinstance(scores, ProsodyScores)
+    assert scores.arousal == 0.0
+    assert scores.valence == 0.0
+    assert scores.emotions == {}
+
+
+def test_prosody_service_protocol_exists():
+    from rehearse.backends.prosody import ProsodyService
+    assert hasattr(ProsodyService, "score")
