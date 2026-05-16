@@ -109,3 +109,29 @@ def test_runtime_config_consent_outcome_defaults(
     assert config.outcome_prompt_lead_seconds == 15
     assert config.outcome_response_timeout_seconds == 15
     assert config.outcome_reprompt_limit == 1
+
+
+def test_config_has_backend_type_field():
+    import dataclasses
+    from rehearse.config import RuntimeConfig
+    fields = {f.name for f in dataclasses.fields(RuntimeConfig)}
+    assert "backend_type" in fields
+    assert "managed_api_key" in fields
+    assert "managed_config_id" in fields
+
+
+def test_config_backend_type_defaults_to_managed():
+    from pathlib import Path
+    from rehearse.config import RuntimeConfig
+    cfg = RuntimeConfig(
+        twilio_account_sid="x",
+        twilio_auth_token="x",
+        twilio_from_number="+10000000000",
+        public_base_url="https://example.com",
+        hume_api_key="k",
+        hume_config_id="c",
+        session_root=Path("/tmp"),
+    )
+    assert cfg.backend_type == "managed"
+    assert cfg.managed_api_key == "k"
+    assert cfg.managed_config_id == "c"

@@ -44,6 +44,21 @@ class RuntimeConfig:
     honcho_workspace_id: str = "rehearse"
     honcho_base_url: str | None = None  # set to http://localhost:8001 for self-hosted
     memory_mcp_url: str | None = None  # MEMORY_MCP_URL — MCP memory server endpoint
+    backend_type: str = "managed"
+    managed_api_key: str = ""
+    managed_config_id: str = ""
+    pipeline_speech_mode: str = "modular"
+    pipeline_stt_model: str = "whisper-tiny"
+    pipeline_tts_model: str = "kokoro"
+    pipeline_e2e_model: str = ""
+    pipeline_e2e_checkpoint: str = ""
+
+    def __post_init__(self) -> None:
+        """Backfill managed_api_key / managed_config_id from hume_* if absent."""
+        if not self.managed_api_key and self.hume_api_key:
+            object.__setattr__(self, "managed_api_key", self.hume_api_key)
+        if not self.managed_config_id and self.hume_config_id:
+            object.__setattr__(self, "managed_config_id", self.hume_config_id)
 
     @classmethod
     def from_env(cls, *, load_dotenv_file: bool = True) -> RuntimeConfig:
@@ -109,4 +124,21 @@ class RuntimeConfig:
             honcho_workspace_id=os.environ.get("HONCHO_WORKSPACE_ID", "rehearse"),
             honcho_base_url=os.environ.get("HONCHO_BASE_URL") or None,
             memory_mcp_url=os.environ.get("MEMORY_MCP_URL") or None,
+            backend_type=os.environ.get("BACKEND_TYPE", "managed"),
+            managed_api_key=(
+                os.environ.get("MANAGED_API_KEY")
+                or os.environ.get("HUME_API_KEY")
+                or ""
+            ),
+            managed_config_id=(
+                os.environ.get("MANAGED_CONFIG_ID")
+                or os.environ.get("HUME_CONFIG_ID")
+                or os.environ.get("HUME_CONFIG_ID_COACH")
+                or ""
+            ),
+            pipeline_speech_mode=os.environ.get("PIPELINE_SPEECH_MODE", "modular"),
+            pipeline_stt_model=os.environ.get("PIPELINE_STT_MODEL", "whisper-tiny"),
+            pipeline_tts_model=os.environ.get("PIPELINE_TTS_MODEL", "kokoro"),
+            pipeline_e2e_model=os.environ.get("PIPELINE_E2E_MODEL", ""),
+            pipeline_e2e_checkpoint=os.environ.get("PIPELINE_E2E_CHECKPOINT", ""),
         )

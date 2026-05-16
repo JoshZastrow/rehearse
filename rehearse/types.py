@@ -68,6 +68,7 @@ class ProsodySource(StrEnum):
     SCRIPTED = "scripted"
     TTS_HUME = "tts_hume"
     HUMAN_RECORDED = "human_recorded"
+    LOCAL_CLASSIFIER = "local_classifier"
 
 
 class FaultLabel(StrEnum):
@@ -309,6 +310,9 @@ class Session(Strict):
     pipeline_version: str | None = None
     model_slots: dict[str, str] = Field(default_factory=dict)
     participants: list[ParticipantConfig] = Field(default_factory=list)
+    backend_type: Literal["managed", "pipeline"] | None = None
+    speech_services: dict[str, str] | None = None
+    prosody_source: Literal["managed", "local_classifier", "none"] = "none"
 
 
 # ───────────────────────────────────────────────────────────────────────────────
