@@ -23,6 +23,13 @@ dependencies = [
     "psycopg[binary]>=3.3.4",
     "hindsight-all>=0.6.1",
     "modal>=0.73",
+    "pocket-tts>=2.1.0",
+]
+
+[project.optional-dependencies]
+pipeline = [
+    "pocket-tts>=2.1.0",
+    "faster-whisper>=1.1.0",
 ]
 
 [project.scripts]

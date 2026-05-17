@@ -364,3 +364,42 @@ async def test_silence_tts_set_voice_is_noop():
     svc = SilenceTTSService()
     await svc.set_voice("any-voice")
     await svc.set_voice(None)
+
+
+def test_pocket_tts_native_sample_rate_is_24000():
+    """Pocket TTS API contract: model.sample_rate must be 24000."""
+    from pocket_tts import TTSModel
+    model = TTSModel.load_model()
+    assert model.sample_rate == 24_000, (
+        f"Expected 24000 Hz but got {model.sample_rate}. "
+        "Update PocketTTSService._NATIVE_SAMPLE_RATE if this changed."
+    )
+
+
+@pytest.mark.asyncio
+async def test_pocket_tts_service_satisfies_protocol():
+    from rehearse.backends.tts import PocketTTSService, TTSService
+    svc = PocketTTSService(voice_ref="alba")
+    assert isinstance(svc, TTSService)
+
+
+@pytest.mark.asyncio
+async def test_pocket_tts_synthesize_returns_16khz_pcm16():
+    """PocketTTSService must resample 24kHz→16kHz before returning."""
+    from rehearse.backends.tts import PocketTTSService
+    svc = PocketTTSService(voice_ref="alba")
+    result = await svc.synthesize("Hello.")
+    assert isinstance(result, bytes)
+    assert len(result) > 0
+    assert len(result) % 2 == 0
+    assert len(result) >= 3200  # at least 100ms at 16kHz
+
+
+@pytest.mark.asyncio
+async def test_pocket_tts_set_voice_changes_voice():
+    from rehearse.backends.tts import PocketTTSService
+    svc = PocketTTSService(voice_ref="alba")
+    await svc.synthesize("Hello.")  # force model load
+    await svc.set_voice("anna")     # must not raise
+    result = await svc.synthesize("World.")
+    assert isinstance(result, bytes)
