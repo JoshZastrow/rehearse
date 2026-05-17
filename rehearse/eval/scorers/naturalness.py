@@ -23,7 +23,7 @@ Bands (Appendix A of v2026-05-05 spec):
   silence_after_affect (s):
     1.5–4.0 ideal · 1.0–1.5 or 4.0–6.0 acceptable · else pathological
   speech_rate_band (wpm):
-    130–170 ideal · 100–130 or 170–200 acceptable · else pathological
+    160–190 ideal · 130–160 or 190–220 acceptable · else pathological
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ from pathlib import Path
 from rehearse.eval.protocols import BenchmarkExample, RolloutResult
 from rehearse.types import RubricScore
 
-_DEFAULT_THRESHOLDS_VERSION = "naturalness-v1"
+_DEFAULT_THRESHOLDS_VERSION = "naturalness-v2"
 
 # Overlaps shorter than this don't count as interruption (backchannels).
 _BACKCHANNEL_THRESHOLD_MS = 250
@@ -140,8 +140,8 @@ class NaturalnessScorer:
                 dimension="naturalness.speech_rate_band",
                 value=_band(
                     wpm,
-                    ideal=(130.0, 170.0),
-                    acceptable=(100.0, 200.0),
+                    ideal=(160.0, 190.0),
+                    acceptable=(130.0, 220.0),
                 )
                 if wpm is not None
                 else 0.0,

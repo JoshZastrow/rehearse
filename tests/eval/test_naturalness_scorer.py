@@ -170,18 +170,15 @@ async def test_silence_dead_air_when_coach_takes_too_long(tmp_path: Path) -> Non
 
 @pytest.mark.asyncio
 async def test_speech_rate_ideal_band(tmp_path: Path) -> None:
-    """~150 wpm coach delivery — paced ideal."""
+    """~175 wpm coach delivery — conversational ideal (160–190 band)."""
     _write_transcript(
         tmp_path,
         [
             {"speaker": "user", "text": "i need help"},
-            # 15 words spoken by coach in 6 seconds = 150 wpm
+            # 14 words in 4.8 seconds = 175 wpm (mid-ideal)
             {
                 "speaker": "coach",
-                "text": (
-                    "Let's break that down into smaller steps "
-                    "so you can act on the first one today."
-                ),
+                "text": "Let's break that down so you can act on the first step today.",
             },
         ],
     )
@@ -191,13 +188,39 @@ async def test_speech_rate_ideal_band(tmp_path: Path) -> None:
             {"turn_index": 0, "role": "user", "event": "audio_start", "t_ms": 0},
             {"turn_index": 0, "role": "user", "event": "audio_end", "t_ms": 1000},
             {"turn_index": 0, "role": "coach", "event": "audio_start", "t_ms": 2000},
-            {"turn_index": 0, "role": "coach", "event": "audio_end", "t_ms": 8000},
+            {"turn_index": 0, "role": "coach", "event": "audio_end", "t_ms": 6800},
         ],
     )
     scorer = NaturalnessScorer()
     rows = await scorer.score(_example(), _rollout(tmp_path), run_id="r")
     rate = next(r for r in rows if r.dimension == "naturalness.speech_rate_band")
     assert rate.value == pytest.approx(1.0)
+
+
+@pytest.mark.asyncio
+async def test_speech_rate_acceptable_when_slow(tmp_path: Path) -> None:
+    """~140 wpm — acceptable (130–160) but no longer ideal under naturalness-v2."""
+    _write_transcript(
+        tmp_path,
+        [
+            # 14 words in 6 seconds = 140 wpm (was ideal in v1, now acceptable in v2)
+            {
+                "speaker": "coach",
+                "text": "Let's break that down so you can act on the first step today.",
+            },
+        ],
+    )
+    _write_timing(
+        tmp_path,
+        [
+            {"turn_index": 0, "role": "coach", "event": "audio_start", "t_ms": 0},
+            {"turn_index": 0, "role": "coach", "event": "audio_end", "t_ms": 6000},
+        ],
+    )
+    scorer = NaturalnessScorer()
+    rows = await scorer.score(_example(), _rollout(tmp_path), run_id="r")
+    rate = next(r for r in rows if r.dimension == "naturalness.speech_rate_band")
+    assert rate.value == pytest.approx(0.5)
 
 
 @pytest.mark.asyncio
