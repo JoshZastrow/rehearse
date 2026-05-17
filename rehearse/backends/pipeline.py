@@ -120,7 +120,9 @@ class PipelineBackend:
         import numpy as np
         from faster_whisper import WhisperModel
 
-        whisper = WhisperModel(self._stt_model, device="cpu", compute_type="int8")
+        # Translate "whisper-<size>" shorthand to the size name faster-whisper expects.
+        fw_model = self._stt_model.removeprefix("whisper-")
+        whisper = WhisperModel(fw_model, device="cpu", compute_type="int8")
         log.info("pipeline_backend.whisper_loaded", model=self._stt_model)
 
         audio_buffer: list[bytes] = []
