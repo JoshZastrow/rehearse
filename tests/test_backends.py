@@ -403,3 +403,43 @@ async def test_pocket_tts_set_voice_changes_voice():
     await svc.set_voice("anna")     # must not raise
     result = await svc.synthesize("World.")
     assert isinstance(result, bytes)
+
+
+@pytest.mark.asyncio
+async def test_pipeline_backend_inject_speech_publishes_audio_chunk():
+    """inject_speech() must synthesize with TTSService and publish AudioChunk(COACH)."""
+    from rehearse.backends.pipeline import PipelineBackend
+    from rehearse.backends.tts import SilenceTTSService
+    from rehearse.bus import FrameBus
+    from rehearse.frames import AudioChunk
+    from rehearse.types import Speaker
+
+    bus = FrameBus("s1")
+    frames: list = []
+
+    async def collect():
+        async for f in bus.subscribe():
+            frames.append(f)
+
+    collect_task = asyncio.create_task(collect())
+
+    backend = PipelineBackend(
+        speech_mode="modular",
+        stt_model="whisper-tiny",
+        tts_model="silence",
+        tts_service=SilenceTTSService(),
+    )
+
+    async with backend:
+        await backend.start("s1", bus)
+        await backend.inject_speech("Hello caller.")
+        await asyncio.sleep(0.05)
+
+    await bus.aclose()
+    await collect_task
+
+    coach_chunks = [
+        f for f in frames
+        if isinstance(f, AudioChunk) and f.speaker == Speaker.COACH
+    ]
+    assert len(coach_chunks) >= 1
