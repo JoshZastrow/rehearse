@@ -54,3 +54,34 @@ def frame_collector_factory():
     def _make(bus: FrameBus) -> FrameCollector:
         return FrameCollector(bus)
     return _make
+
+
+class SpeechCaller:
+    """Generate PCM16/16kHz caller audio from a text phrase using PocketTTS.
+
+    Used for live pipeline tests where Whisper needs actual speech to transcribe.
+    """
+
+    def __init__(self, phrase: str = "Hello, this is a test. One two three.") -> None:
+        self._phrase = phrase
+        self._audio: bytes | None = None
+
+    async def prepare(self) -> None:
+        """Pre-generate the speech audio (loads PocketTTS model once)."""
+        from rehearse.backends.tts import PocketTTSService
+        svc = PocketTTSService(voice_ref="alba")
+        self._audio = await svc.synthesize(self._phrase)
+
+    def audio_chunks(self, chunk_size: int = 640) -> Iterator[bytes]:
+        """Yield PCM16/16kHz chunks of the pre-generated speech audio."""
+        if self._audio is None:
+            raise RuntimeError("Call prepare() first")
+        for i in range(0, len(self._audio), chunk_size):
+            yield self._audio[i : i + chunk_size]
+
+
+@pytest.fixture
+async def speech_caller() -> SpeechCaller:
+    caller = SpeechCaller()
+    await caller.prepare()
+    return caller
