@@ -340,3 +340,27 @@ def test_create_backend_pipeline_returns_pipeline_backend():
     )
     backend = create_backend(cfg)
     assert isinstance(backend, PipelineBackend)
+
+
+def test_tts_service_protocol_exists():
+    from rehearse.backends.tts import TTSService
+    assert hasattr(TTSService, "synthesize")
+    assert hasattr(TTSService, "set_voice")
+
+
+@pytest.mark.asyncio
+async def test_silence_tts_returns_pcm16_bytes():
+    from rehearse.backends.tts import SilenceTTSService
+    svc = SilenceTTSService()
+    result = await svc.synthesize("Hello.")
+    assert isinstance(result, bytes)
+    assert len(result) > 0
+    assert len(result) % 2 == 0  # PCM16 = 2 bytes per sample
+
+
+@pytest.mark.asyncio
+async def test_silence_tts_set_voice_is_noop():
+    from rehearse.backends.tts import SilenceTTSService
+    svc = SilenceTTSService()
+    await svc.set_voice("any-voice")
+    await svc.set_voice(None)
