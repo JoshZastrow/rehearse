@@ -49,7 +49,7 @@ class PhaseSignal(Strict):
     session_id: str
     from_phase: Phase | None = None
     to_phase: Phase
-    reason: Literal["budget", "cue", "consent_decline"]
+    reason: Literal["budget", "cue", "consent_decline", "llm"]
     ts: float
 
 
