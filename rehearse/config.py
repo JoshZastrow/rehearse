@@ -52,6 +52,7 @@ class RuntimeConfig:
     pipeline_tts_model: str = "kokoro"
     pipeline_e2e_model: str = ""
     pipeline_e2e_checkpoint: str = ""
+    enable_consent: bool = False
 
     def __post_init__(self) -> None:
         """Backfill managed_api_key / managed_config_id from hume_* if absent."""
@@ -141,4 +142,5 @@ class RuntimeConfig:
             pipeline_tts_model=os.environ.get("PIPELINE_TTS_MODEL", "kokoro"),
             pipeline_e2e_model=os.environ.get("PIPELINE_E2E_MODEL", ""),
             pipeline_e2e_checkpoint=os.environ.get("PIPELINE_E2E_CHECKPOINT", ""),
+            enable_consent=os.environ.get("ENABLE_CONSENT", "0") == "1",
         )

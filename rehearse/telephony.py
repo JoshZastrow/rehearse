@@ -269,19 +269,27 @@ def mount_twilio_routes(
                     )
                 else:
                     _memory = NullCallerMemory()
-                consent_gate = ConsentGate(
-                    session_id,
-                    orchestrator.store,
-                    bus,
-                    speaker=backend,
-                    on_decline=_on_decline,
-                    config=ConsentGateConfig(
-                        prompt_timeout_seconds=config.consent_prompt_timeout_seconds,
-                        reprompt_limit=config.consent_reprompt_limit,
-                    ),
-                    caller_hash=caller_hash,
-                    memory=_memory,
-                )
+                if config.enable_consent:
+                    consent_gate = ConsentGate(
+                        session_id,
+                        orchestrator.store,
+                        bus,
+                        speaker=backend,
+                        on_decline=_on_decline,
+                        config=ConsentGateConfig(
+                            prompt_timeout_seconds=config.consent_prompt_timeout_seconds,
+                            reprompt_limit=config.consent_reprompt_limit,
+                        ),
+                        caller_hash=caller_hash,
+                        memory=_memory,
+                    )
+                else:
+                    await orchestrator.store.update_session(
+                        session_id, _grant_consent
+                    )
+                    async def _consent_noop() -> None:
+                        pass
+                    consent_gate = None  # type: ignore[assignment]
                 outcome_probe = OutcomeProbe(
                     session_id,
                     orchestrator.store,
@@ -300,7 +308,10 @@ def mount_twilio_routes(
                     speaker=backend,
                     backend=backend,
                 )
-                consent_task = asyncio.create_task(consent_gate.run(bus.subscribe()))
+                if config.enable_consent:
+                    consent_task = asyncio.create_task(consent_gate.run(bus.subscribe()))
+                else:
+                    consent_task = asyncio.create_task(_consent_noop())
                 outcome_task = asyncio.create_task(outcome_probe.run(bus.subscribe()))
                 phase_task = asyncio.create_task(phase_processor.run(bus.subscribe()))
                 intake_task = asyncio.create_task(intake_processor.run(bus.subscribe()))
@@ -434,6 +445,13 @@ def _backend_participant_config(session_id: str, config: RuntimeConfig) -> Parti
         role="coach",
         backend=config.backend_type,
     )
+
+
+def _grant_consent(session):
+    """Set consent to GRANTED on the session manifest (used when consent gate is disabled)."""
+    from rehearse.types import ConsentState
+    session.consent = ConsentState.GRANTED
+    return session
 
 
 async def _pump_assistant_audio(caller: TwilioCallerParticipant, bus: FrameBus) -> None:
