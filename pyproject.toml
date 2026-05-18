@@ -53,9 +53,10 @@ build-backend = "hatchling.build"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-addopts = "-m 'not live_api'"
+addopts = "-m 'not live_api and not live_modal'"
 markers = [
     "live_api: hits real provider APIs; requires sourced .env. Deselected by default. Run with `pytest -m live_api`.",
+    "live_modal: hits a deployed Modal endpoint; requires VLLM_BASE_URL. Deselected by default. Run with `pytest -m live_modal`.",
     "slow: loads ML models, takes >10s",
     "pipeline: requires faster-whisper + pocket-tts installed",
 ]

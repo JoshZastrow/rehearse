@@ -6,6 +6,7 @@ SyntheticCaller produces a fixed sequence of PCM audio chunks.
 
 from __future__ import annotations
 
+import os
 import struct
 from collections.abc import Iterator
 
@@ -85,3 +86,18 @@ async def speech_caller() -> SpeechCaller:
     caller = SpeechCaller()
     await caller.prepare()
     return caller
+
+
+@pytest.fixture
+def vllm_base_url() -> str:
+    """Return VLLM_BASE_URL from the environment.
+
+    Skips the test if the variable is not set.  Set it to the Modal-deployed
+    endpoint, e.g.::
+
+        export VLLM_BASE_URL=https://<workspace>--rehearse-gemma-judge-serve.modal.run/v1
+    """
+    url = os.environ.get("VLLM_BASE_URL", "")
+    if not url:
+        pytest.skip("VLLM_BASE_URL not set — skipping live Modal test")
+    return url
