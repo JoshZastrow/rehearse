@@ -99,14 +99,13 @@ def mock_dialogue_and_judge(monkeypatch: pytest.MonkeyPatch):
     dialogue = _DialogueAnthropic()
     judge = _JudgeAnthropic()
 
-    def _agent_client(self: LLMSandboxAgent) -> _DialogueAnthropic:
-        return dialogue
+    class _JudgeBackend:
+        async def complete(self, *, system: str, user: str) -> str:
+            resp = await judge.create(system=system, messages=[{"role": "user", "content": user}])
+            return resp.content[0].text
 
-    def _judge_client(self: LLMJudge) -> _JudgeAnthropic:
-        return judge
-
-    monkeypatch.setattr(LLMSandboxAgent, "_client_lazy", _agent_client)
-    monkeypatch.setattr(LLMJudge, "_client_lazy", _judge_client)
+    monkeypatch.setattr(LLMSandboxAgent, "_client_lazy", lambda self: dialogue)
+    monkeypatch.setattr(LLMJudge, "_get_backend", lambda self: _JudgeBackend())
     return dialogue, judge
 
 
@@ -162,16 +161,11 @@ async def test_mme_sandbox_rollout_judge_failure_yields_zeros(
         LLMSandboxAgent, "_client_lazy", lambda self: dialogue
     )
 
-    class _BrokenJudgeClient:
-        messages = None  # not used
-
-    class _RaisingMessages:
-        async def create(self, **_: Any):
+    class _BrokenBackend:
+        async def complete(self, *, system: str, user: str) -> str:
             raise RuntimeError("simulated network failure")
 
-    broken = _BrokenJudgeClient()
-    broken.messages = _RaisingMessages()
-    monkeypatch.setattr(LLMJudge, "_client_lazy", lambda self: broken)
+    monkeypatch.setattr(LLMJudge, "_get_backend", lambda self: _BrokenBackend())
 
     config = RunConfig(
         eval_name="mme-sandbox-rollout",

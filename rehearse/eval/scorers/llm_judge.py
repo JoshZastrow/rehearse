@@ -15,7 +15,6 @@ holistic usefulness) without re-implementing the API plumbing.
 from __future__ import annotations
 
 import json
-import os
 import re
 from pathlib import Path
 from typing import Any
@@ -32,10 +31,13 @@ class LLMJudgeError(RuntimeError):
 
 
 class LLMJudge:
-    """Anthropic-backed judge with structured-JSON output.
+    """Judge primitive with pluggable backend.
 
-    Reusable across scorers. Each `judge()` call sends a system+user prompt
-    and parses the response as a JSON object. Caller defines the schema.
+    Each judge() call sends a system+user prompt to the configured backend
+    and parses the response as a JSON object. Backend selection priority:
+      1. Explicit ``backend=`` injection (preferred — used in tests and prod wiring)
+      2. Explicit ``client=`` injection (legacy — existing tests still work)
+      3. ``backend_from_env()`` — reads JUDGE_BASE_URL / ANTHROPIC_API_KEY
     """
 
     def __init__(
@@ -45,43 +47,35 @@ class LLMJudge:
         max_tokens: int = 2048,
         temperature: float | None = None,
         client: Any = None,
+        backend: Any = None,
     ) -> None:
         self.model = model
         self.max_tokens = max_tokens
-        # `temperature` is deprecated on Claude Opus 4.7 and other extended-
-        # thinking-class models. Default to None and only pass it if the
-        # caller explicitly opts in.
         self.temperature = temperature
         self._client = client
+        self._backend = backend
 
-    def _client_lazy(self) -> Any:
-        if self._client is None:
-            from anthropic import AsyncAnthropic
-
-            api_key = os.environ.get("ANTHROPIC_API_KEY")
-            if not api_key:
-                raise LLMJudgeError("ANTHROPIC_API_KEY not set")
-            self._client = AsyncAnthropic(api_key=api_key)
-        return self._client
+    def _get_backend(self) -> Any:
+        if self._backend is not None:
+            return self._backend
+        if self._client is not None:
+            return _LegacyClientBackend(
+                client=self._client,
+                model=self.model,
+                max_tokens=self.max_tokens,
+                temperature=self.temperature,
+            )
+        from rehearse.eval.scorers.judge_backend import backend_from_env
+        return backend_from_env(model=self.model, max_tokens=self.max_tokens)
 
     async def judge(self, *, system: str, user: str) -> dict[str, Any]:
-        client = self._client_lazy()
-        kwargs: dict[str, Any] = {
-            "model": self.model,
-            "max_tokens": self.max_tokens,
-            "system": system,
-            "messages": [{"role": "user", "content": user}],
-        }
-        if self.temperature is not None:
-            kwargs["temperature"] = self.temperature
+        backend = self._get_backend()
         try:
-            resp = await client.messages.create(**kwargs)
+            text = await backend.complete(system=system, user=user)
+        except LLMJudgeError:
+            raise
         except Exception as exc:
             raise LLMJudgeError(f"judge call failed: {type(exc).__name__}: {exc}") from exc
-
-        text = "".join(
-            block.text for block in resp.content if getattr(block, "type", None) == "text"
-        )
         return _parse_json(text)
 
 
@@ -322,6 +316,40 @@ def _render_transcript_for_judge(jsonl_lines: list[str]) -> str:
             label = speaker.upper()
         out.append(f"[{idx}] {label}: {row.get('text', '').strip()}")
     return "\n".join(out)
+
+
+class _LegacyClientBackend:
+    """Wraps a raw Anthropic client injected via LLMJudge(client=).
+
+    Preserves backwards compatibility for callers that inject a client directly.
+    """
+
+    def __init__(
+        self,
+        *,
+        client: Any,
+        model: str,
+        max_tokens: int,
+        temperature: float | None,
+    ) -> None:
+        self._client = client
+        self._model = model
+        self._max_tokens = max_tokens
+        self._temperature = temperature
+
+    async def complete(self, *, system: str, user: str) -> str:
+        kwargs: dict[str, Any] = {
+            "model": self._model,
+            "max_tokens": self._max_tokens,
+            "system": system,
+            "messages": [{"role": "user", "content": user}],
+        }
+        if self._temperature is not None:
+            kwargs["temperature"] = self._temperature
+        resp = await self._client.messages.create(**kwargs)
+        return "".join(
+            block.text for block in resp.content if getattr(block, "type", None) == "text"
+        )
 
 
 def _extract_dim(judge_output: dict[str, Any], dim: str) -> tuple[float, str | None]:
