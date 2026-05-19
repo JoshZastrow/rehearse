@@ -53,6 +53,9 @@ class RuntimeConfig:
     pipeline_e2e_model: str = ""
     pipeline_e2e_checkpoint: str = ""
     enable_consent: bool = False
+    enable_meeting_phase_processor: bool = False
+    phase_classifier_model: str = "claude-haiku-4-5-20251001"
+    phase_classifier_context_turns: int = 10
 
     def __post_init__(self) -> None:
         """Backfill managed_api_key / managed_config_id from hume_* if absent."""
@@ -143,4 +146,7 @@ class RuntimeConfig:
             pipeline_e2e_model=os.environ.get("PIPELINE_E2E_MODEL", ""),
             pipeline_e2e_checkpoint=os.environ.get("PIPELINE_E2E_CHECKPOINT", ""),
             enable_consent=os.environ.get("ENABLE_CONSENT", "0") == "1",
+            enable_meeting_phase_processor=os.environ.get("ENABLE_MEETING_PHASE_PROCESSOR", "0") == "1",
+            phase_classifier_model=os.environ.get("PHASE_CLASSIFIER_MODEL", "claude-haiku-4-5-20251001"),
+            phase_classifier_context_turns=int(os.environ.get("PHASE_CLASSIFIER_CONTEXT_TURNS", "10")),
         )
