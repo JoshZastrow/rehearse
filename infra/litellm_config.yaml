@@ -1,0 +1,62 @@
+# LiteLLM Proxy Configuration
+#
+# Runs a single OpenAI-compatible endpoint at http://localhost:4000 (or wherever
+# deployed) that routes requests by model alias to the right backend.
+#
+# Start locally:
+#   litellm --config infra/litellm_config.yaml
+#
+# All callers in the app talk to ONE base URL and pick a model by alias.
+# To swap a backend: change the entry here, restart the proxy. No code changes.
+#
+# Environment variables required (add to .env):
+#   MODAL_GEMMA_API_KEY   - Modal bearer token (modal token new)
+#   ANTHROPIC_API_KEY     - Anthropic API key (used until coach is fully self-hosted)
+#
+# Deploy URL from: modal deploy infra/judge.py
+#   https://joshzastrow--rehearse-gemma-judge-serve.modal.run
+
+model_list:
+
+  # ── Gemma 4 on Modal (H200 vLLM) ──────────────────────────────────────────
+  # Used by: LLMJudge (eval scoring), PipelineBackend CLM (when self-hosted)
+  - model_name: judge
+    litellm_params:
+      model: openai/google/gemma-4-26B-A4B-it   # openai/ prefix = OpenAI-compat wire
+      api_base: https://joshzastrow--rehearse-gemma-judge-serve.modal.run/v1
+      api_key: os.environ/MODAL_GEMMA_API_KEY
+
+  # Alias for callers that want the full model name instead of "judge"
+  - model_name: google/gemma-4-26B-A4B-it
+    litellm_params:
+      model: openai/google/gemma-4-26B-A4B-it
+      api_base: https://joshzastrow--rehearse-gemma-judge-serve.modal.run/v1
+      api_key: os.environ/MODAL_GEMMA_API_KEY
+
+  # ── Anthropic (coach / CLM) ────────────────────────────────────────────────
+  # Used by: Hume EVI webhook (/chat/completions), PipelineBackend CLM today
+  # Replace api_base with a self-hosted endpoint when ready.
+  - model_name: coach
+    litellm_params:
+      model: anthropic/claude-sonnet-4-6
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  - model_name: claude-sonnet-4-6
+    litellm_params:
+      model: anthropic/claude-sonnet-4-6
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  # ── Local Ollama (dev only) ────────────────────────────────────────────────
+  # Run: ollama pull gemma3:27b
+  - model_name: local
+    litellm_params:
+      model: openai/gemma3:27b
+      api_base: http://localhost:11434/v1
+      api_key: ollama
+
+litellm_settings:
+  drop_params: true        # ignore unknown params (e.g. temperature on Gemma)
+  request_timeout: 120     # vLLM cold start can be slow on first request
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY   # set to any secret; gates all proxy calls
