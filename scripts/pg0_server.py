@@ -13,10 +13,14 @@ import sys
 
 port = int(sys.argv[1]) if len(sys.argv) > 1 else 5433
 
-from pg0 import Pg0  # noqa: E402
+from pg0 import Pg0, Pg0AlreadyRunningError  # noqa: E402
 
 pg = Pg0(port=port)
-pg.start()
+try:
+    pg.start()
+except Pg0AlreadyRunningError:
+    pg.stop()
+    pg.start()
 
 uri = pg.uri
 print(uri, flush=True)
