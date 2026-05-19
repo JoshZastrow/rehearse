@@ -26,3 +26,15 @@ coverage.json
 lib/
 .gstack/
 .worktrees/
+.env
+/outputs/
+/prime-rl/
+/environments/*/outputs/
+/environments/*/dist/
+/environments/*/*.egg-info/
+/environments/*/__pycache__/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+dev/lab
