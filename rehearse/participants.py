@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator
 from typing import Literal, Protocol, runtime_checkable
 
 from rehearse.bus import FrameBus
@@ -46,9 +47,14 @@ class VoiceParticipant(ABC):
         ...
 
     @abstractmethod
-    async def run(self, bus: FrameBus) -> None:
-        """Run this participant's event loop until the call ends."""
+    def audio_stream(self, bus: FrameBus) -> AsyncIterator[bytes]:
+        """Yield PCM16/16kHz audio chunks until the call ends."""
         ...
+
+    async def run(self, bus: FrameBus) -> None:
+        """Consume audio_stream, discarding chunks (convenience for standalone use)."""
+        async for _ in self.audio_stream(bus):
+            pass
 
 
 __all__ = [

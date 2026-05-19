@@ -8,11 +8,8 @@ Twilio media websocket that feeds audio into Hume.
 from __future__ import annotations
 
 import asyncio
-import json
-from contextlib import suppress
 from typing import Protocol
 
-import anyio
 import structlog
 from fastapi import (
     BackgroundTasks,
@@ -27,29 +24,14 @@ from fastapi.responses import PlainTextResponse, Response
 from twilio.request_validator import RequestValidator
 from twilio.rest import Client as TwilioClient
 
-from rehearse.agents.intake_recorder import IntakeMemoryRecorder
-from rehearse.agents.persona_selection_recorder import PersonaSelectionRecorder
-from rehearse.agents.persona_swap import PersonaSwapCoordinator
 from rehearse.audio.twilio_stream import TwilioCallerParticipant, TwilioStream
-from rehearse.bus import FrameBus
-from rehearse.config import RuntimeConfig
-from rehearse.consent import ConsentGate, ConsentGateConfig
-from rehearse.frames import AudioChunk, EndOfCall
-from rehearse.intake import IntakeProcessor
-from rehearse.memory import CallerMemory, HonchoCallerMemory, MCPCallerMemory, NullCallerMemory
-from rehearse.outcome import OutcomeProbe, OutcomeProbeConfig
-from rehearse.phases import PhaseBudgets, PhaseProcessor
-from rehearse.phases_llm import MeetingPhaseProcessor
 from rehearse.backends.factory import create_backend
+from rehearse.config import RuntimeConfig
+from rehearse.conversation import run_session
+from rehearse.memory import HonchoCallerMemory, MCPCallerMemory, NullCallerMemory
+from rehearse.phases import PhaseBudgets
 from rehearse.session import SessionOrchestrator, TriggerEvent, utcnow
-from rehearse.types import ParticipantConfig, Session, Speaker
-from rehearse.writers import (
-    AudioRecorder,
-    ProsodyWriter,
-    TelemetryLogger,
-    TimingWriter,
-    TranscriptWriter,
-)
+from rehearse.types import ParticipantConfig, Session
 
 log = structlog.get_logger(__name__)
 
@@ -200,47 +182,37 @@ def mount_twilio_routes(
 
     @app.websocket("/media/{session_id}")
     async def media_stream(ws: WebSocket, session_id: str) -> None:
-        """Bridge the live Twilio media websocket to Hume and the frame bus."""
+        """Bridge the live Twilio media websocket to the conversation pipeline."""
         await ws.accept()
         log.info("media.connect", session_id=session_id)
-        bus = FrameBus(session_id)
-        budgets = PhaseBudgets()
-        consent_state = {"declined": False}
-
-        def _consent_getter():
-            return _read_consent_from_disk(orchestrator, session_id)
-
-        _llm_client = None
-        if config.anthropic_api_key:
-            from anthropic import AsyncAnthropic
-            _llm_client = AsyncAnthropic(api_key=config.anthropic_api_key)
-        if config.enable_meeting_phase_processor and _llm_client is not None:
-            phase_processor: PhaseProcessor | MeetingPhaseProcessor = MeetingPhaseProcessor(
-                session_id,
-                orchestrator.store,
-                bus,
-                budgets=budgets,
-                llm_client=_llm_client,
-                model=config.phase_classifier_model,
-                context_turns=config.phase_classifier_context_turns,
-            )
-        else:
-            phase_processor = PhaseProcessor(
-                session_id,
-                orchestrator.store,
-                bus,
-                budgets=budgets,
-                consent_getter=_consent_getter,
-            )
-        intake_processor = IntakeProcessor(
-            session_id,
-            orchestrator.store,
-            phase_getter=lambda: phase_processor.current_phase,
-            llm_client=_llm_client,
-        )
         try:
-            backend = create_backend(config)
-            async with TwilioStream(ws) as twilio, backend:
+            _session_obj = Session.model_validate_json(
+                await orchestrator.store.read(session_id, "session.json")
+            )
+            caller_hash = _session_obj.phone_number_hash
+
+            if config.memory_mcp_url:
+                from rehearse.memory import MCPCallerMemory
+                _memory = MCPCallerMemory(config.memory_mcp_url)
+            elif config.honcho_base_url:
+                _memory = HonchoCallerMemory(
+                    workspace_id=config.honcho_workspace_id,
+                    base_url=config.honcho_base_url,
+                )
+            elif config.honcho_api_key:
+                _memory = HonchoCallerMemory(
+                    api_key=config.honcho_api_key,
+                    workspace_id=config.honcho_workspace_id,
+                )
+            else:
+                _memory = NullCallerMemory()
+
+            _llm_client = None
+            if config.anthropic_api_key:
+                from anthropic import AsyncAnthropic
+                _llm_client = AsyncAnthropic(api_key=config.anthropic_api_key)
+
+            async with TwilioStream(ws) as twilio, create_backend(config) as backend:
                 caller = TwilioCallerParticipant(twilio, session_id)
                 await orchestrator.store.update_session(
                     session_id,
@@ -248,173 +220,25 @@ def mount_twilio_routes(
                         s, [caller.config, _backend_participant_config(session_id, config)]
                     ),
                 )
-
-                async def _on_decline() -> None:
-                    """Mark the session for shutdown on consent decline."""
-                    consent_state["declined"] = True
-                    await bus.publish(
-                        EndOfCall(
-                            session_id=session_id,
-                            reason="consent_decline",
-                            ts=utcnow().timestamp(),
-                        )
-                    )
-
-                _session_obj = Session.model_validate_json(
-                    await orchestrator.store.read(session_id, "session.json")
-                )
-                caller_hash = _session_obj.phone_number_hash
-                # Priority: MEMORY_MCP_URL → HONCHO_BASE_URL (self-hosted, local)
-                #           → HONCHO_API_KEY (cloud) → NullCallerMemory
-                # Self-hosted always wins over cloud when both are configured.
-                if config.memory_mcp_url:
-                    _memory: CallerMemory = MCPCallerMemory(config.memory_mcp_url)
-                elif config.honcho_base_url:
-                    _memory = HonchoCallerMemory(
-                        workspace_id=config.honcho_workspace_id,
-                        base_url=config.honcho_base_url,
-                    )
-                elif config.honcho_api_key:
-                    _memory = HonchoCallerMemory(
-                        api_key=config.honcho_api_key,
-                        workspace_id=config.honcho_workspace_id,
-                    )
-                else:
-                    _memory = NullCallerMemory()
-                if config.enable_consent:
-                    consent_gate = ConsentGate(
-                        session_id,
-                        orchestrator.store,
-                        bus,
-                        speaker=backend,
-                        on_decline=_on_decline,
-                        config=ConsentGateConfig(
-                            prompt_timeout_seconds=config.consent_prompt_timeout_seconds,
-                            reprompt_limit=config.consent_reprompt_limit,
-                        ),
-                        caller_hash=caller_hash,
-                        memory=_memory,
-                    )
-                else:
-                    await orchestrator.store.update_session(
-                        session_id, _grant_consent
-                    )
-                    async def _consent_noop() -> None:
-                        pass
-                    consent_gate = None  # type: ignore[assignment]
-                outcome_probe = OutcomeProbe(
+                await run_session(
                     session_id,
-                    orchestrator.store,
-                    speaker=backend,
-                    config=OutcomeProbeConfig(
-                        response_timeout_seconds=config.outcome_response_timeout_seconds,
-                        reprompt_limit=config.outcome_reprompt_limit,
-                        prompt_lead_seconds=config.outcome_prompt_lead_seconds,
-                        feedback_budget_seconds=budgets.feedback_seconds,
-                    ),
+                    caller,
+                    backend,
+                    store=orchestrator.store,
+                    memory=_memory,
+                    caller_hash=caller_hash,
+                    budgets=PhaseBudgets(),
+                    skip_consent=False,
+                    enable_consent=config.enable_consent,
+                    consent_timeout_seconds=config.consent_prompt_timeout_seconds,
+                    consent_reprompt_limit=config.consent_reprompt_limit,
+                    outcome_timeout_seconds=config.outcome_response_timeout_seconds,
+                    outcome_reprompt_limit=config.outcome_reprompt_limit,
+                    outcome_lead_seconds=config.outcome_prompt_lead_seconds,
+                    model_id=config.hume_config_id,
+                    llm_client=_llm_client,
+                    on_consent_declined=lambda: orchestrator.finalize(session_id, "partial"),
                 )
-                await phase_processor.bootstrap()
-                persona_swap = PersonaSwapCoordinator(
-                    session_id,
-                    orchestrator.store,
-                    speaker=backend,
-                    backend=backend,
-                )
-                if config.enable_consent:
-                    consent_task = asyncio.create_task(consent_gate.run(bus.subscribe()))
-                else:
-                    consent_task = asyncio.create_task(_consent_noop())
-                outcome_task = asyncio.create_task(outcome_probe.run(bus.subscribe()))
-                phase_task = asyncio.create_task(phase_processor.run(bus.subscribe()))
-                intake_task = asyncio.create_task(intake_processor.run(bus.subscribe()))
-                intake_recorder_task = asyncio.create_task(
-                    IntakeMemoryRecorder(
-                        session_id, caller_hash, _memory
-                    ).run(bus.subscribe())
-                )
-                persona_selection_task = asyncio.create_task(
-                    PersonaSelectionRecorder(
-                        session_id, caller_hash, _memory, orchestrator.store
-                    ).run(bus.subscribe())
-                )
-                persona_swap_task = asyncio.create_task(
-                    persona_swap.run(bus.subscribe())
-                )
-                transcript_task = asyncio.create_task(
-                    TranscriptWriter(
-                        session_id,
-                        orchestrator.store,
-                        phase_getter=lambda: phase_processor.current_phase,
-                    ).run(bus.subscribe())
-                )
-                prosody_task = asyncio.create_task(
-                    ProsodyWriter(session_id, orchestrator.store).run(bus.subscribe())
-                )
-                audio_task = asyncio.create_task(
-                    AudioRecorder(session_id, orchestrator.store).run(bus.subscribe())
-                )
-                timing_task = asyncio.create_task(
-                    TimingWriter(session_id, orchestrator.store).run(bus.subscribe())
-                )
-                telemetry_task = asyncio.create_task(
-                    TelemetryLogger(
-                        session_id,
-                        orchestrator.store,
-                        model=config.hume_config_id,
-                        phase_getter=lambda: phase_processor.current_phase,
-                    ).run(bus.subscribe())
-                )
-                assistant_task = asyncio.create_task(_pump_assistant_audio(caller, bus))
-                backend_task = asyncio.create_task(backend.start(session_id, bus))
-                try:
-                    async for chunk in caller.audio_stream(bus):
-                        if consent_state["declined"]:
-                            break
-                        await backend.send_caller_audio(chunk)
-                finally:
-                    # Shield cleanup from external cancellation (e.g. starlette
-                    # TestClient closes the anyio CancelScope immediately after
-                    # the WebSocket disconnects, which would interrupt I/O in
-                    # progress and leave session artifacts unwritten).
-                    with anyio.CancelScope(shield=True):
-                        await bus.aclose()
-                        assistant_task.cancel()
-                        backend_task.cancel()
-                        with suppress(asyncio.CancelledError):
-                            await assistant_task
-                        with suppress(asyncio.CancelledError):
-                            await backend_task
-                        await consent_task
-                        await outcome_task
-                        await phase_task
-                        await intake_task
-                        await intake_recorder_task
-                        await persona_selection_task
-                        await persona_swap_task
-                        await transcript_task
-                        await prosody_task
-                        await audio_task
-                        await timing_task
-                        await telemetry_task
-                        if consent_state["declined"]:
-                            await orchestrator.finalize(session_id, "partial")
-                        # Store call transcript in memory backend for future
-                        # Honcho Deriver processing / Hindsight indexing.
-                        if caller_hash:
-                            transcript = await _read_transcript(session_id, orchestrator.store)
-                            if transcript:
-                                try:
-                                    await _memory.store_session(
-                                        caller_hash,
-                                        transcript,
-                                        rehearse_session_id=session_id,
-                                    )
-                                except Exception as exc:
-                                    log.warning(
-                                        "telephony.store_session.failed",
-                                        session_id=session_id,
-                                        error=str(exc),
-                                    )
         except WebSocketDisconnect:
             log.info("media.disconnect", session_id=session_id)
 
@@ -433,18 +257,7 @@ def _stream_twiml(config: RuntimeConfig, session_id: str) -> str:
     )
 
 
-def _read_consent_from_disk(orchestrator: SessionOrchestrator, session_id: str):
-    """Best-effort fallback to read consent from the manifest when no handle exists."""
-    from rehearse.types import ConsentState, Session
-
-    path = orchestrator.store.session_dir(session_id) / "session.json"
-    try:
-        return Session.model_validate_json(path.read_text()).consent
-    except Exception:
-        return ConsentState.PENDING
-
-
-def _set_participants(session, participants):
+def _set_participants(session: Session, participants: list) -> Session:
     """Persist the live-call participant identities on the session manifest."""
     session.participants = participants
     return session
@@ -457,48 +270,3 @@ def _backend_participant_config(session_id: str, config: RuntimeConfig) -> Parti
         role="coach",
         backend=config.backend_type,
     )
-
-
-def _grant_consent(session):
-    """Set consent to GRANTED on the session manifest (used when consent gate is disabled)."""
-    from rehearse.types import ConsentState
-    session.consent = ConsentState.GRANTED
-    return session
-
-
-async def _pump_assistant_audio(caller: TwilioCallerParticipant, bus: FrameBus) -> None:
-    """Forward assistant audio frames from the bus back to Twilio."""
-    async for frame in bus.subscribe():
-        if isinstance(frame, AudioChunk) and frame.speaker != Speaker.USER:
-            await caller.receive_audio(frame.pcm16_16k)
-
-
-async def _read_transcript(
-    session_id: str, store
-) -> list[dict]:
-    """Read transcript.jsonl and return OpenAI-format messages for memory storage.
-
-    Skips interim (non-final) utterances. Maps Speaker.USER → 'user',
-    all other speakers → 'assistant'.
-    """
-    try:
-        content = await store.read(session_id, "transcript.jsonl")
-    except FileNotFoundError:
-        return []
-    messages: list[dict] = []
-    for line in content.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            frame = json.loads(line)
-            text = (frame.get("text") or "").strip()
-            is_interim = frame.get("is_interim", False)
-            if not text or is_interim:
-                continue
-            speaker = frame.get("speaker", "user")
-            role = "user" if speaker == "user" else "assistant"
-            messages.append({"role": role, "content": text})
-        except Exception:
-            continue
-    return messages
