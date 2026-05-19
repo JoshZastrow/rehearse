@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
 import time
 import uuid
 
@@ -54,19 +55,23 @@ class PipelineBackend:
         speech_mode: str = "modular",
         stt_model: str = "whisper-tiny",
         tts_model: str = "pocket-tts",
-        clm_url: str = "http://localhost:8080/chat/completions",
+        clm_url: str = "http://localhost:4000/chat/completions",
+        clm_model: str = "coach",
         prosody_service: ProsodyService | None = None,
         tts_service: TTSService | None = None,
     ) -> None:
         self._speech_mode = speech_mode
         self._stt_model = stt_model
         self._clm_url = clm_url
+        self._clm_model = clm_model
+        self._clm_api_key = os.environ.get("LITELLM_API_KEY", "sk-rehearse-local")
         self._prosody: ProsodyService = prosody_service or NullProsodyService()
         self._tts: TTSService = tts_service or self._default_tts(tts_model)
         self._publisher: BusPublisher | None = None
         self._pipeline_task: asyncio.Task | None = None
         self._audio_queue: asyncio.Queue[bytes] = asyncio.Queue()
         self._session_id = ""
+        self._history: list[dict[str, str]] = []
 
     @staticmethod
     def _default_tts(tts_model: str) -> TTSService:
@@ -174,8 +179,14 @@ class PipelineBackend:
                     ))
                     log.info("pipeline_backend.transcribed", text=text)
 
+                    reply = await self._call_clm(text)
+                    if not reply:
+                        continue
+
+                    log.info("pipeline_backend.clm_reply", reply=reply)
+
                     try:
-                        pcm_response = await self._tts.synthesize(text)
+                        pcm_response = await self._tts.synthesize(reply)
                         await bus.publish(AudioChunk(
                             session_id=self._session_id,
                             speaker=Speaker.COACH,
@@ -184,6 +195,31 @@ class PipelineBackend:
                         ))
                     except Exception as exc:
                         log.warning("pipeline_backend.tts_error", error=str(exc))
+
+    async def _call_clm(self, user_text: str) -> str:
+        """POST to the LiteLLM proxy (OpenAI-compatible) and return the reply text."""
+        import httpx
+
+        self._history.append({"role": "user", "content": user_text})
+        payload = {
+            "model": self._clm_model,
+            "messages": self._history,
+        }
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(
+                    self._clm_url,
+                    json=payload,
+                    headers={"Authorization": f"Bearer {self._clm_api_key}"},
+                )
+                resp.raise_for_status()
+                reply = resp.json()["choices"][0]["message"]["content"]
+            self._history.append({"role": "assistant", "content": reply})
+            return reply
+        except Exception as exc:
+            log.warning("pipeline_backend.clm_error", error=str(exc), url=self._clm_url)
+            self._history.pop()  # don't corrupt history with a failed turn
+            return ""
 
     async def send_caller_audio(self, pcm16_16k: bytes) -> None:
         await self._audio_queue.put(pcm16_16k)
