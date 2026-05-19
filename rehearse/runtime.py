@@ -39,6 +39,7 @@ from rehearse.frames import (
 )
 from rehearse.intake import IntakeProcessor
 from rehearse.phases import PhaseBudgets, PhaseProcessor
+from rehearse.phases_llm import MeetingPhaseProcessor
 from rehearse.session import utcnow
 from rehearse.storage import LocalFilesystemStore
 from rehearse.transport import RuntimeTransport, TransportEvent
@@ -336,6 +337,9 @@ class RuntimeHost:
         bus: FrameBus | None = None,
         enable_audio_recording: bool = False,
         llm_client: Any | None = None,
+        enable_meeting_phase_processor: bool = False,
+        phase_classifier_model: str = "claude-haiku-4-5-20251001",
+        phase_classifier_context_turns: int = 10,
     ) -> None:
         self._store = store
         self._coach = coach
@@ -345,6 +349,9 @@ class RuntimeHost:
         self._external_bus = bus
         self._enable_audio_recording = enable_audio_recording
         self._llm_client = llm_client
+        self._enable_meeting_phase_processor = enable_meeting_phase_processor
+        self._phase_classifier_model = phase_classifier_model
+        self._phase_classifier_context_turns = phase_classifier_context_turns
         self._audio_mode = isinstance(coach, AudioCoachAdapter) and not isinstance(
             coach, TextOnlyCoachAdapter
         )
@@ -376,14 +383,26 @@ class RuntimeHost:
             session_id, "session.json", session.model_dump_json(indent=2)
         )
 
-        phase_processor = PhaseProcessor(
-            session_id,
-            self._store,
-            bus,
-            budgets=self._budgets,
-            clock=self._clock,
-            wait_for_intake_complete=True,
-        )
+        if self._enable_meeting_phase_processor and self._llm_client is not None:
+            phase_processor: PhaseProcessor | MeetingPhaseProcessor = MeetingPhaseProcessor(
+                session_id,
+                self._store,
+                bus,
+                budgets=self._budgets,
+                clock=self._clock,
+                llm_client=self._llm_client,
+                model=self._phase_classifier_model,
+                context_turns=self._phase_classifier_context_turns,
+            )
+        else:
+            phase_processor = PhaseProcessor(
+                session_id,
+                self._store,
+                bus,
+                budgets=self._budgets,
+                clock=self._clock,
+                wait_for_intake_complete=True,
+            )
         intake_processor = IntakeProcessor(
             session_id,
             self._store,

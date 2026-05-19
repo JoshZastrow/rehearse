@@ -39,6 +39,7 @@ from rehearse.intake import IntakeProcessor
 from rehearse.memory import CallerMemory, HonchoCallerMemory, MCPCallerMemory, NullCallerMemory
 from rehearse.outcome import OutcomeProbe, OutcomeProbeConfig
 from rehearse.phases import PhaseBudgets, PhaseProcessor
+from rehearse.phases_llm import MeetingPhaseProcessor
 from rehearse.backends.factory import create_backend
 from rehearse.session import SessionOrchestrator, TriggerEvent, utcnow
 from rehearse.types import ParticipantConfig, Session, Speaker
@@ -209,17 +210,28 @@ def mount_twilio_routes(
         def _consent_getter():
             return _read_consent_from_disk(orchestrator, session_id)
 
-        phase_processor = PhaseProcessor(
-            session_id,
-            orchestrator.store,
-            bus,
-            budgets=budgets,
-            consent_getter=_consent_getter,
-        )
         _llm_client = None
         if config.anthropic_api_key:
             from anthropic import AsyncAnthropic
             _llm_client = AsyncAnthropic(api_key=config.anthropic_api_key)
+        if config.enable_meeting_phase_processor and _llm_client is not None:
+            phase_processor: PhaseProcessor | MeetingPhaseProcessor = MeetingPhaseProcessor(
+                session_id,
+                orchestrator.store,
+                bus,
+                budgets=budgets,
+                llm_client=_llm_client,
+                model=config.phase_classifier_model,
+                context_turns=config.phase_classifier_context_turns,
+            )
+        else:
+            phase_processor = PhaseProcessor(
+                session_id,
+                orchestrator.store,
+                bus,
+                budgets=budgets,
+                consent_getter=_consent_getter,
+            )
         intake_processor = IntakeProcessor(
             session_id,
             orchestrator.store,
