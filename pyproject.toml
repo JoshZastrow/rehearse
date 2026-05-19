@@ -21,9 +21,10 @@ dependencies = [
     "honcho-ai>=2.1",
     "pg0-embedded>=0.14.1",
     "psycopg[binary]>=3.3.4",
-    "hindsight-all>=0.6.1",
     "modal>=0.73",
     "pocket-tts>=2.1.0",
+    "litellm[proxy]>=1.40",
+    "httpx>=0.27",
 ]
 
 [project.optional-dependencies]
@@ -42,7 +43,6 @@ dev = [
     "pytest-asyncio>=0.24",
     "ruff>=0.7",
     "pyright>=1.1",
-    "httpx>=0.27",
     "deepeval>=3.9.9",
 ]
 
@@ -71,6 +71,15 @@ select = ["E", "F", "I", "W", "UP", "B"]
 [tool.pyright]
 pythonVersion = "3.11"
 typeCheckingMode = "standard"
+
+[tool.uv]
+# litellm[proxy] has no wheels for Python 3.14+ / emscripten.
+# Constrain resolution to the platforms this project actually targets.
+environments = [
+    "sys_platform == 'darwin'",
+    "sys_platform == 'linux'",
+    "sys_platform == 'win32'",
+]
 
 [tool.uv.workspace]
 members = [
