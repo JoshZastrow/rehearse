@@ -22,11 +22,13 @@ fi
 
 HONCHO_PID=""
 NGROK_PID=""
+LITELLM_PID=""
 
 cleanup() {
   echo "Shutting down..."
-  [ -n "$HONCHO_PID" ] && kill "$HONCHO_PID" 2>/dev/null || true
-  [ -n "$NGROK_PID" ] && kill "$NGROK_PID" 2>/dev/null || true
+  [ -n "$HONCHO_PID" ]  && kill "$HONCHO_PID"  2>/dev/null || true
+  [ -n "$NGROK_PID" ]   && kill "$NGROK_PID"   2>/dev/null || true
+  [ -n "$LITELLM_PID" ] && kill "$LITELLM_PID" 2>/dev/null || true
 }
 trap cleanup EXIT
 
@@ -63,6 +65,25 @@ elif [ -n "${HONCHO_API_KEY:-}" ]; then
 
 else
   echo "Memory: none (run 'make setup-honcho' for self-hosted, or set HONCHO_API_KEY for cloud)"
+fi
+
+# ── LiteLLM proxy ─────────────────────────────────────────────────────────────
+LITELLM_PORT=4000
+if command -v litellm >/dev/null 2>&1 || uv run litellm --version >/dev/null 2>&1; then
+  echo "Inference: starting LiteLLM proxy on port $LITELLM_PORT..."
+  uv run litellm --config "$SCRIPT_DIR/../infra/litellm_config.yaml" \
+    --port "$LITELLM_PORT" > /tmp/rehearse-litellm.log 2>&1 &
+  LITELLM_PID=$!
+
+  # Wait for proxy to be ready
+  for i in $(seq 1 20); do
+    sleep 0.5
+    if curl -s "http://localhost:$LITELLM_PORT/health" >/dev/null 2>&1; then break; fi
+  done
+  echo "Inference: LiteLLM proxy ready at http://localhost:$LITELLM_PORT"
+  export LITELLM_BASE_URL="http://localhost:$LITELLM_PORT"
+else
+  echo "Inference: litellm not installed — skipping proxy (run 'uv pip install litellm[proxy]' to enable)"
 fi
 
 # ── Sync Hume configs ─────────────────────────────────────────────────────────
