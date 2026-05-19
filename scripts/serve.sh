@@ -24,13 +24,31 @@ HONCHO_PID=""
 NGROK_PID=""
 LITELLM_PID=""
 
+# Kill a PID and its entire process group. Sends SIGTERM, waits up to 2s,
+# then SIGKILL if it's still alive. Silently no-ops on empty/dead PIDs.
+_kill_tree() {
+  local pid=$1
+  [ -z "$pid" ] && return
+  # Kill the process group so child processes (e.g. pg0 under honcho_serve.sh)
+  # are also terminated.
+  local pgid
+  pgid=$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ') || true
+  [ -n "$pgid" ] && kill -- "-$pgid" 2>/dev/null || kill "$pid" 2>/dev/null || true
+  # Wait up to 2s for graceful exit, then force-kill.
+  for _ in 1 2 3 4; do
+    sleep 0.5
+    kill -0 "$pid" 2>/dev/null || return  # already gone
+  done
+  kill -9 "$pid" 2>/dev/null || true
+}
+
 cleanup() {
   echo "Shutting down..."
-  [ -n "$HONCHO_PID" ]  && kill "$HONCHO_PID"  2>/dev/null || true
-  [ -n "$NGROK_PID" ]   && kill "$NGROK_PID"   2>/dev/null || true
-  [ -n "$LITELLM_PID" ] && kill "$LITELLM_PID" 2>/dev/null || true
+  _kill_tree "$LITELLM_PID"
+  _kill_tree "$NGROK_PID"
+  _kill_tree "$HONCHO_PID"
 }
-trap cleanup EXIT
+trap cleanup EXIT INT TERM
 
 # ── Memory backend ────────────────────────────────────────────────────────────
 # Priority: lib/honcho/ (self-hosted, local) > HONCHO_BASE_URL (external)
