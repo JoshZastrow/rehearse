@@ -71,3 +71,8 @@ select = ["E", "F", "I", "W", "UP", "B"]
 [tool.pyright]
 pythonVersion = "3.11"
 typeCheckingMode = "standard"
+
+[tool.uv.workspace]
+members = [
+    "dev/lab",
+]
