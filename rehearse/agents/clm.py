@@ -126,13 +126,11 @@ def build_clm_responder(config: RuntimeConfig) -> CLMResponder:
     local development without credentials.
     """
     store = LocalFilesystemStore(root=config.session_root, public_base_url=config.public_base_url)
-    if config.anthropic_api_key:
+    if config.litellm_base_url or config.anthropic_api_key:
         from rehearse.agents.registry import AgentRegistry
         from rehearse.agents.roles.character import CharacterAgent, FemaleCharacterAgent, MaleCharacterAgent
         from rehearse.agents.roles.feedback import FeedbackCoachAgent
         from rehearse.agents.roles.intake import IntakeCoachAgent
-        from anthropic import AsyncAnthropic
-
         from rehearse.agents.router import IntakeAwareRouter
         from rehearse.memory import (
             HonchoCallerMemory,
@@ -141,7 +139,7 @@ def build_clm_responder(config: RuntimeConfig) -> CLMResponder:
         )
         from rehearse.memory_manager import MemoryManager
         from rehearse.new_clm_responder import NewCLMResponder
-        from rehearse.transports.anthropic import AnthropicTransport
+        from rehearse.transports import llm_client_from_config, transport_from_config
 
         if config.memory_mcp_url:
             _provider = MCPCallerMemory(config.memory_mcp_url)
@@ -158,9 +156,9 @@ def build_clm_responder(config: RuntimeConfig) -> CLMResponder:
         else:
             _provider = NullCallerMemory()
 
-        llm_client = AsyncAnthropic(api_key=config.anthropic_api_key)
+        llm_client = llm_client_from_config(config)
         memory = MemoryManager(_provider)
-        transport = AnthropicTransport(api_key=config.anthropic_api_key)
+        transport = transport_from_config(config)
         registry = AgentRegistry()
         registry.register(IntakeCoachAgent(memory))
         registry.register(CharacterAgent(memory))
@@ -168,12 +166,13 @@ def build_clm_responder(config: RuntimeConfig) -> CLMResponder:
         registry.register(FemaleCharacterAgent(memory))
         registry.register(FeedbackCoachAgent(memory))
         router = IntakeAwareRouter(registry, _provider, llm_client=llm_client)
+        model = config.litellm_model if config.litellm_base_url else config.anthropic_model
         return NewCLMResponder(
             transport=transport,
             router=router,
             memory=memory,
             store=store,
-            model=config.anthropic_model,
+            model=model,
         )
     return ScriptedCLMResponder(store=store)
 

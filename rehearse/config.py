@@ -27,6 +27,9 @@ class RuntimeConfig:
     session_root: Path
     anthropic_api_key: str | None = None
     anthropic_model: str = "claude-sonnet-4-6"
+    litellm_base_url: str | None = None   # LITELLM_BASE_URL — proxy URL (overrides direct Anthropic)
+    litellm_api_key: str | None = None    # LITELLM_API_KEY — proxy bearer token
+    litellm_model: str = "coach"          # LITELLM_MODEL — model alias on the proxy
     hume_clm_secret: str | None = None
     log_level: str = "info"
     validate_twilio_signature: bool = True
@@ -101,6 +104,9 @@ class RuntimeConfig:
             session_root=session_root,
             anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY"),
             anthropic_model=os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6"),
+            litellm_base_url=os.environ.get("LITELLM_BASE_URL") or None,
+            litellm_api_key=os.environ.get("LITELLM_API_KEY") or None,
+            litellm_model=os.environ.get("LITELLM_MODEL", "coach"),
             hume_clm_secret=os.environ.get("HUME_CLM_SECRET"),
             log_level=os.environ.get("LOG_LEVEL", "info"),
             validate_twilio_signature=os.environ.get("VALIDATE_TWILIO_SIGNATURE", "1") != "0",
