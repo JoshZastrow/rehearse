@@ -151,10 +151,13 @@ class RuntimeConfig:
             pipeline_speech_mode=os.environ.get("PIPELINE_SPEECH_MODE", "modular"),
             pipeline_stt_model=os.environ.get("PIPELINE_STT_MODEL", "whisper-tiny"),
             pipeline_tts_model=os.environ.get("PIPELINE_TTS_MODEL", "kokoro"),
-            pipeline_clm_url=os.environ.get(
-                "PIPELINE_CLM_URL", "http://localhost:4000/chat/completions"
+            pipeline_clm_url=os.environ.get("PIPELINE_CLM_URL") or (
+                f"{os.environ['LITELLM_BASE_URL'].rstrip('/')}/chat/completions"
+                if os.environ.get("LITELLM_BASE_URL")
+                else "http://localhost:4000/chat/completions"
             ),
-            pipeline_clm_model=os.environ.get("PIPELINE_CLM_MODEL", "coach"),
+            pipeline_clm_model=os.environ.get("PIPELINE_CLM_MODEL")
+                or os.environ.get("LITELLM_MODEL", "coach"),
             pipeline_e2e_model=os.environ.get("PIPELINE_E2E_MODEL", ""),
             pipeline_e2e_checkpoint=os.environ.get("PIPELINE_E2E_CHECKPOINT", ""),
             enable_consent=os.environ.get("ENABLE_CONSENT", "0") == "1",
