@@ -43,6 +43,7 @@ _kill_tree() {
 }
 
 cleanup() {
+  trap '' EXIT INT TERM  # prevent re-entry when _kill_tree signals our own PGID
   echo "Shutting down..."
   _kill_tree "$LITELLM_PID"
   _kill_tree "$NGROK_PID"
