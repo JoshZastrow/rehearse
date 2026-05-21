@@ -38,8 +38,9 @@ model_list:
   # Replace api_base with a self-hosted endpoint when ready.
   - model_name: coach
     litellm_params:
-      model: anthropic/claude-sonnet-4-6
-      api_key: os.environ/ANTHROPIC_API_KEY
+      model: openai/google/gemma-4-26B-A4B-it
+      api_base: https://joshzastrow--rehearse-gemma-judge-serve.modal.run/v1
+      api_key: os.environ/MODAL_GEMMA_API_KEY
 
   - model_name: claude-sonnet-4-6
     litellm_params:
