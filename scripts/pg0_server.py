@@ -22,6 +22,21 @@ except Pg0AlreadyRunningError:
     pg.stop()
     pg.start()
 
+def _stop(signum, frame):
+    # Disarm handlers before calling pg.stop() — subprocess.run() inside
+    # pg.stop() blocks on selector.select(), which is interrupted by signals,
+    # causing re-entrant calls into _stop and a RecursionError.
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    pg.stop()
+    sys.exit(0)
+
+
+# Install handlers before printing the URI so any signal arriving after the
+# URI line is emitted is caught by _stop rather than the default handler.
+signal.signal(signal.SIGTERM, _stop)
+signal.signal(signal.SIGINT, _stop)
+
 uri = pg.uri
 print(uri, flush=True)
 
@@ -29,12 +44,4 @@ print(uri, flush=True)
 with open("/tmp/rehearse-pg0-uri.txt", "w") as f:
     f.write(uri + "\n")
 
-
-def _stop(signum, frame):
-    pg.stop()
-    sys.exit(0)
-
-
-signal.signal(signal.SIGTERM, _stop)
-signal.signal(signal.SIGINT, _stop)
 signal.pause()
