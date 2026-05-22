@@ -37,7 +37,7 @@ Rehearse fixes the session structure to make this measurable. Three phases. One 
 
 **Persona stability across phase transitions.** The agent plays three distinct roles in one call. Role drift is detectable in the transcript and in audio. The capability goal is consistent role behavior across all phase boundaries, validated by the eval harness scoring transition quality. There is currently no  detection, emotion, or persona steering. This can drift over long contexts.
 
-**Outcome signal.** The ground truth is behavioral change in the real conversation the caller was preparing for. That signal arrives days later, if at all. The capability goal is a proxy reward signal, grounded in prosodic features, that predicts real-world behavior change reliably enough to use in training. The current eval dimensions: affect perception, silence management, delivery are the first approximation. Measuring prosody landscape (perhaps mood and valence) improvement, or situational improvements can tie conversation capabilities with positive intervention outcomes.
+**Outcome signal.** The ground truth is behavioral change in the real conversation the caller was preparing for. That signal arrives days later, if at all. The harder question is how to benchmark real-time interaction ability in real-world use cases at all. The current eval dimensions — affect perception, silence management, delivery — are a first approximation. We think the open research community is well-positioned to contribute independent, fair benchmarks here. New scorers, richer scenario datasets, and alternative judge implementations are the highest-value contributions to this repo.
 
 ## Why Prosody
 
