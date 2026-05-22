@@ -7,42 +7,130 @@
  ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚══════╝
 ```
 
-<p align="center"><b>Meta-conversations to help you with the ones that matter.</b></p>
+<p align="center"><b>An experimental platform for training and evaluating long-horizon conversational agents.</b></p>
 
 ---
 
-Rehearse is a relational support call. Not a chatbot, not a journal prompt — a real phone call that helps you navigate your relationship with life.
+## What This Is
 
-The conversations that shape you are rarely the ones you feel ready for. A hard talk with a parent. A pitch you keep postponing. An honest moment with yourself about what you actually want. Rehearse gives you a place to try them first — five minutes on the phone with an AI counterparty who listens for what your voice is doing, not just what your words are saying.
+Rehearse is a research platform built around a narrow question: how well can a scaffolded voice agent hold a coherent, emotionally attuned conversation across multiple minutes and phase transitions?
 
-**One call, three movements:**
+The domain is interpersonal coaching. A caller names a hard conversation they need to have — with a parent, a colleague, themselves — and works through it on the phone with an AI counterparty. Three phases, one continuous call: intake, practice, feedback. The format is not incidental. Phone-only constrains the interface to audio, forcing the agent to work with prosody — pitch, pace, silence, and the gap between what is said and how it is carried — rather than retreating to text-based reasoning.
 
-| Phase | Duration | What happens |
+Every session is simultaneously a unit of care and a training record. The product is the coaching call. The architecture is a data-collection loop.
+
+## The Research Problem
+
+Standard conversational AI evaluation focuses on turn-level correctness: given this input, does the model say the right thing? Long-horizon evaluation asks a harder question: does the agent remain coherent — goal-aware, emotionally calibrated, behaviorally consistent — across an extended conversation with phase transitions and an evolving emotional arc?
+
+Rehearse makes this problem tractable by fixing the structure. Each session has three phases with distinct behavioral requirements:
+
+| Phase | Duration | What the agent must do |
 |---|---|---|
-| Intake | ~1 min | You name the conversation you need to have and why it matters |
-| Practice | ~3 min | An AI counterparty holds the other side — pushes back, holds silence, reflects incongruence |
-| Feedback | ~1 min | You hear what shifted in your voice: pace, certainty, the moment you meant it |
+| Intake | ~1 min | Elicit a specific, emotionally anchored goal — not a topic, a stakes-laden moment — through active listening, without leading |
+| Practice | ~3 min | Hold a realistic counterparty role: push back, hold silence, reflect incongruence between words and affect |
+| Feedback | ~1 min | Name the moment the caller's voice started to mean it — not generic encouragement, but specific acoustic evidence |
 
-Every session is simultaneously a unit of care and a training record. The architecture is an ML data-collection loop; the product is a coaching call. Prosody is the signal — the gap between what you say and how your voice carries it.
+The challenge is phase coherence: the agent must carry emotional context and caller-specific detail from intake through practice and into feedback, across what a turn-based model experiences as a long, unstructured token sequence with no explicit memory hand-off.
 
----
+## Why Prosody
+
+Prosody is the signal that text evaluation cannot access. A caller can say "I'm ready" with a voice that says otherwise. An agent that responds to words alone will miss the incongruence — and the caller will feel it, even if they cannot articulate why.
+
+Rehearse uses audio-native judges (Gemini 2.5 flash, which processes speech directly) to evaluate dimensions that have no text proxy:
+
+- **Affect perception** — did the agent register the emotional state in the voice, not just the semantic content?
+- **Silence management** — did the agent hold space when the caller needed it, or fill every gap?
+- **Speech rate** — was the agent's pace calibrated to the conversational moment?
+
+These are not soft metrics. They directly predict whether the call worked.
+
+## Current Architecture
+
+Rehearse is built on scaffolded components, not a natively interactive model. The scaffold is the experiment: the platform is studying what current scaffolded systems can and cannot do in sustained, emotionally loaded conversation.
+
+| Layer | Component |
+|---|---|
+| Voice (STT + TTS + prosody) | Hume EVI |
+| Coach + character brain | Claude (Sonnet for turns, Opus for synthesis) |
+| Dialog management | Hume EVI turn detection + phase timer |
+| Telephony | Twilio — SMS trigger, outbound call, Media Streams |
+| Caller memory | Honcho (cloud or self-hosted) |
+| Eval judges | Gemini 2.5 (audio-native) + Claude Opus |
+| Service | FastAPI + Uvicorn |
+
+The limitations of scaffolded turn detection are visible in the data: no proactive interjection, no response to vocal cues that don't cross an audio VAD boundary. The eval harness tracks these failure modes.
+
+## Eval Harness
+
+The harness is the core research artifact. It measures agent behavior across seven dimensions without requiring a live phone call. Most evals run offline against fixture audio.
+
+**Scoring dimensions:**
+
+| Metric | What it measures |
+|---|---|
+| `rwrd` | Weighted composite reward |
+| `cont` | Content quality — right things said at the right moment |
+| `afct` | Affect perception — response to emotional state vs. words |
+| `dlvr` | Delivery — timing, naturalness, phase-appropriateness |
+| `nint` | Interruption rate — how often the agent stepped on the caller |
+| `slnc` | Silence after affect — did the agent hold space when warranted? |
+| `spch` | Speech rate — appropriate pace for the conversational moment |
+
+**Running evals:**
+
+```bash
+make eval-list                         # what's available
+
+# Offline (no live APIs required)
+make eval-voice-smoke                  # fixture-audio smoke test, stub judges
+make eval-voice-rollout                # runtime-sandbox rollout, stub TTS
+
+# Live (real Hume TTS + Gemini/Claude judges)
+make eval-voice-smoke-live             # smoke + real TTS + Gemini judges
+make eval-voice-rollout-live           # full rollout with audio judges
+make eval-voice-replay-live            # score 3 real sessions, Gemini judges
+
+# Inspect results
+rehearse-eval list-runs                # per-rollout scores + audio paths
+rehearse-eval list-runs --play <id>    # open audio in QuickTime
+make eval-watch RUN=<run_id>           # tail scores.jsonl live
+```
+
+Each run produces `scores.jsonl` with per-turn scores, phase timings (with overrun warnings), and audio recordings. The same Pydantic types span the runtime and the eval harness — a frozen production session is replayable through any stage of the pipeline.
+
+## Codebase
+
+```
+rehearse/
+├── rehearse/
+│   ├── app.py                    # FastAPI: SMS + voice webhooks
+│   ├── agents/                   # coach + character responders (Claude Agent SDK)
+│   ├── phases.py                 # intake / practice / feedback timing
+│   ├── types.py                  # shared Pydantic contracts (runtime ↔ eval)
+│   ├── memory.py                 # CallerMemory protocol + backends
+│   ├── services/
+│   │   ├── hume_configs.py       # EVI persona registry (config as code)
+│   │   └── hume_client.py        # Hume EVI WebSocket client
+│   ├── audio/                    # Twilio Media Streams bridge
+│   ├── synthesis.py              # post-call feedback generation
+│   └── eval/                     # eval harness (evals, datasets, scorers, environments)
+├── docs/specs/                   # design specs
+└── Makefile                      # all dev commands
+```
 
 ## Getting Started
 
 ### Prerequisites
 
 - Python 3.11+
-- [`uv`](https://docs.astral.sh/uv/) — fast Python package manager
-- [`ngrok`](https://ngrok.com/) — tunnel for Twilio webhooks
-- A [Twilio](https://twilio.com) account with a phone number
-- A [Hume AI](https://hume.ai) account (EVI voice + prosody)
-- An [Anthropic](https://console.anthropic.com) API key (coach brain)
+- [`uv`](https://docs.astral.sh/uv/)
+- [`ngrok`](https://ngrok.com/)
+- [Twilio](https://twilio.com) account with a phone number
+- [Hume AI](https://hume.ai) account (EVI voice + prosody)
+- [Anthropic](https://console.anthropic.com) API key
 
----
-
-## Setup
-
-### 1. Install dependencies
+### Setup
 
 ```bash
 git clone https://github.com/yourusername/rehearse.git
@@ -50,213 +138,63 @@ cd rehearse
 make setup
 ```
 
-This installs Python dependencies and creates a `.env` file from the template.
-
-### 2. Configure your environment
+Configure `.env`:
 
 ```bash
-# Edit .env with your API keys:
 TWILIO_ACCOUNT_SID=...
 TWILIO_AUTH_TOKEN=...
-TWILIO_PHONE_NUMBER=+1...   # E.164 format
+TWILIO_PHONE_NUMBER=+1...
 HUME_API_KEY=...
 HUME_CONFIG_ID=...
 HUME_CLM_SECRET=...
 ANTHROPIC_API_KEY=...
 ```
 
-### 3. Set up caller memory
-
-Returning callers hear a one-sentence reminder instead of the full consent prompt. New callers always hear the full prompt. Choose one:
-
-**Option A — Honcho cloud (recommended for production)**
+**Caller memory** (optional — new callers always hear the full consent prompt):
 
 ```bash
-# Add to .env:
+# Option A — Honcho cloud (recommended for production)
 HONCHO_API_KEY=<your-key>
-```
 
-**Option B — Self-hosted (no cloud account needed)**
-
-```bash
+# Option B — Self-hosted
 make setup-honcho
-# Add to .env:
 HONCHO_BASE_URL=http://localhost:8001
+
+# Option C — No memory (leave both unset)
 ```
 
-**Option C — No memory**
-
-Leave both unset. Calls still work; every caller hears the full consent prompt.
-
-### 4. Sync Hume EVI configs
-
-Voice, greeting, prompt, and turn-detection settings are declared in code (`rehearse/services/hume_configs.py`) and synced to the live Hume workspace in one command:
+**Sync Hume EVI configs** (voice, prompt, and timeouts are declared in code):
 
 ```bash
 BASE_URL=https://your-ngrok-url uv run rehearse-hume sync
+uv run rehearse-hume diff   # see what's out of sync before applying
 ```
 
-Run `uv run rehearse-hume diff` anytime to see what's out of sync before applying changes.
-
-### 5. Start everything
+**Start:**
 
 ```bash
-make serve
+make serve   # opens ngrok tunnel, syncs Hume configs, starts server
 ```
 
-This opens an ngrok tunnel, syncs Hume configs, and starts the rehearse server. If `lib/honcho/` exists, it also starts local Honcho with embedded Postgres — no separate process to manage.
-
----
-
-## Your First Call
-
-Once `make serve` is running:
-
-1. **Text your Twilio number** — any SMS triggers an outbound call to that number
-2. **Answer** — you'll hear the intake prompt
-3. **Name the conversation** you need to have ("I need to tell my sister I can't keep covering for her")
-4. **Practice** — the AI counterparty holds the other side for ~3 minutes
-5. **Listen to your feedback** — a one-minute reflection on what your voice revealed
-6. **Check your transcript** — a viewer link is sent back to you by SMS after the call
-
-That's it. No app to download. No account to create. Just a phone call.
-
----
-
-## Running Evals
-
-The eval harness measures voice quality, coach behavior, and rollout readiness without requiring a live phone call. Most evals run offline with `ANTHROPIC_API_KEY` only.
-
-**List what's available:**
-
-```bash
-make eval-list
-```
-
-**Offline evals (free, no live APIs):**
-
-```bash
-make eval-voice-smoke        # fixture-audio smoke test with stub judges
-make eval-voice-rollout      # runtime-sandbox rollout with stub TTS
-```
-
-**Live evals (uses real Hume TTS and Gemini/Claude judges):**
-
-```bash
-make eval-voice-smoke-live         # fixture smoke + real TTS + Gemini judges
-make eval-voice-rollout-live       # full rollout with audio judges
-make eval-voice-rollout-audio      # routes through live EVI (real voice pipeline)
-```
-
-**Score production sessions:**
-
-```bash
-make eval-voice-replay             # score 3 real sessions with stub judges
-make eval-voice-replay-live        # score 3 real sessions with Gemini judges
-```
-
-**Watch a run in progress:**
-
-```bash
-make eval-watch RUN=<run_id>       # tail scores.jsonl with live aggregate
-```
-
-**Browse completed runs and listen to recordings:**
-
-```bash
-# List the 10 most recent runs with per-rollout scores and audio paths
-rehearse-eval list-runs
-
-# Show more runs
-rehearse-eval list-runs --n 20
-
-# Filter to a specific scenario across all runs
-rehearse-eval list-runs --scenario peer-feedback-anxious
-
-# Filter by eval suite name
-rehearse-eval list-runs --eval voice-rollout-judges
-
-# Open the most recent audio recording for a scenario (macOS: opens in QuickTime)
-rehearse-eval list-runs --play vrj-s01-peer-feedback-anxious
-```
-
-Each rollout shows phase timings (with overrun warnings), per-dimension scores colour-coded green/yellow/red, and the path to `audio.wav`. Scores shown: `rwrd` (weighted reward), `cont` (content quality), `afct` (affect perception), `dlvr` (delivery), `nint` (interruption rate), `slnc` (silence after affect), `spch` (speech rate).
-
-**Full test suite:**
-
-```bash
-make test     # pytest
-make lint     # ruff
-```
-
----
+Text your Twilio number. Answer the call.
 
 ## Contributing
 
-```bash
-git clone https://github.com/yourusername/rehearse.git
-cd rehearse
-make setup
-make test     # confirm everything passes
-```
+The most valuable contributions are to the eval harness: new scorers, richer scenario datasets, and alternative judge implementations — especially audio-native ones.
 
-**Key files to know:**
+**Key contracts:**
 
 | Path | What it does |
 |---|---|
-| `rehearse/app.py` | FastAPI entry — SMS/voice webhooks |
+| `rehearse/types.py` | Pydantic contracts — runtime and eval share the same schema |
+| `rehearse/eval/` | Evals, datasets, scorers, environments |
 | `rehearse/agents/` | Claude Agent SDK roles (coach + character) |
-| `rehearse/services/hume_configs.py` | All EVI persona config — declared in code |
-| `rehearse/types.py` | Pydantic contracts shared by runtime and eval harness |
-| `rehearse/eval/` | Eval harness (evals, datasets, scorers, environments) |
-| `rehearse/memory.py` | `CallerMemory` protocol + Honcho and null backends |
-| `scripts/serve.sh` | Orchestrates ngrok + Honcho + server startup |
+| `rehearse/phases.py` | Phase timing and transitions |
+| `rehearse/services/hume_configs.py` | EVI personas — declared in code, synced via CLI |
 
-**Hume EVI configs are code.** When you change a persona's voice, prompt, or timeouts in `rehearse/services/hume_configs.py`, run `uv run rehearse-hume sync` to apply it. The workspace stays in lockstep with the repo.
+**The schema is frozen by design.** A frozen session must be replayable through any stage of the pipeline. Don't break the contract.
 
-**The schema is frozen by design.** Production session artifacts and eval-harness outputs share the same Pydantic types (`rehearse/types.py`). A frozen session is replayable through any stage of the pipeline. Don't break the contract.
-
-**Every changed line should trace to the request.** Don't improve adjacent code, refactor things that aren't broken, or add features that weren't asked for. Keep it surgical.
-
-Open a PR when tests pass and `make eval-voice-smoke` is green.
-
----
-
-## Architecture
-
-```
-rehearse/
-├── rehearse/                     # application package
-│   ├── app.py                    # FastAPI: SMS + voice webhooks
-│   ├── agents/                   # coach + character responders (Claude Agent SDK)
-│   ├── types.py                  # shared Pydantic contracts
-│   ├── memory.py                 # CallerMemory protocol + backends
-│   ├── services/
-│   │   ├── hume_configs.py       # EVI persona registry (config as code)
-│   │   └── hume_client.py        # Hume EVI WebSocket client
-│   ├── audio/                    # Twilio Media Streams bridge
-│   ├── phases.py                 # intake / practice / feedback timing
-│   ├── synthesis.py              # post-call story + feedback generation
-│   └── eval/                     # eval harness (evals, datasets, scorers)
-├── scripts/
-│   ├── serve.sh                  # startup orchestrator
-│   └── honcho_serve.sh           # self-hosted Honcho + embedded Postgres
-├── docs/specs/                   # design specs (frozen — do not edit)
-├── web/viewer.html               # static session artifact viewer
-├── SPEC.md                       # foundational design
-└── Makefile                      # all dev commands
-```
-
-**Stack:**
-
-| Layer | What |
-|---|---|
-| Voice (STT + TTS + prosody) | Hume EVI |
-| Coach + character brain | Claude (Sonnet for turns, Opus for feedback) |
-| Telephony | Twilio — SMS trigger, outbound call, Media Streams |
-| Caller memory | Honcho (cloud or self-hosted) |
-| Service | FastAPI + Uvicorn |
-| Eval judges | Gemini 2.5 (audio-native) + Claude Opus |
+Open a PR when `make test` and `make eval-voice-smoke` both pass.
 
 ---
 
