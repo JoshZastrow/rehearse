@@ -21,7 +21,7 @@ A caller brings a hard conversation they have had or need to have and works thro
 
 Most conversational AI evaluation is turn-level. Give the model an input, check the output. Did it say the right thing?
 
-Long-horizon evaluation asks something harder. Does the agent stay coherent across a full conversation? Can it track a goal set three minutes ago? Does it notice when the caller's emotional state has changed between phases?
+Long-horizon evaluation asks something harder: can a voice agent stay behaviorally coherent across a structured, emotionally loaded conversation it did not fully control?
 
 Rehearse fixes the session structure to make this measurable. Three phases. One continuous call. No reset between them.
 
@@ -31,27 +31,25 @@ Rehearse fixes the session structure to make this measurable. Three phases. One 
 | Practice | ~3 min | Hold a realistic counterparty role: push back, hold silence, reflect incongruence between words and affect |
 | Feedback | ~1 min | Name the moment the caller's voice started to mean it. Not generic encouragement — specific acoustic evidence. |
 
-The hard problems are naturalness, persona stability, and outcome measurement.
+## Capability Focus
 
-Naturalness degrades over long sessions. Turn-based models flatten prosody over time. Pauses become mechanical. Response latency becomes predictable. Callers notice.
+**Naturalness at scale.** Turn-based scaffolding flattens prosody over long sessions. Pauses become mechanical. Response latency becomes predictable. The capability goal is a conversation that stays sonically natural across the full arc. Progress is measured against human baseline recordings using blind listener ratings and prosodic feature distributions.
 
-Persona stability is a separate failure mode. The agent plays a distinct role in each phase: active listener in intake, counterparty in practice, reflective coach in feedback. Role drift within a phase — or across the transition — breaks the session. There is no automatic mechanism to detect or correct it.
+**Persona stability across phase transitions.** The agent plays three distinct roles in one call. Role drift is detectable in the transcript and in audio. The capability goal is consistent role behavior across all phase boundaries, validated by the eval harness scoring transition quality. There is currently no  detection, emotion, or persona steering. This can drift over long contexts.
 
-Outcome measurement is hardest. The ground truth is behavioral change in the real conversation the caller was preparing for. That signal arrives days later, if at all. The eval harness approximates with audio-native judges scoring affect perception, delivery, and silence management. The proxy is imperfect. Closing that gap is an open problem.
-
-Turn-based models see this as one long token sequence. Phase coherence has to emerge from context alone. There is no explicit mechanism to surface what matters.
+**Outcome signal.** The ground truth is behavioral change in the real conversation the caller was preparing for. That signal arrives days later, if at all. The capability goal is a proxy reward signal, grounded in prosodic features, that predicts real-world behavior change reliably enough to use in training. The current eval dimensions: affect perception, silence management, delivery are the first approximation. Measuring prosody landscape (perhaps mood and valence) improvement, or situational improvements can tie conversation capabilities with positive intervention outcomes.
 
 ## Why Prosody
 
-Prosody is the signal that text evaluation cannot access. A caller can say "I'm ready" with a voice that says otherwise. An agent that responds to words alone will miss the incongruence — and the caller will feel it, even if they cannot articulate why.
+Tone matters. Prosody is the signal that text evaluation cannot access. A caller can say "I'm ready" with a voice that says otherwise. An agent that responds to words alone will miss the incongruence — and the caller will feel it, even if they cannot articulate why.
 
-Rehearse uses audio-native judges (Gemini 2.5 flash, which processes speech directly) to evaluate dimensions that have no text proxy:
+Rehearse currently uses audio-native judges (Gemini 2.5 flash, which processes speech directly) to evaluate dimensions that have no text proxy:
 
 - **Affect perception** — did the agent register the emotional state in the voice, not just the semantic content?
 - **Silence management** — did the agent hold space when the caller needed it, or fill every gap?
 - **Speech rate** — was the agent's pace calibrated to the conversational moment?
 
-These are not soft metrics. They directly predict whether the call worked.
+These focus on measuring whether the conversation worked for the caller.
 
 ## Current Architecture
 
@@ -71,7 +69,7 @@ The limitations of scaffolded turn detection are visible in the data: no proacti
 
 ## Eval Harness
 
-The harness is the core research artifact. It measures agent behavior across seven dimensions without requiring a live phone call. Most evals run offline against fixture audio.
+The harness is the core research artifact. It measures agent behavior across seven dimensions without requiring a live phone call. Most evals run offline against fixture audio, and aim to measure audio calls.
 
 **Scoring dimensions:**
 
