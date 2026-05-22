@@ -7,31 +7,39 @@
  ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚══════╝
 ```
 
-<p align="center"><b>An experimental platform for training and evaluating long-horizon conversational agents.</b></p>
+<p align="center"><b>A research prototype for training and evaluating long-horizon conversational agents.</b></p>
 
 ---
 
 ## What This Is
 
-Rehearse is a research platform built around a narrow question: how well can a scaffolded voice agent hold a coherent, emotionally attuned conversation across multiple minutes and phase transitions?
+Rehearse is built for interactive, conversational support. How well can a voice agent hold a coherent, emotionally attuned conversation across long conversations and multiple sessions?
 
-The domain is interpersonal coaching. A caller names a hard conversation they need to have — with a parent, a colleague, themselves — and works through it on the phone with an AI counterparty. Three phases, one continuous call: intake, practice, feedback. The format is not incidental. Phone-only constrains the interface to audio, forcing the agent to work with prosody — pitch, pace, silence, and the gap between what is said and how it is carried — rather than retreating to text-based reasoning.
-
-Every session is simultaneously a unit of care and a training record. The product is the coaching call. The architecture is a data-collection loop.
+A caller brings a hard conversation they have had or need to have and works through it on the phone. One continuous call: intake, practice, feedback. 
 
 ## The Research Problem
 
-Standard conversational AI evaluation focuses on turn-level correctness: given this input, does the model say the right thing? Long-horizon evaluation asks a harder question: does the agent remain coherent — goal-aware, emotionally calibrated, behaviorally consistent — across an extended conversation with phase transitions and an evolving emotional arc?
+Most conversational AI evaluation is turn-level. Give the model an input, check the output. Did it say the right thing?
 
-Rehearse makes this problem tractable by fixing the structure. Each session has three phases with distinct behavioral requirements:
+Long-horizon evaluation asks something harder. Does the agent stay coherent across a full conversation? Can it track a goal set three minutes ago? Does it notice when the caller's emotional state has changed between phases?
+
+Rehearse fixes the session structure to make this measurable. Three phases. One continuous call. No reset between them.
 
 | Phase | Duration | What the agent must do |
 |---|---|---|
-| Intake | ~1 min | Elicit a specific, emotionally anchored goal — not a topic, a stakes-laden moment — through active listening, without leading |
+| Intake | ~1 min | Elicit a specific, emotionally anchored goal through active listening. Not a topic — a stakes-laden moment. |
 | Practice | ~3 min | Hold a realistic counterparty role: push back, hold silence, reflect incongruence between words and affect |
-| Feedback | ~1 min | Name the moment the caller's voice started to mean it — not generic encouragement, but specific acoustic evidence |
+| Feedback | ~1 min | Name the moment the caller's voice started to mean it. Not generic encouragement — specific acoustic evidence. |
 
-The challenge is phase coherence: the agent must carry emotional context and caller-specific detail from intake through practice and into feedback, across what a turn-based model experiences as a long, unstructured token sequence with no explicit memory hand-off.
+The hard problems are naturalness, persona stability, and outcome measurement.
+
+Naturalness degrades over long sessions. Turn-based models flatten prosody over time. Pauses become mechanical. Response latency becomes predictable. Callers notice.
+
+Persona stability is a separate failure mode. The agent plays a distinct role in each phase: active listener in intake, counterparty in practice, reflective coach in feedback. Role drift within a phase — or across the transition — breaks the session. There is no automatic mechanism to detect or correct it.
+
+Outcome measurement is hardest. The ground truth is behavioral change in the real conversation the caller was preparing for. That signal arrives days later, if at all. The eval harness approximates with audio-native judges scoring affect perception, delivery, and silence management. The proxy is imperfect. Closing that gap is an open problem.
+
+Turn-based models see this as one long token sequence. Phase coherence has to emerge from context alone. There is no explicit mechanism to surface what matters.
 
 ## Why Prosody
 
@@ -47,7 +55,7 @@ These are not soft metrics. They directly predict whether the call worked.
 
 ## Current Architecture
 
-Rehearse is built on scaffolded components, not a natively interactive model. The scaffold is the experiment: the platform is studying what current scaffolded systems can and cannot do in sustained, emotionally loaded conversation.
+The initial design is a scaffolded, multi-model system — purpose-built to prove out the conversational agent interface before committing to model infrastructure. The roadmap is to replace off-the-shelf components with self-hosted models as the interface and eval harness mature.
 
 | Layer | Component |
 |---|---|
