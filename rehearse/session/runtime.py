@@ -37,9 +37,9 @@ from rehearse.frames import (
     ProsodyEvent,
     TranscriptDelta,
 )
-from rehearse.intake import IntakeProcessor
-from rehearse.phases import PhaseBudgets, PhaseProcessor
-from rehearse.phases_llm import MeetingPhaseProcessor
+from rehearse.phases.intake import IntakeProcessor
+from rehearse.phases.phases import PhaseBudgets, PhaseProcessor
+from rehearse.phases.phases_llm import MeetingPhaseProcessor
 from rehearse.session.session import utcnow
 from rehearse.storage import LocalFilesystemStore
 from rehearse.transport import RuntimeTransport, TransportEvent

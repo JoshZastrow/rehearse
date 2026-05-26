@@ -24,16 +24,16 @@ from rehearse.agents.persona_selection_recorder import PersonaSelectionRecorder
 from rehearse.agents.persona_swap import PersonaSwapCoordinator
 from rehearse.backends.base import ConversationBackend
 from rehearse.bus import FrameBus
-from rehearse.consent import ConsentGate, ConsentGateConfig
+from rehearse.phases.consent import ConsentGate, ConsentGateConfig
 from rehearse.frames import AudioChunk, EndOfCall
-from rehearse.intake import IntakeProcessor
+from rehearse.phases.intake import IntakeProcessor
 from rehearse.memory import CallerMemory, NullCallerMemory
-from rehearse.outcome import OutcomeProbe, OutcomeProbeConfig
+from rehearse.phases.outcome import OutcomeProbe, OutcomeProbeConfig
 from rehearse.participants import VoiceParticipant
-from rehearse.phases import PhaseBudgets, PhaseProcessor
+from rehearse.phases.phases import PhaseBudgets, PhaseProcessor
 from rehearse.session.session import utcnow
 from rehearse.storage import LocalFilesystemStore
-from rehearse.survey import SurveyAgent, SurveyAgentConfig
+from rehearse.phases.survey import SurveyAgent, SurveyAgentConfig
 from rehearse.types import ConsentState, Session, Speaker
 from rehearse.writers import (
     AudioRecorder,

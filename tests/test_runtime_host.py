@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from rehearse.phases import PhaseBudgets
+from rehearse.phases.phases import PhaseBudgets
 from rehearse.session.runtime import (
     CoachAudioEvent,
     CoachProsodyEvent,

@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from rehearse.intake import IntakeProcessor, classify_gender_preference
+from rehearse.phases.intake import IntakeProcessor, classify_gender_preference
 from rehearse.personas import COACH_PROMPT
 
 

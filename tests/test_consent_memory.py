@@ -30,7 +30,7 @@ from pathlib import Path
 import pytest
 
 from rehearse.bus import FrameBus
-from rehearse.consent import ConsentGate, ConsentGateConfig
+from rehearse.phases.consent import ConsentGate, ConsentGateConfig
 from rehearse.frames import ConsentResolved, TranscriptDelta
 from rehearse.memory import InMemoryCallerMemory
 from rehearse.participants import SpeakRequest

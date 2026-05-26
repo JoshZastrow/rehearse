@@ -29,7 +29,7 @@ from rehearse.backends.factory import create_backend
 from rehearse.config import RuntimeConfig
 from rehearse.session.conversation import run_session
 from rehearse.memory import HonchoCallerMemory, MCPCallerMemory, NullCallerMemory
-from rehearse.phases import PhaseBudgets
+from rehearse.phases.phases import PhaseBudgets
 from rehearse.session.session import SessionOrchestrator, TriggerEvent, utcnow
 from rehearse.types import ParticipantConfig, Session
 

@@ -11,7 +11,7 @@ import pytest
 
 from rehearse.bus import FrameBus
 from rehearse.frames import EndOfCall, PhaseSignal, TranscriptDelta
-from rehearse.outcome import (
+from rehearse.phases.outcome import (
     OUTCOME_PROMPT,
     OutcomeProbe,
     OutcomeProbeConfig,

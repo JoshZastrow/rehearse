@@ -27,7 +27,7 @@ from rehearse.eval.customers.eval_caller import EvalCallerParticipant
 from rehearse.eval.protocols import BenchmarkExample, RolloutResult
 from rehearse.eval.tts_bridge import TTSProvider, get_default_provider
 from rehearse.memory import NullCallerMemory
-from rehearse.phases import PhaseBudgets
+from rehearse.phases.phases import PhaseBudgets
 from rehearse.session.session import SessionOrchestrator, TriggerEvent, utcnow
 from rehearse.storage import LocalFilesystemStore
 from rehearse.types import ConsentState, Session
