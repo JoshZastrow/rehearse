@@ -18,7 +18,7 @@ from datetime import UTC, datetime, timedelta
 
 import structlog
 
-from rehearse.session import SessionOrchestrator
+from rehearse.session.session import SessionOrchestrator
 from rehearse.storage import LocalFilesystemStore
 from rehearse.types import Session
 

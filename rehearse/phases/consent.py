@@ -22,8 +22,8 @@ import structlog
 
 from rehearse.bus import FrameBus
 from rehearse.frames import ConsentResolved, EndOfCall, Frame, TranscriptDelta
-from rehearse.participants import SpeakRequest, VoiceSpeaker
-from rehearse.memory import CallerMemory, NullCallerMemory
+from rehearse.audio.participants import SpeakRequest, VoiceSpeaker
+from rehearse.memory.memory import CallerMemory, NullCallerMemory
 from rehearse.personas import (
     CONSENT_DECLINE_ACK,
     CONSENT_PROMPT,
@@ -31,7 +31,7 @@ from rehearse.personas import (
     CONSENT_REPROMPT,
     classify_consent,
 )
-from rehearse.session import utcnow
+from rehearse.session.session import utcnow
 from rehearse.storage import LocalFilesystemStore
 from rehearse.types import ConsentState, Session, Speaker
 

@@ -17,7 +17,7 @@ from rehearse.audio.mulaw import decode_mulaw, encode_pcm16
 from rehearse.audio.resample import downsample_16k_to_8k, upsample_8k_to_16k
 from rehearse.bus import FrameBus
 from rehearse.frames import AudioChunk
-from rehearse.participants import ParticipantConfig, SpeakRequest, VoiceParticipant
+from rehearse.audio.participants import ParticipantConfig, SpeakRequest, VoiceParticipant
 from rehearse.types import Speaker
 
 

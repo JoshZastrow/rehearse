@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from rehearse.finalize_sweeper import FinalizeSweeper
-from rehearse.session import SessionOrchestrator, TriggerEvent
+from rehearse.session.finalize_sweeper import FinalizeSweeper
+from rehearse.session.session import SessionOrchestrator, TriggerEvent
 from rehearse.storage import LocalFilesystemStore
 from rehearse.types import Phase, Session, Speaker, TranscriptFrame
 

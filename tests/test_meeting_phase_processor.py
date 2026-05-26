@@ -17,8 +17,8 @@ import pytest
 
 from rehearse.bus import FrameBus
 from rehearse.frames import PhaseSignal, TranscriptDelta
-from rehearse.phases import PhaseBudgets
-from rehearse.phases_llm import MeetingPhaseProcessor
+from rehearse.phases.phases import PhaseBudgets
+from rehearse.phases.phases_llm import MeetingPhaseProcessor
 from rehearse.storage import LocalFilesystemStore
 from rehearse.types import ConsentState, Phase, Session, Speaker
 

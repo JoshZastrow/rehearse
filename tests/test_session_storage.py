@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from rehearse.session import SessionOrchestrator, TriggerEvent
+from rehearse.session.session import SessionOrchestrator, TriggerEvent
 from rehearse.storage import LocalFilesystemStore
 from rehearse.types import Phase, Speaker, TranscriptFrame
 
@@ -114,7 +114,7 @@ async def test_session_orchestrator_finalize_writes_story_and_feedback(
 
 @pytest.mark.asyncio
 async def test_orchestrator_set_persona_key_persists(tmp_path):
-    from rehearse.session import SessionOrchestrator, TriggerEvent, utcnow
+    from rehearse.session.session import SessionOrchestrator, TriggerEvent, utcnow
     from rehearse.storage import LocalFilesystemStore
     from rehearse.types import Session
 

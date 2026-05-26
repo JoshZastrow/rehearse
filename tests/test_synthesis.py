@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from rehearse.storage import LocalFilesystemStore
-from rehearse.synthesis import SessionSynthesizer, persist_synthesis
+from rehearse.session.synthesis import SessionSynthesizer, persist_synthesis
 from rehearse.types import (
     Phase,
     ProsodyFrame,

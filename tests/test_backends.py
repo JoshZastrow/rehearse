@@ -191,7 +191,7 @@ async def test_managed_backend_say_delegates_to_inject_speech():
     """say(SpeakRequest) satisfies VoiceSpeaker protocol."""
     from rehearse.backends.managed import ManagedBackend
     from rehearse.bus import FrameBus
-    from rehearse.participants import SpeakRequest
+    from rehearse.audio.participants import SpeakRequest
 
     spoken: list[str] = []
 

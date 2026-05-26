@@ -12,7 +12,7 @@ from typing import Any
 from rehearse.eval.customers import CallerResult
 from rehearse.eval.customers.llm_customer import _PHASE_PROMPTS
 from rehearse.eval.tts_bridge import TTSProvider
-from rehearse.transport import TwoWayChannel
+from rehearse.backends.transport import TwoWayChannel
 from rehearse.types import Phase
 
 _MAX_TURNS = 12

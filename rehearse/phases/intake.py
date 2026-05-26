@@ -17,7 +17,7 @@ import structlog
 from rehearse.bus import FrameBus
 from rehearse.frames import Frame, IntakeComplete, PhaseSignal, TranscriptDelta
 from rehearse.personas import build_intake_record, compile_character
-from rehearse.session import utcnow
+from rehearse.session.session import utcnow
 from rehearse.storage import LocalFilesystemStore
 from rehearse.types import Phase, Session, Speaker
 

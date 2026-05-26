@@ -26,7 +26,7 @@ from pathlib import Path
 
 import pytest
 
-from rehearse.memory import HonchoCallerMemory
+from rehearse.memory.memory import HonchoCallerMemory
 
 
 # ---------------------------------------------------------------------------

@@ -21,7 +21,7 @@ from rehearse.agents.clm import (
     CLMResponder,
     mount_clm_routes,
 )
-from rehearse.app import create_app
+from rehearse.api.app import create_app
 from rehearse.config import RuntimeConfig
 from rehearse.storage import LocalFilesystemStore
 from rehearse.types import ConsentState, CounterpartyPersona, Phase, PhaseTiming, Session

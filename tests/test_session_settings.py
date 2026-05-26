@@ -44,8 +44,8 @@ def test_female_system_prompt_differs_from_male(tmp_session) -> None:
 @pytest.mark.asyncio
 async def test_male_and_female_agents_in_registry() -> None:
     from rehearse.agents.registry import AgentRegistry
-    from rehearse.memory_manager import MemoryManager
-    from rehearse.memory import NullCallerMemory
+    from rehearse.memory.memory_manager import MemoryManager
+    from rehearse.memory.memory import NullCallerMemory
 
     memory = MemoryManager(NullCallerMemory())
     registry = AgentRegistry()

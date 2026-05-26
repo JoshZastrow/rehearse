@@ -18,7 +18,7 @@ from typing import Any, Final
 import structlog
 
 from rehearse.frames import EndOfCall, Frame, PhaseSignal
-from rehearse.participants import SpeakRequest, VoiceSpeaker
+from rehearse.audio.participants import SpeakRequest, VoiceSpeaker
 from rehearse.storage import LocalFilesystemStore
 from rehearse.types import Phase, Session
 

@@ -21,9 +21,9 @@ from rehearse.agents.roles.feedback import FeedbackCoachAgent
 from rehearse.agents.roles.intake import IntakeCoachAgent
 from rehearse.agents.router import PhaseRouter
 from rehearse.config import RuntimeConfig
-from rehearse.memory_manager import MemoryManager
-from rehearse.memory import NullCallerMemory
-from rehearse.new_clm_responder import NewCLMResponder
+from rehearse.memory.memory_manager import MemoryManager
+from rehearse.memory.memory import NullCallerMemory
+from rehearse.agents.new_clm_responder import NewCLMResponder
 from rehearse.types import ConsentState, CounterpartyPersona, Phase, PhaseTiming, Session
 from tests.fakes import FakeMemoryManager, FakeLLMTransport
 

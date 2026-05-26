@@ -11,7 +11,7 @@ import pytest
 
 from rehearse.eval.customers import CallerResult
 from rehearse.eval.customers.llm_customer import SyntheticCaller, _MAX_TURNS
-from rehearse.transport import InMemoryTwoWayChannel
+from rehearse.backends.transport import InMemoryTwoWayChannel
 from rehearse.types import Phase
 
 

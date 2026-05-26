@@ -19,8 +19,8 @@ import structlog
 
 from rehearse.bus import FrameBus
 from rehearse.frames import EndOfCall, Frame, PhaseSignal, TranscriptDelta
-from rehearse.phases import PhaseBudgets, _apply_phase_transition, _close_open_phase
-from rehearse.session import utcnow
+from rehearse.phases.phases import PhaseBudgets, _apply_phase_transition, _close_open_phase
+from rehearse.session.session import utcnow
 from rehearse.storage import LocalFilesystemStore
 from rehearse.types import Phase, PhaseTiming, Session, Speaker
 

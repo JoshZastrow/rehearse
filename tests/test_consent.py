@@ -10,18 +10,18 @@ from pathlib import Path
 import pytest
 
 from rehearse.bus import FrameBus
-from rehearse.consent import ConsentGate, ConsentGateConfig
+from rehearse.phases.consent import ConsentGate, ConsentGateConfig
 from rehearse.frames import ConsentResolved, TranscriptDelta
-from rehearse.participants import SpeakRequest
+from rehearse.audio.participants import SpeakRequest
 from rehearse.personas import (
     CONSENT_DECLINE_ACK,
     CONSENT_PROMPT,
     CONSENT_REPROMPT,
     classify_consent,
 )
-from rehearse.session import SessionHandle, SessionOrchestrator
+from rehearse.session.session import SessionHandle, SessionOrchestrator
 from rehearse.storage import LocalFilesystemStore
-from rehearse.synthesis import SessionSynthesizer
+from rehearse.session.synthesis import SessionSynthesizer
 from rehearse.types import ConsentState, Session, Speaker
 
 # ---------------------------------------------------------------------------

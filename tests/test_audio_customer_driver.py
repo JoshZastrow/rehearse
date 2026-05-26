@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from rehearse.eval.customers.audio_customer import AudioCustomerDriver
-from rehearse.transport import InMemoryTwoWayChannel
+from rehearse.backends.transport import InMemoryTwoWayChannel
 from rehearse.types import Phase
 
 

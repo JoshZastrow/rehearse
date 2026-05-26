@@ -44,7 +44,7 @@ def _get_memory():
     global _memory_provider
     if _memory_provider is None:
         if _use_honcho:
-            from rehearse.memory import HonchoCallerMemory
+            from rehearse.memory.memory import HonchoCallerMemory
             _memory_provider = HonchoCallerMemory(
                 api_key=_honcho_api_key or "",
                 workspace_id=_honcho_workspace_id,
@@ -52,7 +52,7 @@ def _get_memory():
             )
             log.info("memory_mcp_server.backend", backend="honcho")
         else:
-            from rehearse.memory import InMemoryCallerMemory
+            from rehearse.memory.memory import InMemoryCallerMemory
             _memory_provider = InMemoryCallerMemory()
             log.info("memory_mcp_server.backend", backend="in-memory")
     return _memory_provider

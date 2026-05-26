@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from rehearse.memory_manager import MemoryManager
+from rehearse.memory.memory_manager import MemoryManager
 
 
 def _mock_provider(**overrides):

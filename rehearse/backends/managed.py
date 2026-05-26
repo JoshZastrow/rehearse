@@ -15,7 +15,7 @@ import structlog
 
 from rehearse.backends.base import PersonaSpec
 from rehearse.bus import FrameBus
-from rehearse.participants import SpeakRequest
+from rehearse.audio.participants import SpeakRequest
 
 log = structlog.get_logger(__name__)
 

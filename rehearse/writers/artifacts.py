@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import BinaryIO
 
 from rehearse.frames import AudioChunk, Frame, ProsodyEvent, TranscriptDelta
-from rehearse.session import utcnow
+from rehearse.session.session import utcnow
 from rehearse.storage import LocalFilesystemStore
 from rehearse.types import (
     InferenceLogEntry,

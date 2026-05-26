@@ -11,14 +11,14 @@ import pytest
 
 from rehearse.bus import FrameBus
 from rehearse.frames import EndOfCall, PhaseSignal, TranscriptDelta
-from rehearse.outcome import (
+from rehearse.phases.outcome import (
     OUTCOME_PROMPT,
     OutcomeProbe,
     OutcomeProbeConfig,
     build_label,
     classify_outcome,
 )
-from rehearse.participants import SpeakRequest
+from rehearse.audio.participants import SpeakRequest
 from rehearse.storage import LocalFilesystemStore
 from rehearse.types import ConsentState, Phase, Session, Speaker
 

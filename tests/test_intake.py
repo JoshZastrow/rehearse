@@ -11,7 +11,7 @@ import pytest
 
 from rehearse.bus import FrameBus
 from rehearse.frames import PhaseSignal, TranscriptDelta
-from rehearse.intake import IntakeProcessor
+from rehearse.phases.intake import IntakeProcessor
 from rehearse.storage import LocalFilesystemStore
 from rehearse.types import ConsentState, Phase, Session, Speaker
 

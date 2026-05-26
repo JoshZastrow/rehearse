@@ -29,7 +29,7 @@ log = structlog.get_logger(__name__)
 CLM_FALLBACK_LINE = "Sorry, I had a brief glitch — what were you saying?"
 
 from rehearse.config import RuntimeConfig
-from rehearse.session import utcnow
+from rehearse.session.session import utcnow
 from rehearse.storage import LocalFilesystemStore
 from rehearse.types import Phase, Session
 
@@ -132,13 +132,13 @@ def build_clm_responder(config: RuntimeConfig) -> CLMResponder:
         from rehearse.agents.roles.feedback import FeedbackCoachAgent
         from rehearse.agents.roles.intake import IntakeCoachAgent
         from rehearse.agents.router import IntakeAwareRouter
-        from rehearse.memory import (
+        from rehearse.memory.memory import (
             HonchoCallerMemory,
             MCPCallerMemory,
             NullCallerMemory,
         )
-        from rehearse.memory_manager import MemoryManager
-        from rehearse.new_clm_responder import NewCLMResponder
+        from rehearse.memory.memory_manager import MemoryManager
+        from rehearse.agents.new_clm_responder import NewCLMResponder
         from rehearse.transports import llm_client_from_config, transport_from_config
 
         if config.memory_mcp_url:

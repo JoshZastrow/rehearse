@@ -25,7 +25,7 @@ from rehearse.backends.prosody import NullProsodyService, ProsodyService
 from rehearse.backends.tts import SilenceTTSService, TTSService
 from rehearse.bus import FrameBus
 from rehearse.frames import AudioChunk, TranscriptDelta
-from rehearse.participants import SpeakRequest
+from rehearse.audio.participants import SpeakRequest
 from rehearse.types import Speaker
 
 log = structlog.get_logger(__name__)

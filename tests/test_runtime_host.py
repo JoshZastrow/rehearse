@@ -9,8 +9,8 @@ from typing import Any
 
 import pytest
 
-from rehearse.phases import PhaseBudgets
-from rehearse.runtime import (
+from rehearse.phases.phases import PhaseBudgets
+from rehearse.session.runtime import (
     CoachAudioEvent,
     CoachProsodyEvent,
     CoachTranscriptEvent,
@@ -22,7 +22,7 @@ from rehearse.runtime import (
     StubAudioCoachAdapter,
 )
 from rehearse.storage import LocalFilesystemStore
-from rehearse.transport import InMemoryTwoWayChannel, TransportEvent
+from rehearse.backends.transport import InMemoryTwoWayChannel, TransportEvent
 from rehearse.types import Phase
 
 # ---------------------------------------------------------------------------

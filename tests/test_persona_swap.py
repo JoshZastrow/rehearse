@@ -11,7 +11,7 @@ import pytest
 from rehearse.agents.persona_swap import PersonaSwapCoordinator
 from rehearse.bus import FrameBus
 from rehearse.frames import EndOfCall, PhaseSignal
-from rehearse.participants import SpeakRequest
+from rehearse.audio.participants import SpeakRequest
 from rehearse.storage import LocalFilesystemStore
 from rehearse.types import (
     ConsentState,

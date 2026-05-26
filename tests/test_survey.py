@@ -23,10 +23,10 @@ import pytest
 
 from rehearse.bus import FrameBus
 from rehearse.frames import EndOfCall, Frame, PhaseSignal, TranscriptDelta
-from rehearse.participants import SpeakRequest
-from rehearse.phases import PhaseBudgets
+from rehearse.audio.participants import SpeakRequest
+from rehearse.phases.phases import PhaseBudgets
 from rehearse.storage import LocalFilesystemStore
-from rehearse.survey import (
+from rehearse.phases.survey import (
     SURVEY_CLOSING_LINE,
     SURVEY_QUESTION,
     SurveyAgent,
