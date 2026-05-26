@@ -105,24 +105,102 @@ make eval-watch RUN=<run_id>           # tail scores.jsonl live
 
 Each run produces `scores.jsonl` with per-turn scores, phase timings (with overrun warnings), and audio recordings. The same Pydantic types span the runtime and the eval harness — a frozen production session is replayable through any stage of the pipeline.
 
-## Codebase
+## Project Structure
+
+Top-level directories:
+
+| Directory | Purpose |
+|---|---|
+| `rehearse/` | Core Python package |
+| `tests/` | Unit and integration tests |
+| `evals/` | Eval datasets, fixtures, and run artifacts |
+| `scripts/` | Operational scripts (serving, diagnostics, scenario generation) |
+| `infra/` | Deployment and infrastructure configuration |
+| `web/` | Frontend assets |
+| `docs/` | Specs, plans, and architecture documents |
+| `dev/` | Local development tooling and lab configs |
+
+Within `rehearse/`:
 
 ```
 rehearse/
-├── rehearse/
-│   ├── app.py                    # FastAPI: SMS + voice webhooks
-│   ├── agents/                   # coach + character responders (Claude Agent SDK)
-│   ├── phases.py                 # intake / practice / feedback timing
-│   ├── types.py                  # shared Pydantic contracts (runtime ↔ eval)
-│   ├── memory.py                 # CallerMemory protocol + backends
-│   ├── services/
-│   │   ├── hume_configs.py       # EVI persona registry (config as code)
-│   │   └── hume_client.py        # Hume EVI WebSocket client
-│   ├── audio/                    # Twilio Media Streams bridge
-│   ├── synthesis.py              # post-call feedback generation
-│   └── eval/                     # eval harness (evals, datasets, scorers, environments)
-├── docs/specs/                   # design specs
-└── Makefile                      # all dev commands
+├── types.py            # Domain types and Pydantic models (widely imported)
+├── bus.py              # FrameBus — in-process async event bus
+├── frames.py           # Frame types published onto the bus
+├── config.py           # RuntimeConfig loaded from environment
+├── storage.py          # LocalFilesystemStore — session artifact persistence
+├── pipeline.py         # Live-call assembly reference doc
+│
+├── session/            # Call lifecycle orchestration
+│   ├── session.py      # SessionOrchestrator, SessionHandle
+│   ├── conversation.py # run_session() — transport-agnostic session runner
+│   ├── runtime.py      # RuntimeHost — boots one session against a transport
+│   ├── finalize_sweeper.py  # Sweep stale in_progress sessions on restart
+│   └── synthesis.py    # SessionSynthesizer — post-call artifact generation
+│
+├── phases/             # Conversation flow state machine
+│   ├── phases.py       # PhaseProcessor, PhaseBudgets — phase timing and transitions
+│   ├── phases_llm.py   # MeetingPhaseProcessor — LLM-driven phase detection
+│   ├── intake.py       # IntakeProcessor — captures caller situation during intake
+│   ├── consent.py      # ConsentGate — verbal recording-consent at call start
+│   ├── outcome.py      # OutcomeProbe — post-feedback yes/no outcome capture
+│   └── survey.py       # SurveyAgent — post-call satisfaction survey
+│
+├── memory/             # Caller memory across sessions
+│   ├── memory.py       # CallerMemory protocol + implementations (Null, InMemory, Honcho)
+│   └── memory_manager.py  # MemoryManager — per-turn recall and storage
+│
+├── api/                # HTTP layer
+│   ├── app.py          # FastAPI app factory — wires routes, storage, orchestration
+│   ├── telephony.py    # Twilio webhooks, outbound calls, media websocket
+│   └── viewer.py       # /viewer page — renders session artifacts as HTML
+│
+├── agents/             # CLM agent roles and routing
+│   ├── clm.py          # CLM entrypoint and route mounting
+│   ├── new_clm_responder.py  # NewCLMResponder — per-turn CLM orchestration
+│   ├── router.py       # AgentRouter — selects agent for each turn
+│   ├── registry.py     # AgentRegistry — maps phase+intake to agent instances
+│   └── roles/          # Individual agent role implementations
+│
+├── audio/              # Audio codecs and voice participant contracts
+│   ├── participants.py # VoiceParticipant ABC and VoiceSpeaker protocol
+│   ├── twilio_stream.py  # TwilioCallerParticipant and TwilioStream
+│   ├── mulaw.py        # μ-law codec helpers
+│   └── resample.py     # PCM resampling
+│
+├── backends/           # LLM and voice backend adapters
+│   ├── transport.py    # RuntimeTransport — duplex transport abstraction
+│   ├── pipeline.py     # PipelineBackend — local STT/TTS pipeline
+│   ├── managed.py      # ManagedBackend — remote managed voice backend
+│   ├── tts.py          # TTS adapter
+│   └── factory.py      # Backend factory — selects backend from config
+│
+├── personas/           # Persona registry and prompt builders
+│   ├── __init__.py     # Coach/character/feedback prompts, consent classifier, intake builder
+│   ├── registry.py     # PersonaRegistry — maps intake to practice partner
+│   └── souls/          # Named persona definitions
+│
+├── services/           # External service integrations
+│   ├── hume_evi.py     # HumeEVIClient — Hume voice backend
+│   ├── hume_configs.py # Hume EVI config management
+│   └── memory_mcp_server.py  # MCP server exposing caller memory
+│
+├── transports/         # LLM API transport clients
+│   ├── anthropic.py    # Anthropic streaming transport
+│   └── openai_compat.py  # OpenAI-compatible streaming transport
+│
+├── writers/            # Session artifact writers
+│   └── artifacts.py    # AudioRecorder, TranscriptWriter, ProsodyWriter, TimingWriter
+│
+└── eval/               # Evaluation harness
+    ├── cli.py          # rehearse-eval entry point
+    ├── runner.py       # Eval run orchestration
+    ├── scorers/        # LLM and deterministic judges
+    ├── providers/      # LLM provider adapters for eval
+    ├── targets/        # Eval targets (echo, raw LLM)
+    ├── environments/   # Sandbox environments (in-process, subprocess)
+    ├── customers/      # Synthetic customer drivers
+    └── executors/      # Task executors
 ```
 
 ## Getting Started
