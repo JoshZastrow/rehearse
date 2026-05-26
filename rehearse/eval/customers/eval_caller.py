@@ -24,7 +24,7 @@ from rehearse.bus import FrameBus
 from rehearse.eval.customers.llm_customer import _PHASE_PROMPTS
 from rehearse.eval.tts_bridge import TTSProvider
 from rehearse.frames import EndOfCall, PhaseSignal, TranscriptDelta
-from rehearse.participants import SpeakRequest, VoiceParticipant
+from rehearse.audio.participants import SpeakRequest, VoiceParticipant
 from rehearse.types import ParticipantConfig, Phase, Speaker
 
 log = structlog.get_logger(__name__)

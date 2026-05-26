@@ -24,7 +24,7 @@ from rehearse.eval.protocols import BenchmarkExample
 from rehearse.phases.phases import PhaseBudgets
 from rehearse.session.runtime import RuntimeHost, TextOnlyCoachAdapter
 from rehearse.storage import LocalFilesystemStore
-from rehearse.transport import InMemoryTwoWayChannel, TwoWayChannel
+from rehearse.backends.transport import InMemoryTwoWayChannel, TwoWayChannel
 from rehearse.types import Phase
 
 

@@ -29,7 +29,7 @@ from rehearse.frames import AudioChunk, EndOfCall
 from rehearse.phases.intake import IntakeProcessor
 from rehearse.memory.memory import CallerMemory, NullCallerMemory
 from rehearse.phases.outcome import OutcomeProbe, OutcomeProbeConfig
-from rehearse.participants import VoiceParticipant
+from rehearse.audio.participants import VoiceParticipant
 from rehearse.phases.phases import PhaseBudgets, PhaseProcessor
 from rehearse.session.session import utcnow
 from rehearse.storage import LocalFilesystemStore

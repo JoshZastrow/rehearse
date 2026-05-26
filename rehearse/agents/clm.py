@@ -138,7 +138,7 @@ def build_clm_responder(config: RuntimeConfig) -> CLMResponder:
             NullCallerMemory,
         )
         from rehearse.memory.memory_manager import MemoryManager
-        from rehearse.new_clm_responder import NewCLMResponder
+        from rehearse.agents.new_clm_responder import NewCLMResponder
         from rehearse.transports import llm_client_from_config, transport_from_config
 
         if config.memory_mcp_url:

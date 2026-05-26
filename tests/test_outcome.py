@@ -18,7 +18,7 @@ from rehearse.phases.outcome import (
     build_label,
     classify_outcome,
 )
-from rehearse.participants import SpeakRequest
+from rehearse.audio.participants import SpeakRequest
 from rehearse.storage import LocalFilesystemStore
 from rehearse.types import ConsentState, Phase, Session, Speaker
 

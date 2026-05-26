@@ -17,7 +17,7 @@ from rehearse.api.app import create_app
 from rehearse.audio.mulaw import encode_pcm16
 from rehearse.config import RuntimeConfig
 from rehearse.frames import AudioChunk, ProsodyEvent, TranscriptDelta
-from rehearse.participants import ParticipantConfig
+from rehearse.audio.participants import ParticipantConfig
 from rehearse.api.telephony import TwilioRestClient
 from rehearse.types import (
     CounterpartyPersona,

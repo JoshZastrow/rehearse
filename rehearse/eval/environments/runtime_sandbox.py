@@ -51,7 +51,7 @@ _EVAL_BUDGETS = PhaseBudgets(
     practice_min_dwell_seconds=20,
 )
 from rehearse.storage import LocalFilesystemStore
-from rehearse.transport import InMemoryTwoWayChannel
+from rehearse.backends.transport import InMemoryTwoWayChannel
 
 
 class RuntimeSandboxEnvironment:

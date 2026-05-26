@@ -26,7 +26,7 @@ import rehearse.services.hume_configs as _hume_configs
 from rehearse.audio.resample import resample_pcm16
 from rehearse.bus import FrameBus
 from rehearse.frames import AudioChunk, EndOfCall, ProsodyEvent, TranscriptDelta
-from rehearse.participants import ParticipantConfig, SpeakRequest, VoiceParticipant
+from rehearse.audio.participants import ParticipantConfig, SpeakRequest, VoiceParticipant
 from rehearse.services.hume_configs import select_config_id
 from rehearse.types import ProsodyScores, Speaker
 

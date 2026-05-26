@@ -25,7 +25,7 @@ from rehearse.eval.environments.runtime_sandbox import RuntimeSandboxEnvironment
 from rehearse.eval.protocols import BenchmarkExample
 from rehearse.eval.tts_bridge import TTSProvider
 from rehearse.session.runtime import RuntimeHost
-from rehearse.transport import TwoWayChannel
+from rehearse.backends.transport import TwoWayChannel
 
 
 _SCENARIO = {

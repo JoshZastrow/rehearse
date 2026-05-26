@@ -6,7 +6,7 @@ import pytest
 
 
 def test_canonical_import() -> None:
-    from rehearse.transport import (
+    from rehearse.backends.transport import (
         InMemoryTwoWayChannel,
         TwoWayChannel,
         RuntimeTransport,
@@ -34,7 +34,7 @@ def test_legacy_import_still_works() -> None:
 
 def test_audio_bytes_round_trip() -> None:
     """Audio bytes via TransportEvent data field round-trip unchanged."""
-    from rehearse.transport import InMemoryTwoWayChannel, TransportEvent
+    from rehearse.backends.transport import InMemoryTwoWayChannel, TransportEvent
 
     import asyncio
 
@@ -51,6 +51,6 @@ def test_audio_bytes_round_trip() -> None:
 
 def test_both_paths_same_class() -> None:
     from rehearse.eval.transports import InMemoryTwoWayChannel as Legacy
-    from rehearse.transport import InMemoryTwoWayChannel as Canonical
+    from rehearse.backends.transport import InMemoryTwoWayChannel as Canonical
 
     assert Legacy is Canonical

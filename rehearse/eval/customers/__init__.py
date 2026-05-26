@@ -14,7 +14,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-from rehearse.transport import TwoWayChannel
+from rehearse.backends.transport import TwoWayChannel
 from rehearse.types import Phase
 
 

@@ -22,7 +22,7 @@ from rehearse.session.runtime import (
     StubAudioCoachAdapter,
 )
 from rehearse.storage import LocalFilesystemStore
-from rehearse.transport import InMemoryTwoWayChannel, TransportEvent
+from rehearse.backends.transport import InMemoryTwoWayChannel, TransportEvent
 from rehearse.types import Phase
 
 # ---------------------------------------------------------------------------
