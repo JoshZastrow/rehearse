@@ -32,7 +32,7 @@ import pytest
 from rehearse.bus import FrameBus
 from rehearse.phases.consent import ConsentGate, ConsentGateConfig
 from rehearse.frames import ConsentResolved, TranscriptDelta
-from rehearse.memory import InMemoryCallerMemory
+from rehearse.memory.memory import InMemoryCallerMemory
 from rehearse.participants import SpeakRequest
 from rehearse.personas import CONSENT_PROMPT, CONSENT_REMINDERS
 from rehearse.storage import LocalFilesystemStore
@@ -219,7 +219,7 @@ def honcho_memory(honcho_server):
     Falls back to the cloud API when honcho_server is not available (i.e.
     lib/honcho/ not set up) and HONCHO_API_KEY is set in the environment.
     """
-    from rehearse.memory import HonchoCallerMemory
+    from rehearse.memory.memory import HonchoCallerMemory
 
     if honcho_server:
         # Self-hosted Honcho via conftest.py fixture — no API key needed.

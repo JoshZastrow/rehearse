@@ -17,7 +17,7 @@ from collections.abc import AsyncIterator
 import structlog
 
 from rehearse.frames import EndOfCall, Frame, IntakeComplete
-from rehearse.memory import CallerMemory
+from rehearse.memory.memory import CallerMemory
 from rehearse.storage import LocalFilesystemStore
 
 log = structlog.get_logger(__name__)

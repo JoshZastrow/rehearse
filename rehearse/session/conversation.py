@@ -27,7 +27,7 @@ from rehearse.bus import FrameBus
 from rehearse.phases.consent import ConsentGate, ConsentGateConfig
 from rehearse.frames import AudioChunk, EndOfCall
 from rehearse.phases.intake import IntakeProcessor
-from rehearse.memory import CallerMemory, NullCallerMemory
+from rehearse.memory.memory import CallerMemory, NullCallerMemory
 from rehearse.phases.outcome import OutcomeProbe, OutcomeProbeConfig
 from rehearse.participants import VoiceParticipant
 from rehearse.phases.phases import PhaseBudgets, PhaseProcessor

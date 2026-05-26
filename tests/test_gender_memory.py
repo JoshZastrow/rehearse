@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from rehearse.memory import InMemoryCallerMemory
+from rehearse.memory.memory import InMemoryCallerMemory
 
 
 @pytest.mark.asyncio

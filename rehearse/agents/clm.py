@@ -132,12 +132,12 @@ def build_clm_responder(config: RuntimeConfig) -> CLMResponder:
         from rehearse.agents.roles.feedback import FeedbackCoachAgent
         from rehearse.agents.roles.intake import IntakeCoachAgent
         from rehearse.agents.router import IntakeAwareRouter
-        from rehearse.memory import (
+        from rehearse.memory.memory import (
             HonchoCallerMemory,
             MCPCallerMemory,
             NullCallerMemory,
         )
-        from rehearse.memory_manager import MemoryManager
+        from rehearse.memory.memory_manager import MemoryManager
         from rehearse.new_clm_responder import NewCLMResponder
         from rehearse.transports import llm_client_from_config, transport_from_config
 

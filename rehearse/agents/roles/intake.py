@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from rehearse.agents.roles.base import wrap_memory_context
-from rehearse.memory_manager import MemoryManager
+from rehearse.memory.memory_manager import MemoryManager
 from rehearse.personas import coach_system_prompt
 from rehearse.types import Session
 

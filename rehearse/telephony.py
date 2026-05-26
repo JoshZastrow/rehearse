@@ -28,7 +28,7 @@ from rehearse.audio.twilio_stream import TwilioCallerParticipant, TwilioStream
 from rehearse.backends.factory import create_backend
 from rehearse.config import RuntimeConfig
 from rehearse.session.conversation import run_session
-from rehearse.memory import HonchoCallerMemory, MCPCallerMemory, NullCallerMemory
+from rehearse.memory.memory import HonchoCallerMemory, MCPCallerMemory, NullCallerMemory
 from rehearse.phases.phases import PhaseBudgets
 from rehearse.session.session import SessionOrchestrator, TriggerEvent, utcnow
 from rehearse.types import ParticipantConfig, Session
@@ -192,7 +192,7 @@ def mount_twilio_routes(
             caller_hash = _session_obj.phone_number_hash
 
             if config.memory_mcp_url:
-                from rehearse.memory import MCPCallerMemory
+                from rehearse.memory.memory import MCPCallerMemory
                 _memory = MCPCallerMemory(config.memory_mcp_url)
             elif config.honcho_base_url:
                 _memory = HonchoCallerMemory(

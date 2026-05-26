@@ -15,7 +15,7 @@ from typing import Any
 
 import structlog
 
-from rehearse.memory import CallerMemory
+from rehearse.memory.memory import CallerMemory
 
 log = structlog.get_logger(__name__)
 

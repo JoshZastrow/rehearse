@@ -27,7 +27,7 @@ from rehearse.agents.registry import AgentRegistry
 from rehearse.agents.roles.base import wrap_memory_context
 from rehearse.agents.router import AgentRouter
 from rehearse.agents.timecard import build_time_card, render_time_card
-from rehearse.memory_manager import MemoryManager
+from rehearse.memory.memory_manager import MemoryManager
 from rehearse.session.session import utcnow
 from rehearse.storage import LocalFilesystemStore
 from rehearse.transports.base import LLMTransport

@@ -17,7 +17,7 @@ from rehearse.agents.roles.character import (
 from rehearse.agents.roles.feedback import FeedbackCoachAgent
 from rehearse.agents.roles.intake import IntakeCoachAgent
 from rehearse.agents.router import IntakeAwareRouter
-from rehearse.memory import InMemoryCallerMemory, NullCallerMemory
+from rehearse.memory.memory import InMemoryCallerMemory, NullCallerMemory
 from rehearse.types import (
     ConsentState,
     IntakeRecord,
