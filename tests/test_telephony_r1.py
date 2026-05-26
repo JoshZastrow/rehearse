@@ -13,12 +13,12 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from rehearse.app import create_app
+from rehearse.api.app import create_app
 from rehearse.audio.mulaw import encode_pcm16
 from rehearse.config import RuntimeConfig
 from rehearse.frames import AudioChunk, ProsodyEvent, TranscriptDelta
 from rehearse.participants import ParticipantConfig
-from rehearse.telephony import TwilioRestClient
+from rehearse.api.telephony import TwilioRestClient
 from rehearse.types import (
     CounterpartyPersona,
     IntakeRecord,
@@ -68,7 +68,7 @@ def app_client(
 ) -> tuple[TestClient, FakeTwilioClient, RuntimeConfig]:
     fake = FakeTwilioClient()
 
-    from rehearse import app as app_module
+    from rehearse.api import app as app_module
 
     monkeypatch.setattr(app_module, "TwilioRestClient", lambda cfg: fake)
 
@@ -363,7 +363,7 @@ def test_media_websocket_bridges_twilio_to_fake_hume(
         async def close(self) -> None:
             pass
 
-    from rehearse import telephony as telephony_module
+    from rehearse.api import telephony as telephony_module
     monkeypatch.setattr(telephony_module, "create_backend", lambda cfg: FakeBackend())
 
     pcm8k = struct.pack("<4h", 0, 1000, -1000, 0)
@@ -459,7 +459,7 @@ def test_media_websocket_handles_hume_normal_close(
         async def close(self) -> None:
             pass
 
-    from rehearse import telephony as telephony_module
+    from rehearse.api import telephony as telephony_module
 
     monkeypatch.setattr(telephony_module, "create_backend", lambda cfg: FakeBackendClosesNormally())
 
@@ -500,8 +500,8 @@ def test_twilio_sms_signature_validation_failure(
         def validate(self, _url: str, _params: dict[str, str], _signature: str) -> bool:
             return False
 
-    from rehearse import app as app_module
-    from rehearse import telephony as telephony_module
+    from rehearse.api import app as app_module
+    from rehearse.api import telephony as telephony_module
 
     monkeypatch.setattr(app_module, "TwilioRestClient", lambda cfg: FakeTwilioClient())
     monkeypatch.setattr(telephony_module, "RequestValidator", RejectingValidator)
@@ -525,7 +525,7 @@ def test_twilio_sms_failed_outbound_call_marks_session_failed(
         async def place_call(self, to: str, callback_url: str, status_callback: str) -> str:
             raise RuntimeError("boom")
 
-    from rehearse import app as app_module
+    from rehearse.api import app as app_module
 
     monkeypatch.setattr(app_module, "TwilioRestClient", lambda cfg: FailingTwilioClient())
     client = TestClient(create_app(config))
@@ -566,7 +566,7 @@ async def test_twilio_rest_client_wraps_underlying_sdk_calls() -> None:
             self.calls = fake_calls
             self.messages = fake_messages
 
-    from rehearse import telephony as telephony_module
+    from rehearse.api import telephony as telephony_module
 
     monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setattr(telephony_module, "TwilioClient", FakeSdkClient)

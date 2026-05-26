@@ -21,8 +21,8 @@ from rehearse.config import RuntimeConfig
 from rehearse.session.finalize_sweeper import FinalizeSweeper
 from rehearse.session.session import SessionOrchestrator
 from rehearse.storage import LocalFilesystemStore
-from rehearse.telephony import TwilioRestClient, mount_twilio_routes
-from rehearse.viewer import mount_viewer_routes
+from rehearse.api.telephony import TwilioRestClient, mount_twilio_routes
+from rehearse.api.viewer import mount_viewer_routes
 
 
 def _configure_logging(level: str) -> None:
