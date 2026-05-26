@@ -19,9 +19,9 @@ from rehearse.personas import (
     CONSENT_REPROMPT,
     classify_consent,
 )
-from rehearse.session import SessionHandle, SessionOrchestrator
+from rehearse.session.session import SessionHandle, SessionOrchestrator
 from rehearse.storage import LocalFilesystemStore
-from rehearse.synthesis import SessionSynthesizer
+from rehearse.session.synthesis import SessionSynthesizer
 from rehearse.types import ConsentState, Session, Speaker
 
 # ---------------------------------------------------------------------------

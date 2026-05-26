@@ -22,7 +22,7 @@ import structlog
 from rehearse.frames import EndOfCall, Frame, PhaseSignal, TranscriptDelta
 from rehearse.outcome import build_label, classify_outcome
 from rehearse.participants import SpeakRequest, VoiceSpeaker
-from rehearse.session import utcnow
+from rehearse.session.session import utcnow
 from rehearse.storage import LocalFilesystemStore
 from rehearse.types import (
     OutcomeLabel,

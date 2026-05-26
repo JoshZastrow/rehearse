@@ -16,7 +16,7 @@ from typing import Literal, Protocol
 import structlog
 
 from rehearse.storage import LocalFilesystemStore
-from rehearse.synthesis import SessionSynthesizer, persist_synthesis
+from rehearse.session.synthesis import SessionSynthesizer, persist_synthesis
 from rehearse.types import ConsentState, Session
 
 log = structlog.get_logger(__name__)

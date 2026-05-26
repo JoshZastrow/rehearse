@@ -29,7 +29,7 @@ log = structlog.get_logger(__name__)
 CLM_FALLBACK_LINE = "Sorry, I had a brief glitch — what were you saying?"
 
 from rehearse.config import RuntimeConfig
-from rehearse.session import utcnow
+from rehearse.session.session import utcnow
 from rehearse.storage import LocalFilesystemStore
 from rehearse.types import Phase, Session
 

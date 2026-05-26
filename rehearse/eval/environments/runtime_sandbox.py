@@ -39,7 +39,7 @@ from rehearse.eval.environments._audio import (
 from rehearse.eval.protocols import BenchmarkExample, RolloutResult
 from rehearse.eval.tts_bridge import TTSProvider, get_default_provider
 from rehearse.phases import PhaseBudgets
-from rehearse.runtime import RuntimeHost, TextOnlyCoachAdapter
+from rehearse.session.runtime import RuntimeHost, TextOnlyCoachAdapter
 
 # Phase budgets compressed for text-only eval: no audio playback time, so
 # LLM turns happen ~10× faster than real phone exchanges. Production budgets

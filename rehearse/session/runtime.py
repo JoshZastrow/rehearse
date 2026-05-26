@@ -40,7 +40,7 @@ from rehearse.frames import (
 from rehearse.intake import IntakeProcessor
 from rehearse.phases import PhaseBudgets, PhaseProcessor
 from rehearse.phases_llm import MeetingPhaseProcessor
-from rehearse.session import utcnow
+from rehearse.session.session import utcnow
 from rehearse.storage import LocalFilesystemStore
 from rehearse.transport import RuntimeTransport, TransportEvent
 from rehearse.types import ConsentState, Phase, ProsodyScores, Session, Speaker

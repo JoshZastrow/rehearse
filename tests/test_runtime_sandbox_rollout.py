@@ -22,7 +22,7 @@ from rehearse.eval.environments import get_environment
 from rehearse.eval.environments.runtime_sandbox import RuntimeSandboxEnvironment
 from rehearse.eval.protocols import BenchmarkExample
 from rehearse.phases import PhaseBudgets
-from rehearse.runtime import RuntimeHost, TextOnlyCoachAdapter
+from rehearse.session.runtime import RuntimeHost, TextOnlyCoachAdapter
 from rehearse.storage import LocalFilesystemStore
 from rehearse.transport import InMemoryTwoWayChannel, TwoWayChannel
 from rehearse.types import Phase

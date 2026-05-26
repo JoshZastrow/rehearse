@@ -18,8 +18,8 @@ from fastapi.staticfiles import StaticFiles
 from rehearse.agents import build_clm_responder, mount_clm_routes
 from rehearse.agents.clm import validate_anthropic_credentials
 from rehearse.config import RuntimeConfig
-from rehearse.finalize_sweeper import FinalizeSweeper
-from rehearse.session import SessionOrchestrator
+from rehearse.session.finalize_sweeper import FinalizeSweeper
+from rehearse.session.session import SessionOrchestrator
 from rehearse.storage import LocalFilesystemStore
 from rehearse.telephony import TwilioRestClient, mount_twilio_routes
 from rehearse.viewer import mount_viewer_routes

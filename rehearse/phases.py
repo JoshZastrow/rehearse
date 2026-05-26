@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 
 from rehearse.bus import FrameBus
 from rehearse.frames import EndOfCall, Frame, IntakeComplete, PhaseSignal, TranscriptDelta
-from rehearse.session import utcnow
+from rehearse.session.session import utcnow
 from rehearse.storage import LocalFilesystemStore
 from rehearse.types import ConsentState, Phase, PhaseTiming, Session, Speaker
 

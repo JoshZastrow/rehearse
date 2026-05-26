@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 
 from rehearse.phases import PhaseBudgets
-from rehearse.runtime import (
+from rehearse.session.runtime import (
     CoachAudioEvent,
     CoachProsodyEvent,
     CoachTranscriptEvent,

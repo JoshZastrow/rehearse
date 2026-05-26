@@ -16,7 +16,7 @@ from rehearse.bus import FrameBus
 from rehearse.eval.environments.live_audio_sandbox import LiveAudioSandboxEnvironment
 from rehearse.eval.protocols import BenchmarkExample
 from rehearse.frames import EndOfCall
-from rehearse.session import utcnow
+from rehearse.session.session import utcnow
 
 
 class _StubTTS:

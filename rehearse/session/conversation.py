@@ -31,7 +31,7 @@ from rehearse.memory import CallerMemory, NullCallerMemory
 from rehearse.outcome import OutcomeProbe, OutcomeProbeConfig
 from rehearse.participants import VoiceParticipant
 from rehearse.phases import PhaseBudgets, PhaseProcessor
-from rehearse.session import utcnow
+from rehearse.session.session import utcnow
 from rehearse.storage import LocalFilesystemStore
 from rehearse.survey import SurveyAgent, SurveyAgentConfig
 from rehearse.types import ConsentState, Session, Speaker

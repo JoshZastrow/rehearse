@@ -31,7 +31,7 @@ from rehearse.personas import (
     CONSENT_REPROMPT,
     classify_consent,
 )
-from rehearse.session import utcnow
+from rehearse.session.session import utcnow
 from rehearse.storage import LocalFilesystemStore
 from rehearse.types import ConsentState, Session, Speaker
 

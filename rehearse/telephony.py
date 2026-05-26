@@ -27,10 +27,10 @@ from twilio.rest import Client as TwilioClient
 from rehearse.audio.twilio_stream import TwilioCallerParticipant, TwilioStream
 from rehearse.backends.factory import create_backend
 from rehearse.config import RuntimeConfig
-from rehearse.conversation import run_session
+from rehearse.session.conversation import run_session
 from rehearse.memory import HonchoCallerMemory, MCPCallerMemory, NullCallerMemory
 from rehearse.phases import PhaseBudgets
-from rehearse.session import SessionOrchestrator, TriggerEvent, utcnow
+from rehearse.session.session import SessionOrchestrator, TriggerEvent, utcnow
 from rehearse.types import ParticipantConfig, Session
 
 log = structlog.get_logger(__name__)
