@@ -2,13 +2,13 @@
 Annotate audio files with word-level transcripts using Whisper on Modal GPU.
 
 ── Modal run (recommended) ──────────────────────────────────────────────────
-    modal run train/components/annotate.py --egs /path/to/sessions.jsonl
-    modal run train/components/annotate.py --egs /path/to/sessions.jsonl \\
+    modal run train/pipeline/annotate.py --egs /path/to/sessions.jsonl
+    modal run train/pipeline/annotate.py --egs /path/to/sessions.jsonl \\
         --lang fr --whisper-model large-v2
 
 ── Standalone chz CLI ────────────────────────────────────────────────────────
-    python train/components/annotate.py egs=/path/to/sessions.jsonl
-    python train/components/annotate.py egs=/path/to/sessions.jsonl lang=fr
+    python train/pipeline/annotate.py egs=/path/to/sessions.jsonl
+    python train/pipeline/annotate.py egs=/path/to/sessions.jsonl lang=fr
 
 ── Output ───────────────────────────────────────────────────────────────────
     Each audio.wav gets a sibling audio.json:
@@ -181,13 +181,13 @@ class AnnotateConfig:
     """Annotation job configuration.
 
     Modal run CLI:
-        modal run train/components/annotate.py --egs /path/to/sessions.jsonl
+        modal run train/pipeline/annotate.py --egs /path/to/sessions.jsonl
 
     Standalone chz CLI:
-        python train/components/annotate.py egs=/path/to/sessions.jsonl
+        python train/pipeline/annotate.py egs=/path/to/sessions.jsonl
 
     Nested fields (chz dot-notation):
-        python train/components/annotate.py egs=... whisper_model=large-v2 lang=fr
+        python train/pipeline/annotate.py egs=... whisper_model=large-v2 lang=fr
     """
 
     egs: Path
@@ -248,7 +248,7 @@ def _validate_session(session_dir: Path):
     Raises pydantic.ValidationError if the file does not match the schema.
     """
     try:
-        from train.components.schemas import Session
+        from train.pipeline.schemas import Session
     except ImportError:
         sys.path.insert(0, str(Path(__file__).parent))
         from schemas import Session  # type: ignore[no-redef]
@@ -263,7 +263,7 @@ def _validate_output(result: dict):
     Raises pydantic.ValidationError if the structure is unexpected.
     """
     try:
-        from train.components.schemas import AnnotationOutput
+        from train.pipeline.schemas import AnnotationOutput
     except ImportError:
         sys.path.insert(0, str(Path(__file__).parent))
         from schemas import AnnotationOutput  # type: ignore[no-redef]
@@ -355,12 +355,12 @@ def cli(
     """Annotate audio files with Whisper on Modal GPU.
 
     Usage:
-        modal run train/components/annotate.py --egs /path/to/sessions.jsonl
-        modal run train/components/annotate.py --egs /path/to/sessions.jsonl \\
+        modal run train/pipeline/annotate.py --egs /path/to/sessions.jsonl
+        modal run train/pipeline/annotate.py --egs /path/to/sessions.jsonl \\
             --lang fr --whisper-model large-v2
 
     Override GPU type via environment variable (default: T4):
-        REHEARSE_GPU=A10G modal run train/components/annotate.py --egs ...
+        REHEARSE_GPU=A10G modal run train/pipeline/annotate.py --egs ...
     """
     _run(
         AnnotateConfig(
@@ -376,5 +376,5 @@ def cli(
 
 if __name__ == "__main__":
     # Standalone chz CLI — runs process_remote via Modal if authenticated.
-    # Usage: python train/components/annotate.py egs=/path/to/sessions.jsonl
+    # Usage: python train/pipeline/annotate.py egs=/path/to/sessions.jsonl
     chz.nested_entrypoint(_run)
