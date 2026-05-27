@@ -19,8 +19,7 @@ from pathlib import Path
 import pytest
 
 from rehearse.eval.protocols import BenchmarkExample, RolloutResult
-from rehearse.eval.scorers.audio_judge import AudioJudgeError, StubAudioJudge
-from rehearse.eval.scorers.delivery_judge import DeliveryJudgeScorer
+from rehearse.eval.scorers.audio_judges import AudioJudgeError, DeliveryJudgeScorer, StubAudioJudge
 
 
 def _silent_wav(path: Path) -> Path:

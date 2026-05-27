@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from rehearse.eval.executors import LocalSubprocessExecutor
+from rehearse.eval.harness.executor import LocalSubprocessExecutor
 from rehearse.eval.protocols import BenchmarkExample
 
 

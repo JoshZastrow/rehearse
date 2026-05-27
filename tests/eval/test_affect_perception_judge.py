@@ -15,8 +15,7 @@ from pathlib import Path
 import pytest
 
 from rehearse.eval.protocols import BenchmarkExample, RolloutResult
-from rehearse.eval.scorers.affect_perception_judge import AffectPerceptionJudgeScorer
-from rehearse.eval.scorers.audio_judge import AudioJudgeError, StubAudioJudge
+from rehearse.eval.scorers.audio_judges import AffectPerceptionJudgeScorer, AudioJudgeError, StubAudioJudge
 
 
 def _silent_wav(path: Path, *, duration_s: float = 0.5) -> Path:

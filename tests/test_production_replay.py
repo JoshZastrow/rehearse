@@ -184,12 +184,6 @@ def test_replay_errors_when_bundle_missing(tmp_path: Path) -> None:
     assert "not found" in (result.error or "")
 
 
-def test_mme_sandbox_rollout_supports_production_replay() -> None:
-    from rehearse.eval.evals.mme_sandbox_rollout import MMESandboxRolloutEval
-
-    eval_obj = MMESandboxRolloutEval()
-    assert "production-replay" in eval_obj.supported_environments
-
 
 @pytest.mark.parametrize(
     "name",

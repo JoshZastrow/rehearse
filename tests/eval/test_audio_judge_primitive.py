@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from rehearse.eval.scorers.audio_judge import AudioJudge, AudioJudgeError, StubAudioJudge
+from rehearse.eval.scorers.audio_judges import AudioJudge, AudioJudgeError, StubAudioJudge
 
 
 def _silent_wav(path: Path, *, duration_s: float = 0.5, sample_rate: int = 16_000) -> Path:

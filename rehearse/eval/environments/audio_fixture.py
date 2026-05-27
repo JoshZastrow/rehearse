@@ -23,7 +23,7 @@ The environment writes:
     {run_dir}/timing.jsonl
 
 Audio synthesis path: if a TTS provider is configured (see
-`rehearse.eval.tts_bridge.get_default_provider`), each turn's text is
+`rehearse.eval.environments.tts_bridge.get_default_provider`), each turn's text is
 synthesized to a real WAV and timing is computed from the *actual*
 audio duration. If no provider is configured, the environment falls
 back to silent WAVs sized by `*_audio_durations_s` so CI smoke runs
@@ -40,7 +40,7 @@ from pathlib import Path
 from typing import Any
 
 from rehearse.eval.protocols import BenchmarkExample, RolloutResult
-from rehearse.eval.tts_bridge import TTSProvider, get_default_provider
+from rehearse.eval.environments.tts_bridge import TTSProvider, get_default_provider
 
 
 class AudioFixtureEnvironment:

@@ -23,12 +23,13 @@ from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
+from rehearse.eval.benchmarks import get_benchmark
 from rehearse.eval.environments import get_environment
-from rehearse.eval.evals import get_eval
-from rehearse.eval.executors import LocalSubprocessExecutor
+from rehearse.eval.suites import EVALS, get_eval
+from rehearse.eval.harness.executor import LocalSubprocessExecutor
 from rehearse.eval.protocols import BenchmarkExample, Executor, MetaScorer, RolloutResult
 from rehearse.eval.scorers.composite import supports_publish
-from rehearse.eval.score_stream import ScoreStreamWriter
+from rehearse.eval.harness.stream import ScoreStreamWriter
 from rehearse.types import EvalRun, RubricScore
 
 
@@ -89,8 +90,15 @@ class RunOutcome:
     total_tokens: int = 0
 
 
+def _resolve_eval(name: str):
+    """Try suites first, fall back to benchmarks."""
+    if name in EVALS:
+        return get_eval(name)
+    return get_benchmark(name)
+
+
 async def execute_run(config: RunConfig, executor: Executor | None = None) -> RunOutcome:
-    eval_spec = get_eval(config.eval_name or "")
+    eval_spec = _resolve_eval(config.eval_name or "")
     environment_name = config.environment or eval_spec.preferred_environment
     if environment_name not in eval_spec.supported_environments:
         raise ValueError(

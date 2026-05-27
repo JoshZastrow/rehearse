@@ -19,7 +19,7 @@ from typing import Any
 
 import pytest
 
-from rehearse.eval.customers.llm_customer import SyntheticCaller
+from rehearse.eval.drivers.llm_customer import SyntheticCaller
 from rehearse.eval.protocols import BenchmarkExample, RolloutResult
 from rehearse.eval.scorers.llm_judge import LLMJudge
 from rehearse.eval.scorers.survey_presence_judge import SurveyPresenceJudge
@@ -195,7 +195,7 @@ def _survey_transcript() -> list[dict[str, Any]]:
 
 
 def test_synthetic_caller_survey_prompt_exists() -> None:
-    from rehearse.eval.customers.llm_customer import _PHASE_PROMPTS
+    from rehearse.eval.drivers.llm_customer import _PHASE_PROMPTS
 
     assert Phase.SURVEY in _PHASE_PROMPTS, (
         "SURVEY phase missing from _PHASE_PROMPTS — SyntheticCaller will fall "
@@ -220,7 +220,7 @@ def test_synthetic_caller_survey_prompt_formats() -> None:
 
 
 def test_synthetic_caller_survey_prompt_is_distinct_from_feedback() -> None:
-    from rehearse.eval.customers.llm_customer import _PHASE_PROMPTS
+    from rehearse.eval.drivers.llm_customer import _PHASE_PROMPTS
 
     assert _PHASE_PROMPTS[Phase.SURVEY] != _PHASE_PROMPTS[Phase.FEEDBACK]
 

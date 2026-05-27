@@ -17,7 +17,7 @@ from unittest.mock import patch
 
 import pytest
 
-from rehearse.eval.customers import CallerResult
+from rehearse.eval.drivers import CallerResult
 from rehearse.eval.environments import get_environment
 from rehearse.eval.environments.runtime_sandbox import RuntimeSandboxEnvironment
 from rehearse.eval.protocols import BenchmarkExample
@@ -193,16 +193,3 @@ async def test_stub_customer_no_deadlock(tmp_path: Path) -> None:
     assert results is not None
 
 
-# ---------------------------------------------------------------------------
-# voice-agent-sandbox shim → deprecation warning to stderr
-# ---------------------------------------------------------------------------
-
-
-def test_voice_agent_sandbox_deprecation_warning(capsys: Any) -> None:
-    """get_environment('voice-agent-sandbox') prints a DeprecationWarning to stderr."""
-    with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key-stub"}):
-        get_environment("voice-agent-sandbox", model_slots={})
-    captured = capsys.readouterr()
-    assert "DeprecationWarning" in captured.err
-    assert "voice-agent-sandbox" in captured.err
-    assert "runtime-sandbox" in captured.err

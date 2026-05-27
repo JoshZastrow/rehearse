@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from rehearse.eval.watch import AggregateState, watch
+from rehearse.eval.harness.watch import AggregateState, watch
 
 
 def _row(example_id: str, dim: str, value: float) -> str:

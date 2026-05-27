@@ -18,7 +18,7 @@ from typing import Any
 import pytest
 
 from rehearse.eval.protocols import BenchmarkExample, RolloutResult
-from rehearse.eval.score_stream import ScoreStreamWriter
+from rehearse.eval.harness.stream import ScoreStreamWriter
 from rehearse.eval.scorers.aggregate import AggregateScorer
 from rehearse.eval.scorers.composite import CompositeScorer, supports_publish
 from rehearse.types import RubricScore
@@ -176,7 +176,7 @@ def test_supports_publish_false_for_static_scorer() -> None:
 
 def test_reader_skips_malformed_line(tmp_path: Path) -> None:
     """A line that fails JSON parsing should not break aggregation."""
-    from rehearse.eval.watch import AggregateState
+    from rehearse.eval.harness.watch import AggregateState
 
     state = AggregateState()
     state.add(json.loads('{"example_id":"a","dimension":"d1","value":0.7}'))

@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from rehearse.eval.datasets.mme_emotion import MMEEmotionDataset
-from rehearse.eval.evals.mme_emotion import MMEEmotionEval
+from rehearse.eval.benchmarks.mme_emotion import MMEEmotionEval
 from rehearse.eval.protocols import BenchmarkExample, RolloutResult
 from rehearse.eval.scorers.deterministic import (
     MMERecognitionScorer,
