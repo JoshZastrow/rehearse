@@ -119,6 +119,17 @@ Top-level directories:
 | `web/` | Frontend assets |
 | `docs/` | Specs, plans, and architecture documents |
 | `dev/` | Local development tooling and lab configs |
+| `train/` | ML training pipeline (annotation, dataset prep) |
+
+Within `train/`:
+
+```
+train/
+└── pipeline/
+    ├── schemas.py    # Pydantic models for session input and annotation output
+    ├── annotate.py   # Whisper word-level annotation on Modal GPU
+    └── dataset.py    # Build training manifest (JSONL) from annotated sessions
+```
 
 Within `rehearse/`:
 
