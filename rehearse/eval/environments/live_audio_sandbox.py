@@ -23,9 +23,9 @@ from typing import Any
 from rehearse.backends.factory import create_backend
 from rehearse.config import RuntimeConfig
 from rehearse.session.conversation import run_session
-from rehearse.eval.customers.eval_caller import EvalCallerParticipant
+from rehearse.eval.drivers.eval_caller import EvalCallerParticipant
 from rehearse.eval.protocols import BenchmarkExample, RolloutResult
-from rehearse.eval.tts_bridge import TTSProvider, get_default_provider
+from rehearse.eval.environments.tts_bridge import TTSProvider, get_default_provider
 from rehearse.memory.memory import NullCallerMemory
 from rehearse.phases.phases import PhaseBudgets
 from rehearse.session.session import SessionOrchestrator, TriggerEvent, utcnow

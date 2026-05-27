@@ -1,12 +1,12 @@
-"""Audio LLM provider registry."""
+"""Audio LLM judge (provider) registry."""
 
 from __future__ import annotations
 
 from collections.abc import Callable
 
-from rehearse.eval.providers.base import AudioLLMProvider
-from rehearse.eval.providers.gemini import GeminiAudioProvider
-from rehearse.eval.providers.vllm import VLLMAudioProvider
+from rehearse.eval.judges.base import AudioLLMProvider
+from rehearse.eval.judges.gemini import GeminiAudioProvider
+from rehearse.eval.judges.vllm import VLLMAudioProvider
 
 ProviderFactory = Callable[[dict[str, str]], AudioLLMProvider]
 

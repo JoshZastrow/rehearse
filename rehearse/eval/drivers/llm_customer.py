@@ -17,7 +17,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from rehearse.eval.customers import CallerResult
+from rehearse.eval.drivers import CallerResult
 from rehearse.backends.transport import TwoWayChannel
 from rehearse.types import Phase
 

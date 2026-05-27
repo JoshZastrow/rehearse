@@ -10,7 +10,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from rehearse.eval.providers.base import AudioInput, ProviderError, ProviderResponse
+from rehearse.eval.judges.base import AudioInput, ProviderError, ProviderResponse
 
 _DEFAULT_MODEL = "gemini-2.5-pro"
 

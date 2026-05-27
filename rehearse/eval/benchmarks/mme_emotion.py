@@ -1,10 +1,28 @@
-"""Compatibility wrapper for the MME-Emotion eval."""
+"""MME-Emotion eval: 10-clip dataset + recognition scorer."""
 
 from __future__ import annotations
 
-from rehearse.eval.evals.mme_emotion import MMEEmotionEval
+from collections.abc import Iterable
+
+from rehearse.eval.datasets.mme_emotion import MMEEmotionDataset
+from rehearse.eval.protocols import BenchmarkExample, Scorer
+from rehearse.eval.scorers.deterministic import MMERecognitionScorer
 
 
-class MMEEmotionBenchmark(MMEEmotionEval):
-    supported_targets = MMEEmotionEval.supported_environments
-    preferred_target = MMEEmotionEval.preferred_environment
+class MMEEmotionEval:
+    name = "mme-emotion"
+    version = "v0-10clip"
+    supported_environments = frozenset({"multimodal-llm"})
+    preferred_environment = "multimodal-llm"
+
+    def __init__(self) -> None:
+        self.dataset = MMEEmotionDataset()
+
+    def load(self) -> Iterable[BenchmarkExample]:
+        return self.dataset.load()
+
+    def scoring_plan(self) -> list[Scorer]:
+        return [MMERecognitionScorer()]
+
+    def rollout_timeout_s(self) -> int:
+        return 90

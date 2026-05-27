@@ -58,8 +58,8 @@ async def test_repetitions_runs_each_example_n_times_with_distinct_seeds(
     """With reps=3 and 2 examples, the runner must produce 6 rollouts; per
     rep the rng_seed varies so downstream environments can produce
     differentiated outputs."""
-    from rehearse.eval.evals import get_eval
-    from rehearse.eval.executors import InProcessExecutor
+    from rehearse.eval.suites import get_eval
+    from rehearse.eval.harness.executor import InProcessExecutor
     from rehearse.eval.protocols import RolloutResult
 
     seen_seeds: list[int] = []
@@ -92,8 +92,8 @@ async def test_repetitions_runs_each_example_n_times_with_distinct_seeds(
 async def test_meta_scoring_plan_invoked_with_grouped_rollouts(tmp_path: Path):
     """An eval that exposes `meta_scoring_plan()` gets its meta-scorer called
     once per example with all repetitions of that example grouped."""
-    from rehearse.eval.evals import EVALS
-    from rehearse.eval.evals.noop import NoopEval
+    from rehearse.eval.suites import EVALS
+    from rehearse.eval.suites.noop import NoopEval
     from rehearse.eval.scorers.stability import StabilityScorer
 
     class _NoopWithStability(NoopEval):

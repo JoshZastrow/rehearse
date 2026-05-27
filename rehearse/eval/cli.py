@@ -17,15 +17,16 @@ import asyncio
 import sys
 from pathlib import Path
 
+from rehearse.eval.benchmarks import list_benchmarks
 from rehearse.eval.datasets import list_datasets
 from rehearse.eval.environments import list_environments
-from rehearse.eval.evals import get_eval, list_evals
-from rehearse.eval.executors import InProcessExecutor
-from rehearse.eval.providers import list_providers
-from rehearse.eval.report import ensure_run_recorded, list_runs, record_run, render_report
-from rehearse.eval.runner import RunConfig, execute_run
+from rehearse.eval.suites import list_evals
+from rehearse.eval.harness.executor import InProcessExecutor
+from rehearse.eval.judges import list_providers
+from rehearse.eval.harness.report import ensure_run_recorded, list_runs, record_run, render_report
+from rehearse.eval.runner import RunConfig, _resolve_eval, execute_run
 from rehearse.eval.transports import TransportEvent
-from rehearse.eval.watch import watch as run_watch
+from rehearse.eval.harness.watch import watch as run_watch
 
 
 def _print_event(event: TransportEvent) -> None:
@@ -139,7 +140,7 @@ def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
 
     if args.cmd in {"list-evals", "list-benchmarks"}:
-        for name in list_evals():
+        for name in sorted(list_evals() + list_benchmarks()):
             print(name)
         return 0
 
@@ -182,7 +183,7 @@ def main(argv: list[str] | None = None) -> int:
         return run_watch(run_dir)
 
     if args.cmd == "run":
-        eval_spec = get_eval(args.eval_name)
+        eval_spec = _resolve_eval(args.eval_name)
         environment = args.environment or eval_spec.preferred_environment
         model_slots = dict(args.model_slot)
         if args.provider:

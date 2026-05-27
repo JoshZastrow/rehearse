@@ -28,7 +28,7 @@ import wave
 from pathlib import Path
 from typing import Any
 
-from rehearse.eval.tts_bridge import TTSProvider
+from rehearse.eval.environments.tts_bridge import TTSProvider
 
 DEFAULT_COACH_DESCRIPTION = "warm, steady, present"
 

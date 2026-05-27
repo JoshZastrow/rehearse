@@ -1,7 +1,7 @@
-"""Protocol and result type for synthetic callers used in eval rollouts.
+"""Driver protocol and result types for synthetic callers used in eval rollouts.
 
 A `Caller` simulates the human counterparty side of a runtime-sandbox session.
-Concrete implementations (e.g. `SyntheticCaller`) live alongside this module.
+Concrete driver implementations (e.g. `SyntheticCaller`) live alongside this module.
 
 Naming note: `CustomerDriver` and `CustomerDriverResult` are deprecated aliases
 kept for backwards compatibility for one release cycle. New code should use

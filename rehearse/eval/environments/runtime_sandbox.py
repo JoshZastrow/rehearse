@@ -28,7 +28,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from rehearse.eval.customers.llm_customer import SyntheticCaller
+from rehearse.eval.drivers.llm_customer import SyntheticCaller
 from rehearse.eval.environments._audio import (
     DEFAULT_COACH_DESCRIPTION,
     read_transcript,
@@ -37,7 +37,7 @@ from rehearse.eval.environments._audio import (
     timing_from_frames,
 )
 from rehearse.eval.protocols import BenchmarkExample, RolloutResult
-from rehearse.eval.tts_bridge import TTSProvider, get_default_provider
+from rehearse.eval.environments.tts_bridge import TTSProvider, get_default_provider
 from rehearse.phases.phases import PhaseBudgets
 from rehearse.session.runtime import RuntimeHost, TextOnlyCoachAdapter
 

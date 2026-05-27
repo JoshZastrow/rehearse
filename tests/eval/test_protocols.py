@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from rehearse.eval.datasets import DATASETS, get_dataset
 from rehearse.eval.environments import ENVIRONMENTS, get_environment
-from rehearse.eval.evals import EVALS, get_eval
+from rehearse.eval.suites import EVALS, get_eval
 from rehearse.eval.protocols import Dataset, Environment, Eval
 
 

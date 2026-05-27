@@ -9,9 +9,9 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from rehearse.eval.customers import CallerResult
-from rehearse.eval.customers.llm_customer import _PHASE_PROMPTS
-from rehearse.eval.tts_bridge import TTSProvider
+from rehearse.eval.drivers import CallerResult
+from rehearse.eval.drivers.llm_customer import _PHASE_PROMPTS
+from rehearse.eval.environments.tts_bridge import TTSProvider
 from rehearse.backends.transport import TwoWayChannel
 from rehearse.types import Phase
 

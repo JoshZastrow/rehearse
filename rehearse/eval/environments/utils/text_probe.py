@@ -1,13 +1,10 @@
-"""raw-llm environment — single Anthropic SDK call with the example's prompt.
+"""Harness utility environment — single text LLM call for diagnostics.
 
-Kept for occasional text diagnostics. The model slot key is `raw_llm`; default
-is Claude Sonnet 4.6, matching the synthesis slot per SPEC §9.
+Sends `example.payload["prompt"]` to an Anthropic model and returns the raw
+response text. Use this to spot-check prompts or debug scorer logic without
+running the full rehearse agent pipeline.
 
-Reads the prompt and generation params from `example.payload`:
-  - prompt: str (required)
-  - max_tokens: int (default 1024)
-  - temperature: float (default 0.0)
-  - system: str (optional)
+Not tied to any specific eval or benchmark.
 """
 
 from __future__ import annotations
@@ -23,7 +20,7 @@ from rehearse.eval.protocols import BenchmarkExample, RolloutResult
 _DEFAULT_MODEL = "claude-sonnet-4-6"
 
 
-class RawLLMTarget:
+class TextProbeEnvironment:
     name = "raw-llm"
     version = "v0"
 

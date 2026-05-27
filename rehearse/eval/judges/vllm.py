@@ -6,7 +6,7 @@ import base64
 import os
 from pathlib import Path
 
-from rehearse.eval.providers.base import AudioInput, ProviderError, ProviderResponse
+from rehearse.eval.judges.base import AudioInput, ProviderError, ProviderResponse
 
 _DEFAULT_MODEL = "gemma-4-e4b"
 

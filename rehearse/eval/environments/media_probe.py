@@ -6,11 +6,11 @@ from datetime import datetime
 from pathlib import Path
 
 from rehearse.eval.protocols import BenchmarkExample, RolloutResult
-from rehearse.eval.providers import get_provider
-from rehearse.eval.providers.base import AudioInput, ProviderError
+from rehearse.eval.judges import get_provider
+from rehearse.eval.judges.base import AudioInput, ProviderError
 
 
-class MultimodalLLMEnvironment:
+class MediaProbeEnvironment:
     name = "multimodal-llm"
     version = "v0"
 

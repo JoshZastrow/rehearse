@@ -1,6 +1,7 @@
-"""Echo environment — returns the example's payload unchanged.
+"""Harness utility environment — returns the example payload unchanged.
 
-Phase 1 skeleton. Lets the harness run without any model API.
+Use this to verify harness plumbing (runner, executor, reporter, score
+streaming) without making any model calls. All rollouts succeed immediately.
 """
 
 from __future__ import annotations
@@ -11,7 +12,7 @@ from pathlib import Path
 from rehearse.eval.protocols import BenchmarkExample, RolloutResult
 
 
-class EchoTarget:
+class EchoEnvironment:
     name = "echo"
     version = "v0"
 

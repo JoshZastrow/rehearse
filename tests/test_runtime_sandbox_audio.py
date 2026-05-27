@@ -20,10 +20,10 @@ from unittest.mock import patch
 
 import pytest
 
-from rehearse.eval.customers import CallerResult
+from rehearse.eval.drivers import CallerResult
 from rehearse.eval.environments.runtime_sandbox import RuntimeSandboxEnvironment
 from rehearse.eval.protocols import BenchmarkExample
-from rehearse.eval.tts_bridge import TTSProvider
+from rehearse.eval.environments.tts_bridge import TTSProvider
 from rehearse.session.runtime import RuntimeHost
 from rehearse.backends.transport import TwoWayChannel
 
