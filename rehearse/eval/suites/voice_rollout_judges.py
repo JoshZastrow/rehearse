@@ -31,14 +31,10 @@ from collections.abc import Iterable
 from rehearse.eval.datasets.voice_rollout_judges import VoiceRolloutJudgesDataset
 from rehearse.eval.protocols import BenchmarkExample, Scorer
 from rehearse.eval.scorers.aggregate import AggregateScorer
-from rehearse.eval.scorers.audio_judge import AudioJudge
+from rehearse.eval.scorers.audio_judges import AudioJudge, CalibratedAffectScorer, CalibratedDeliveryScorer
 from rehearse.eval.scorers.composite import CompositeScorer
 from rehearse.eval.scorers.intake_fidelity import IntakeFidelityScorer
 from rehearse.eval.scorers.naturalness import NaturalnessScorer
-from rehearse.eval.scorers.strict_audio_judges import (
-    StrictAffectPerceptionJudgeScorer,
-    StrictDeliveryJudgeScorer,
-)
 from rehearse.eval.scorers.strict_content_judge import StrictContentJudgeScorer
 
 # Existing weights scaled by 0.95 to make room for intake_fidelity at 0.05.
@@ -70,8 +66,8 @@ class VoiceRolloutJudgesEval:
     def scoring_plan(self) -> list[Scorer]:
         children: list[Scorer] = [
             StrictContentJudgeScorer(),
-            StrictAffectPerceptionJudgeScorer(judge=AudioJudge()),
-            StrictDeliveryJudgeScorer(judge=AudioJudge()),
+            CalibratedAffectScorer(judge=AudioJudge()),
+            CalibratedDeliveryScorer(judge=AudioJudge()),
             NaturalnessScorer(),
             IntakeFidelityScorer(),
         ]

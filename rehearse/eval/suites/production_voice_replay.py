@@ -19,9 +19,12 @@ from collections.abc import Iterable
 
 from rehearse.eval.datasets.production_sessions import ProductionSessionsDataset
 from rehearse.eval.protocols import BenchmarkExample, Scorer
-from rehearse.eval.scorers.affect_perception_judge import AffectPerceptionJudgeScorer
-from rehearse.eval.scorers.audio_judge import AudioJudge, StubAudioJudge
-from rehearse.eval.scorers.delivery_judge import DeliveryJudgeScorer
+from rehearse.eval.scorers.audio_judges import (
+    AffectPerceptionJudgeScorer,
+    AudioJudge,
+    DeliveryJudgeScorer,
+    StubAudioJudge,
+)
 from rehearse.eval.scorers.naturalness import NaturalnessScorer
 
 
