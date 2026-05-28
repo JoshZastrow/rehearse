@@ -39,3 +39,9 @@ __pycache__/
 .ruff_cache/
 dev/lab
 /.claude/worktrees
+
+# Model weights (downloaded at runtime)
+rehearse/models/kyutai/**/*.safetensors
+rehearse/models/kyutai/**/*.model
+rehearse/models/kyutai/**/config.json
+rehearse/models/kyutai/**/tokenizer*.model
