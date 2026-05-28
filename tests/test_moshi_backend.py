@@ -23,6 +23,8 @@ def _make_stub(name: str) -> MagicMock:
 
 _HEAVY_MODULES = [
     "torch",
+    "torchaudio",
+    "torchaudio.functional",
     "moshi",
     "moshi.models",
     "moshi.models.loaders",
@@ -34,6 +36,29 @@ _HEAVY_MODULES = [
 for _mod_name in _HEAVY_MODULES:
     if _mod_name not in sys.modules:
         sys.modules[_mod_name] = _make_stub(_mod_name)  # type: ignore[assignment]
+
+# Wire torchaudio.functional into the torchaudio stub.
+_torchaudio = sys.modules["torchaudio"]
+_torchaudio_functional = sys.modules["torchaudio.functional"]
+if not isinstance(getattr(_torchaudio, "functional", None), MagicMock):
+    _torchaudio.functional = _torchaudio_functional  # type: ignore[attr-defined]
+
+# Make torch attrs usable in the stub (spec=ModuleType blocks unknown attrs).
+_torch = sys.modules["torch"]
+
+from contextlib import contextmanager as _cm
+
+@_cm
+def _no_grad():
+    yield
+
+_torch.no_grad = _no_grad  # type: ignore[attr-defined]
+# from_numpy: return a MagicMock that supports .float().unsqueeze()
+_torch.from_numpy = MagicMock(name="torch.from_numpy")  # type: ignore[attr-defined]
+_torch.int16 = MagicMock(name="torch.int16")  # type: ignore[attr-defined]
+
+# torchaudio.functional.resample is also spec-blocked — add it explicitly.
+_torchaudio_functional.resample = MagicMock(name="torchaudio.functional.resample")  # type: ignore[attr-defined]
 
 # Ensure the stubs expose the names that moshi_loader imports at module level.
 _moshi_models = sys.modules["moshi.models"]
@@ -160,3 +185,108 @@ def test_moshi_asr_transcribes_buffered_audio():
 
     # Buffer is cleared after transcription
     assert asr.transcribe_and_reset() == ""
+
+
+# ---- Task 4: MoshiBackend tests ----
+
+import threading
+import queue as _queue
+import concurrent.futures as _futures
+from contextlib import contextmanager
+
+
+@contextmanager
+def _noop_ctx():
+    yield
+
+
+@pytest.mark.asyncio
+async def test_moshi_backend_satisfies_protocol():
+    from rehearse.backends.base import ConversationBackend
+    from rehearse.backends.moshi import MoshiBackend
+
+    fake_mimi = MagicMock(); fake_mimi.frame_size = 1920
+    fake_lm_gen = MagicMock()
+    fake_tokenizer = MagicMock()
+    fake_asr = MagicMock()
+
+    with (
+        patch("rehearse.backends.moshi.load_models", return_value=(fake_mimi, fake_lm_gen, fake_tokenizer)),
+        patch("rehearse.backends.moshi.MoshiASR", return_value=fake_asr),
+    ):
+        backend = MoshiBackend(
+            checkpoint_path="",
+            hf_repo="kyutai/moshiko-pytorch-bf16",
+            device="cpu",
+            asr_model="tiny",
+        )
+
+    assert isinstance(backend, ConversationBackend)
+
+
+@pytest.mark.asyncio
+async def test_moshi_backend_start_launches_task():
+    import asyncio
+    from rehearse.backends.moshi import MoshiBackend
+    from rehearse.bus import FrameBus
+
+    fake_mimi = MagicMock(); fake_mimi.frame_size = 1920
+    fake_lm_gen = MagicMock()
+    fake_tokenizer = MagicMock()
+    fake_asr = MagicMock()
+
+    with (
+        patch("rehearse.backends.moshi.load_models", return_value=(fake_mimi, fake_lm_gen, fake_tokenizer)),
+        patch("rehearse.backends.moshi.MoshiASR", return_value=fake_asr),
+    ):
+        backend = MoshiBackend(
+            checkpoint_path="",
+            hf_repo="kyutai/moshiko-pytorch-bf16",
+            device="cpu",
+            asr_model="tiny",
+        )
+
+    fake_mimi.streaming_forever = MagicMock(return_value=_noop_ctx())
+    fake_lm_gen.streaming_forever = MagicMock(return_value=_noop_ctx())
+    fake_asr.transcribe_and_reset.return_value = ""
+
+    bus = FrameBus(session_id="test-start")
+    await backend.start("test-start", bus)
+    assert backend._task is not None
+    assert not backend._task.done()
+    await backend.close()
+
+
+@pytest.mark.asyncio
+async def test_send_caller_audio_puts_to_queue():
+    from rehearse.backends.moshi import MoshiBackend
+    from rehearse.bus import FrameBus
+
+    fake_mimi = MagicMock(); fake_mimi.frame_size = 1920
+    fake_lm_gen = MagicMock()
+    fake_tokenizer = MagicMock()
+    fake_asr = MagicMock()
+
+    with (
+        patch("rehearse.backends.moshi.load_models", return_value=(fake_mimi, fake_lm_gen, fake_tokenizer)),
+        patch("rehearse.backends.moshi.MoshiASR", return_value=fake_asr),
+    ):
+        backend = MoshiBackend(
+            checkpoint_path="",
+            hf_repo="kyutai/moshiko-pytorch-bf16",
+            device="cpu",
+            asr_model="tiny",
+        )
+
+    fake_mimi.streaming_forever = MagicMock(return_value=_noop_ctx())
+    fake_lm_gen.streaming_forever = MagicMock(return_value=_noop_ctx())
+    fake_asr.transcribe_and_reset.return_value = ""
+
+    bus = FrameBus(session_id="test-queue")
+    await backend.start("test-queue", bus)
+
+    pcm = b"\x00" * 640
+    await backend.send_caller_audio(pcm)
+    assert backend._audio_q.qsize() == 1
+
+    await backend.close()
