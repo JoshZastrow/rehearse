@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import sys
+from contextlib import contextmanager as _cm
 from pathlib import Path
 from types import ModuleType
 from unittest.mock import MagicMock, patch
@@ -9,17 +10,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 # ---------------------------------------------------------------------------
-# Pre-seed sys.modules with lightweight stubs for heavy optional dependencies
-# (torch, moshi, sentencepiece) so that moshi_loader can be imported without
-# these packages being installed in the test environment.
+# Heavy-dependency stubs: installed via a session-scoped autouse fixture so
+# that sys.modules entries are cleaned up after this module's tests run and
+# do not pollute other test modules (e.g. test_backends.py pocket_tts tests).
 # ---------------------------------------------------------------------------
-
-def _make_stub(name: str) -> MagicMock:
-    stub = MagicMock(spec=ModuleType)
-    stub.__name__ = name
-    stub.__spec__ = None
-    return stub
-
 
 _HEAVY_MODULES = [
     "torch",
@@ -33,58 +27,88 @@ _HEAVY_MODULES = [
     "sentencepiece",
 ]
 
-for _mod_name in _HEAVY_MODULES:
-    if _mod_name not in sys.modules:
-        sys.modules[_mod_name] = _make_stub(_mod_name)  # type: ignore[assignment]
 
-# Wire torchaudio.functional into the torchaudio stub.
-_torchaudio = sys.modules["torchaudio"]
-_torchaudio_functional = sys.modules["torchaudio.functional"]
-if not isinstance(getattr(_torchaudio, "functional", None), MagicMock):
-    _torchaudio.functional = _torchaudio_functional  # type: ignore[attr-defined]
+def _make_stub(name: str) -> MagicMock:
+    stub = MagicMock(spec=ModuleType)
+    stub.__name__ = name
+    stub.__spec__ = None
+    return stub
 
-# Make torch attrs usable in the stub (spec=ModuleType blocks unknown attrs).
-_torch = sys.modules["torch"]
 
-from contextlib import contextmanager as _cm
+def _install_stubs() -> dict:
+    """Insert lightweight stubs into sys.modules; return mapping of what was added."""
+    added: dict = {}
+    for mod_name in _HEAVY_MODULES:
+        if mod_name not in sys.modules:
+            sys.modules[mod_name] = _make_stub(mod_name)  # type: ignore[assignment]
+            added[mod_name] = sys.modules[mod_name]
 
-@_cm
-def _no_grad():
+    # Wire torchaudio.functional into the torchaudio stub.
+    _torchaudio = sys.modules["torchaudio"]
+    _torchaudio_functional = sys.modules["torchaudio.functional"]
+    if not isinstance(getattr(_torchaudio, "functional", None), MagicMock):
+        _torchaudio.functional = _torchaudio_functional  # type: ignore[attr-defined]
+
+    # Make torch attrs usable in the stub (spec=ModuleType blocks unknown attrs).
+    _torch = sys.modules["torch"]
+
+    @_cm
+    def _no_grad():
+        yield
+
+    _torch.no_grad = _no_grad  # type: ignore[attr-defined]
+    _torch.from_numpy = MagicMock(name="torch.from_numpy")  # type: ignore[attr-defined]
+    _torch.int16 = MagicMock(name="torch.int16")  # type: ignore[attr-defined]
+
+    # torchaudio.functional.resample is also spec-blocked — add it explicitly.
+    _torchaudio_functional.resample = MagicMock(  # type: ignore[attr-defined]
+        name="torchaudio.functional.resample"
+    )
+
+    # Ensure the stubs expose the names that moshi_loader imports at module level.
+    _moshi_models = sys.modules["moshi.models"]
+    _moshi_loaders = sys.modules["moshi.models.loaders"]
+
+    if not isinstance(getattr(_moshi_models, "loaders", None), MagicMock):
+        _moshi_models.loaders = _moshi_loaders  # type: ignore[attr-defined]
+    if not isinstance(getattr(_moshi_models, "LMGen", None), MagicMock):
+        _moshi_models.LMGen = MagicMock(name="LMGen")  # type: ignore[attr-defined]
+    if not isinstance(getattr(_moshi_loaders, "CheckpointInfo", None), MagicMock):
+        _moshi_loaders.CheckpointInfo = MagicMock(name="CheckpointInfo")  # type: ignore[attr-defined]
+    if not hasattr(_moshi_loaders, "get_mimi"):
+        _moshi_loaders.get_mimi = MagicMock(name="get_mimi")  # type: ignore[attr-defined]
+    if not hasattr(_moshi_loaders, "get_moshi_lm"):
+        _moshi_loaders.get_moshi_lm = MagicMock(name="get_moshi_lm")  # type: ignore[attr-defined]
+    if not hasattr(_moshi_loaders, "MIMI_NAME"):
+        _moshi_loaders.MIMI_NAME = "tokenizer-e351c8d8-checkpoint125.safetensors"  # type: ignore[attr-defined]
+    if not hasattr(_moshi_loaders, "MOSHI_NAME"):
+        _moshi_loaders.MOSHI_NAME = "model.safetensors"  # type: ignore[attr-defined]
+    if not hasattr(_moshi_loaders, "TEXT_TOKENIZER_NAME"):
+        _moshi_loaders.TEXT_TOKENIZER_NAME = "tokenizer_spm_32k_3.model"  # type: ignore[attr-defined]
+
+    _sentencepiece = sys.modules["sentencepiece"]
+    if not hasattr(_sentencepiece, "SentencePieceProcessor"):
+        _sentencepiece.SentencePieceProcessor = MagicMock(  # type: ignore[attr-defined]
+            name="SentencePieceProcessor"
+        )
+
+    return added
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _moshi_stubs():
+    """Install heavy-dep stubs before any test in this module; remove them after."""
+    added = _install_stubs()
     yield
-
-_torch.no_grad = _no_grad  # type: ignore[attr-defined]
-# from_numpy: return a MagicMock that supports .float().unsqueeze()
-_torch.from_numpy = MagicMock(name="torch.from_numpy")  # type: ignore[attr-defined]
-_torch.int16 = MagicMock(name="torch.int16")  # type: ignore[attr-defined]
-
-# torchaudio.functional.resample is also spec-blocked — add it explicitly.
-_torchaudio_functional.resample = MagicMock(name="torchaudio.functional.resample")  # type: ignore[attr-defined]
-
-# Ensure the stubs expose the names that moshi_loader imports at module level.
-_moshi_models = sys.modules["moshi.models"]
-_moshi_loaders = sys.modules["moshi.models.loaders"]
-
-if not isinstance(getattr(_moshi_models, "loaders", None), MagicMock):
-    _moshi_models.loaders = _moshi_loaders  # type: ignore[attr-defined]
-if not isinstance(getattr(_moshi_models, "LMGen", None), MagicMock):
-    _moshi_models.LMGen = MagicMock(name="LMGen")  # type: ignore[attr-defined]
-if not isinstance(getattr(_moshi_loaders, "CheckpointInfo", None), MagicMock):
-    _moshi_loaders.CheckpointInfo = MagicMock(name="CheckpointInfo")  # type: ignore[attr-defined]
-if not hasattr(_moshi_loaders, "get_mimi"):
-    _moshi_loaders.get_mimi = MagicMock(name="get_mimi")  # type: ignore[attr-defined]
-if not hasattr(_moshi_loaders, "get_moshi_lm"):
-    _moshi_loaders.get_moshi_lm = MagicMock(name="get_moshi_lm")  # type: ignore[attr-defined]
-# Constants used by _load_local to build file paths.
-if not hasattr(_moshi_loaders, "MIMI_NAME"):
-    _moshi_loaders.MIMI_NAME = "tokenizer-e351c8d8-checkpoint125.safetensors"  # type: ignore[attr-defined]
-if not hasattr(_moshi_loaders, "MOSHI_NAME"):
-    _moshi_loaders.MOSHI_NAME = "model.safetensors"  # type: ignore[attr-defined]
-if not hasattr(_moshi_loaders, "TEXT_TOKENIZER_NAME"):
-    _moshi_loaders.TEXT_TOKENIZER_NAME = "tokenizer_spm_32k_3.model"  # type: ignore[attr-defined]
-
-_sentencepiece = sys.modules["sentencepiece"]
-if not hasattr(_sentencepiece, "SentencePieceProcessor"):
-    _sentencepiece.SentencePieceProcessor = MagicMock(name="SentencePieceProcessor")  # type: ignore[attr-defined]
+    # Teardown: remove only the entries we inserted so real packages (if present)
+    # or other test modules are not affected.
+    for mod_name in added:
+        sys.modules.pop(mod_name, None)
+    # Also evict any cached moshi_* rehearse modules so their imports re-run
+    # cleanly if needed in other test sessions.
+    for key in list(sys.modules):
+        if key.startswith("rehearse.backends.moshi"):
+            sys.modules.pop(key, None)
 
 
 def test_loader_returns_models_from_local_path(tmp_path):
