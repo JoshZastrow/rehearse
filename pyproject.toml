@@ -28,6 +28,13 @@ dependencies = [
     "httpx>=0.27",
     "chz>=0.4",
     "pyyaml>=6.0",
+    "fire>=0.6",
+    "simple-parsing>=0.1",
+    "safetensors>=0.4",
+    "tensorboard>=2.0",
+    "sphn>=0.1.12",
+    "submitit>=1.5",
+    "moshi",
 ]
 
 [project.optional-dependencies]
@@ -92,3 +99,6 @@ environments = [
 members = [
     "dev/lab",
 ]
+
+[tool.uv.sources]
+moshi = { git = "https://github.com/kyutai-labs/moshi.git", subdirectory = "moshi" }
