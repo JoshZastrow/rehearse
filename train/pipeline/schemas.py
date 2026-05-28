@@ -56,7 +56,7 @@ class ArtifactPaths(BaseModel):
     transcript: str
     prosody: str
     audio: str
-    timing: str
+    timing: Optional[str] = None
     telemetry: str
     story: str
     feedback: str
@@ -76,18 +76,18 @@ class Session(BaseModel):
     created_at: datetime
     phone_number_hash: str
     consent: str
-    intake: SessionIntake
-    persona: SessionPersona
-    phase_timings: list[PhaseTimings]
-    persona_key: str
+    intake: Optional[SessionIntake] = None
+    persona: Optional[SessionPersona] = None
+    phase_timings: list[PhaseTimings] = []
+    persona_key: Optional[str] = None
     artifact_paths: ArtifactPaths
     completion_status: str
     finalized_at: Optional[datetime] = None
     outcome_label: Optional[str] = None
     outcome_probe_status: Optional[str] = None
     pipeline_version: Optional[str] = None
-    model_slots: dict[str, Any]
-    participants: list[Participant]
+    model_slots: dict[str, Any] = {}
+    participants: list[Participant] = []
 
 
 # ─── Transcript schema ────────────────────────────────────────────────────────

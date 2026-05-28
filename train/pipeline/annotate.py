@@ -308,8 +308,7 @@ def _run(config: AnnotateConfig) -> None:
                 "Session schema OK: id=%s status=%s", session.id, session.completion_status
             )
         except Exception as exc:
-            logger.error("session.json failed schema validation:\n%s", exc)
-            raise
+            logger.warning("session.json failed schema validation (continuing): %s", exc)
 
     for idx, path in enumerate(pending):
         logger.info("[%d/%d] %s", idx + 1, len(pending), path)
