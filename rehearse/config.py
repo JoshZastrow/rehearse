@@ -57,6 +57,10 @@ class RuntimeConfig:
     pipeline_clm_model: str = "coach"
     pipeline_e2e_model: str = ""
     pipeline_e2e_checkpoint: str = ""
+    moshi_checkpoint_path: str = ""          # MOSHI_CHECKPOINT_PATH — local dir; empty = use HF Hub
+    moshi_hf_repo: str = "kyutai/moshiko-pytorch-bf16"  # MOSHI_HF_REPO
+    moshi_device: str = "cuda"               # MOSHI_DEVICE — "cuda" or "cpu"
+    moshi_asr_model: str = "base"            # MOSHI_ASR_MODEL — whisper model size for user ASR
     enable_consent: bool = False
     enable_meeting_phase_processor: bool = False
     phase_classifier_model: str = "claude-haiku-4-5-20251001"
@@ -160,6 +164,10 @@ class RuntimeConfig:
                 or os.environ.get("LITELLM_MODEL", "coach"),
             pipeline_e2e_model=os.environ.get("PIPELINE_E2E_MODEL", ""),
             pipeline_e2e_checkpoint=os.environ.get("PIPELINE_E2E_CHECKPOINT", ""),
+            moshi_checkpoint_path=os.environ.get("MOSHI_CHECKPOINT_PATH", ""),
+            moshi_hf_repo=os.environ.get("MOSHI_HF_REPO", "kyutai/moshiko-pytorch-bf16"),
+            moshi_device=os.environ.get("MOSHI_DEVICE", "cuda"),
+            moshi_asr_model=os.environ.get("MOSHI_ASR_MODEL", "base"),
             enable_consent=os.environ.get("ENABLE_CONSENT", "0") == "1",
             enable_meeting_phase_processor=os.environ.get("ENABLE_MEETING_PHASE_PROCESSOR", "0") == "1",
             phase_classifier_model=os.environ.get("PHASE_CLASSIFIER_MODEL", "claude-haiku-4-5-20251001"),

@@ -135,3 +135,37 @@ def test_config_backend_type_defaults_to_managed():
     assert cfg.backend_type == "managed"
     assert cfg.managed_api_key == "k"
     assert cfg.managed_config_id == "c"
+
+
+def test_moshi_config_defaults():
+    from pathlib import Path
+    from rehearse.config import RuntimeConfig
+    cfg = RuntimeConfig(
+        twilio_account_sid="x", twilio_auth_token="x",
+        twilio_from_number="x", public_base_url="x",
+        hume_api_key="x", hume_config_id="x",
+        session_root=Path("/tmp"),
+    )
+    assert cfg.moshi_checkpoint_path == ""
+    assert cfg.moshi_hf_repo == "kyutai/moshiko-pytorch-bf16"
+    assert cfg.moshi_device == "cuda"
+    assert cfg.moshi_asr_model == "base"
+
+
+def test_moshi_config_from_env(monkeypatch, tmp_path):
+    monkeypatch.setenv("MOSHI_CHECKPOINT_PATH", "/models/moshi.safetensors")
+    monkeypatch.setenv("MOSHI_HF_REPO", "kyutai/moshiko-pytorch-bf16")
+    monkeypatch.setenv("MOSHI_DEVICE", "cpu")
+    monkeypatch.setenv("MOSHI_ASR_MODEL", "tiny")
+    monkeypatch.setenv("TWILIO_ACCOUNT_SID", "x")
+    monkeypatch.setenv("TWILIO_AUTH_TOKEN", "x")
+    monkeypatch.setenv("TWILIO_PHONE_NUMBER", "+1")
+    monkeypatch.setenv("BASE_URL", "http://x")
+    monkeypatch.setenv("HUME_API_KEY", "x")
+    monkeypatch.setenv("HUME_CONFIG_ID", "x")
+    monkeypatch.setenv("SESSIONS_DIR", str(tmp_path))
+    from rehearse.config import RuntimeConfig
+    cfg = RuntimeConfig.from_env(load_dotenv_file=False)
+    assert cfg.moshi_checkpoint_path == "/models/moshi.safetensors"
+    assert cfg.moshi_device == "cpu"
+    assert cfg.moshi_asr_model == "tiny"
