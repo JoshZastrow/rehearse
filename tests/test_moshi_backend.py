@@ -95,7 +95,7 @@ def _install_stubs() -> dict:
     return added
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="module", autouse=True)
 def _moshi_stubs():
     """Install heavy-dep stubs before any test in this module; remove them after."""
     added = _install_stubs()
