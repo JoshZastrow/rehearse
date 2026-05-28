@@ -7,9 +7,8 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-import sentencepiece
 import structlog
 
 # moshi lib is vendored at lib/moshi/moshi — ensure it is importable
@@ -31,7 +30,7 @@ def load_models(
     checkpoint_path: str,
     hf_repo: str,
     device: str,
-) -> tuple["MimiModel", "LMGen", sentencepiece.SentencePieceProcessor]:
+) -> tuple["MimiModel", "LMGen", Any]:
     """Return (mimi, lm_gen, tokenizer) ready for streaming inference.
 
     If checkpoint_path is a non-empty string, loads weights from that
@@ -45,7 +44,7 @@ def load_models(
 def _load_local(
     ckpt_dir: Path,
     device: str,
-) -> tuple["MimiModel", "LMGen", sentencepiece.SentencePieceProcessor]:
+) -> tuple["MimiModel", "LMGen", Any]:
     mimi_path = ckpt_dir / loaders.MIMI_NAME
     moshi_path = ckpt_dir / loaders.MOSHI_NAME
     tokenizer_path = ckpt_dir / loaders.TEXT_TOKENIZER_NAME
@@ -57,7 +56,8 @@ def _load_local(
     lm_model = loaders.get_moshi_lm(str(moshi_path), device=device)
     lm_gen = LMGen(lm_model, temp=0.8, temp_text=0.7)
 
-    tokenizer = sentencepiece.SentencePieceProcessor()
+    import sentencepiece as _sp  # noqa: PLC0415 — deferred to avoid import-time failure
+    tokenizer = _sp.SentencePieceProcessor()
     tokenizer.Load(str(tokenizer_path))
 
     log.info("moshi_loader.loaded_local")
@@ -67,7 +67,7 @@ def _load_local(
 def _load_hf(
     hf_repo: str,
     device: str,
-) -> tuple["MimiModel", "LMGen", sentencepiece.SentencePieceProcessor]:
+) -> tuple["MimiModel", "LMGen", Any]:
     log.info("moshi_loader.loading_hf", repo=hf_repo)
     info = CheckpointInfo.from_hf_repo(hf_repo)
 
