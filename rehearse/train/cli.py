@@ -31,10 +31,12 @@ _OVERRIDES: dict[str, tuple[str, ...]] = {
     "lora_rank":    ("lora", "rank"),
 }
 
+_DEFAULT_CONFIG = Path(__file__).parents[2] / "rehearse" / "models" / "moshi_7B" / "config.yaml"
+
 
 @chz.chz
 class TrainConfig:
-    config: Path = Path("rehearse/models/moshi_7B/config.yaml")
+    config: Path = _DEFAULT_CONFIG
     """Base training YAML. Defines data paths, LoRA settings, optimizer params.
     Defaults to the bundled moshi-7B config."""
 
@@ -114,8 +116,7 @@ def _run(config: TrainConfig) -> None:
         temp_yaml,
     ]
     if config.dry_run:
-        print(f"PYTHONPATH={finetune_dir}")
-        print(" ".join(cmd))
+        print(f"PYTHONPATH={finetune_dir} {' '.join(cmd)}")
         print(f"\nResolved config written to: {temp_yaml}")
         return
     env = {**os.environ, "PYTHONPATH": finetune_dir}
