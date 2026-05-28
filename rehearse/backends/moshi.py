@@ -104,7 +104,7 @@ class MoshiBackend:
         self._audio_q.put_nowait(_STOP_SENTINEL)
         if self._task and not self._task.done():
             try:
-                await asyncio.wait_for(self._task, timeout=5.0)
+                await asyncio.wait_for(self._task, timeout=30.0)
             except (asyncio.CancelledError, asyncio.TimeoutError):
                 self._task.cancel()
         if self._task is not None and self._task.done() and not self._task.cancelled():
@@ -124,33 +124,29 @@ class MoshiBackend:
         coach_text_pieces: list[str] = []
         silence_streak = 0
 
-        with torch.no_grad():
-            with self._mimi.streaming_forever(1), self._lm_gen.streaming_forever(1):
-                while not self._stop.is_set():
-                    try:
-                        raw = self._audio_q.get(timeout=0.05)
-                    except queue.Empty:
-                        continue
-                    if raw is _STOP_SENTINEL:
-                        break
+        with self._mimi.streaming(1), self._lm_gen.streaming(1), torch.no_grad():
+            while not self._stop.is_set():
+                try:
+                    raw = self._audio_q.get(timeout=0.05)
+                except queue.Empty:
+                    continue
+                if raw is _STOP_SENTINEL:
+                    break
 
-                    assert isinstance(raw, bytes)
-                    self._asr.push_audio(raw)
+                assert isinstance(raw, bytes)
+                self._asr.push_audio(raw)
 
-                    # PCM16 16kHz → float32 24kHz
-                    pcm16 = np.frombuffer(raw, dtype=np.int16).astype(np.float32)
-                    pcm_float = pcm16 / 32768.0
-                    pcm_24k = self._resample(pcm_float, _REHEARSE_SAMPLE_RATE, _MOSHI_SAMPLE_RATE)
-                    pcm_buf = np.concatenate([pcm_buf, pcm_24k])
+                # PCM16 16kHz → float32 24kHz
+                pcm16 = np.frombuffer(raw, dtype=np.int16).astype(np.float32)
+                pcm_float = pcm16 / 32768.0
+                pcm_24k = self._resample(pcm_float, _REHEARSE_SAMPLE_RATE, _MOSHI_SAMPLE_RATE)
+                pcm_buf = np.concatenate([pcm_buf, pcm_24k])
 
-                    while len(pcm_buf) >= self._frame_size:
-                        frame = pcm_buf[: self._frame_size]
-                        pcm_buf = pcm_buf[self._frame_size :]
+                while len(pcm_buf) >= self._frame_size:
+                    frame = pcm_buf[: self._frame_size]
+                    pcm_buf = pcm_buf[self._frame_size :]
 
-                        tokens_out = self._infer_frame(frame)
-                        if tokens_out is None:
-                            continue
-
+                    for tokens_out in self._infer_frame(frame):
                         text_id = int(tokens_out[0, 0, 0].item())
                         pad_id = self._lm_gen.lm_model.text_padding_token_id
                         if text_id != pad_id:
@@ -194,12 +190,22 @@ class MoshiBackend:
             ts=time.time(),
         ))
 
-    def _infer_frame(self, frame: np.ndarray) -> torch.Tensor | None:
+    def _infer_frame(self, frame: np.ndarray) -> list[torch.Tensor]:
+        """Encode one audio frame and step the LM for each code timestep.
+
+        mimi.encode may return multiple time steps; lm_gen.step takes one at a
+        time and may return None during warmup — those are filtered out.
+        """
         frame_t = torch.from_numpy(frame).float().unsqueeze(0).unsqueeze(0)
         if self._device != "cpu":
             frame_t = frame_t.to(self._device)
-        codes = self._mimi.encode(frame_t)
-        return self._lm_gen.step(codes)
+        codes = self._mimi.encode(frame_t)  # [1, K, T]
+        results: list[torch.Tensor] = []
+        for c in range(codes.shape[-1]):
+            tokens = self._lm_gen.step(codes[:, :, c : c + 1])
+            if tokens is not None:
+                results.append(tokens)
+        return results
 
     def _flush_coach_turn(self, utt_id: str, pieces: list[str]) -> None:
         text = "".join(pieces).replace("▁", " ").strip()
