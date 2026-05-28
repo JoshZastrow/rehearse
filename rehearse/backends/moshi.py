@@ -107,6 +107,10 @@ class MoshiBackend:
                 await asyncio.wait_for(self._task, timeout=5.0)
             except (asyncio.CancelledError, asyncio.TimeoutError):
                 self._task.cancel()
+        if self._task is not None and self._task.done() and not self._task.cancelled():
+            exc = self._task.exception()
+            if exc:
+                log.error("moshi_backend.inference_loop_error", exc_info=exc, session_id=self._session_id)
         self._executor.shutdown(wait=False)
         log.info("moshi_backend.closed", session_id=self._session_id)
 
