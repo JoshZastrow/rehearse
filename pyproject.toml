@@ -33,6 +33,9 @@ pipeline = [
     "pocket-tts>=2.1.0",
     "faster-whisper>=1.1.0",
 ]
+moshi = [
+    "sentencepiece>=0.2.0",
+]
 
 [project.scripts]
 rehearse-eval = "rehearse.eval.cli:main"

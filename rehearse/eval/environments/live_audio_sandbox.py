@@ -23,6 +23,7 @@ from typing import Any
 from rehearse.backends.factory import create_backend
 from rehearse.config import RuntimeConfig
 from rehearse.session.conversation import run_session
+from rehearse.eval.customers.caller_clients import DEFAULT_CALLER_MODEL, make_caller_client
 from rehearse.eval.drivers.eval_caller import EvalCallerParticipant
 from rehearse.eval.protocols import BenchmarkExample, RolloutResult
 from rehearse.eval.environments.tts_bridge import TTSProvider, get_default_provider
@@ -57,18 +58,19 @@ class LiveAudioSandboxEnvironment:
     ) -> None:
         self.model_slots = dict(model_slots or {})
         self._tts_provider = tts_provider
-        self._llm_client = llm_client
         self._customer_max_turns = customer_max_turns
 
-        missing = [
-            name for name in ("ANTHROPIC_API_KEY", "HUME_API_KEY")
-            if not os.environ.get(name) and tts_provider is None and llm_client is None
-        ]
-        if missing and coach_adapter_factory is None:
+        # Resolve caller client: injected > model_slots["caller"] > default
+        if llm_client is not None:
+            self._llm_client = llm_client
+        else:
+            caller_model = self.model_slots.get("caller", DEFAULT_CALLER_MODEL)
+            self._llm_client = make_caller_client(caller_model)
+
+        if not os.environ.get("HUME_API_KEY") and tts_provider is None and coach_adapter_factory is None:
             raise RuntimeError(
-                "LiveAudioSandboxEnvironment requires "
-                + ", ".join(missing)
-                + " (or inject tts_provider + llm_client for testing)"
+                "LiveAudioSandboxEnvironment requires HUME_API_KEY "
+                "(or inject tts_provider for testing)"
             )
 
     async def rollout(

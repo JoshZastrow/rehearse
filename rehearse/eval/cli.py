@@ -74,6 +74,16 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="shortcut for --model-slot provider=... when environment=multimodal-llm",
     )
+    run.add_argument(
+        "--caller",
+        default=None,
+        metavar="MODEL",
+        help=(
+            "model name for the synthetic caller "
+            "(default: claude-sonnet-4-6); "
+            "e.g. claude-sonnet-4-6, gemma-4-26b, kyutai/moshi"
+        ),
+    )
     run.add_argument("--limit", type=int, default=None)
     run.add_argument("--concurrency", type=int, default=4)
     run.add_argument("--seed", type=int, default=0)
@@ -188,6 +198,8 @@ def main(argv: list[str] | None = None) -> int:
         model_slots = dict(args.model_slot)
         if args.provider:
             model_slots["provider"] = args.provider
+        if args.caller:
+            model_slots["caller"] = args.caller
 
         if args.dry_run:
             n_examples = len(list(eval_spec.load()))
