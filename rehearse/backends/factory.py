@@ -28,5 +28,13 @@ def create_backend(config: RuntimeConfig) -> ConversationBackend:
                 clm_url=config.pipeline_clm_url,
                 clm_model=config.pipeline_clm_model,
             )
+        case "moshi":
+            from rehearse.backends.moshi import MoshiBackend
+            return MoshiBackend(
+                checkpoint_path=config.moshi_checkpoint_path,
+                hf_repo=config.moshi_hf_repo,
+                device=config.moshi_device,
+                asr_model=config.moshi_asr_model,
+            )
         case _:
             raise ValueError(f"Unknown backend_type: {config.backend_type!r}")

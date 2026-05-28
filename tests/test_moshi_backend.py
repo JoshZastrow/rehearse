@@ -290,3 +290,32 @@ async def test_send_caller_audio_puts_to_queue():
     assert backend._audio_q.qsize() == 1
 
     await backend.close()
+
+
+def test_create_backend_moshi_returns_moshi_backend():
+    from pathlib import Path
+    from rehearse.backends.factory import create_backend
+    from rehearse.backends.moshi import MoshiBackend
+    from rehearse.config import RuntimeConfig
+
+    cfg = RuntimeConfig(
+        twilio_account_sid="x", twilio_auth_token="x",
+        twilio_from_number="x", public_base_url="x",
+        hume_api_key="x", hume_config_id="x",
+        session_root=Path("/tmp"),
+        backend_type="moshi",
+        moshi_checkpoint_path="",
+        moshi_hf_repo="kyutai/moshiko-pytorch-bf16",
+        moshi_device="cpu",
+        moshi_asr_model="tiny",
+    )
+    fake_mimi = MagicMock(); fake_mimi.frame_size = 1920
+
+    with (
+        patch("rehearse.backends.moshi.load_models",
+              return_value=(fake_mimi, MagicMock(), MagicMock())),
+        patch("rehearse.backends.moshi.MoshiASR"),
+    ):
+        backend = create_backend(cfg)
+
+    assert isinstance(backend, MoshiBackend)
