@@ -10,6 +10,7 @@ __pycache__/
 uv.lock
 .DS_Store
 sessions/
+data/
 evals/runs/
 evals/datasets/mme-emotion/v0-10clip/clips/*
 !evals/datasets/mme-emotion/v0-10clip/clips/.gitkeep
