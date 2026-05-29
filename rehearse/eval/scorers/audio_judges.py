@@ -433,7 +433,11 @@ class CalibratedAffectScorer:
         if not transcript_path.exists():
             return [self._zero(example, run_id, "no transcript.jsonl")]
 
-        transcript = _render_transcript(transcript_path.read_text().splitlines())
+        transcript_lines = transcript_path.read_text().splitlines()
+        transcript = _render_transcript(transcript_lines)
+        if not transcript.strip():
+            return [self._zero(example, run_id, "transcript is empty — no turns to score", flags=["empty_transcript"])]
+
         user_audio = _audio_paths(artifacts_dir, "user")
         flags: list[str] = []
         modality = "audio+text"
@@ -494,7 +498,11 @@ class CalibratedDeliveryScorer:
         if not transcript_path.exists():
             return [self._zero(example, run_id, "no transcript.jsonl")]
 
-        transcript = _render_transcript(transcript_path.read_text().splitlines())
+        transcript_lines = transcript_path.read_text().splitlines()
+        transcript = _render_transcript(transcript_lines)
+        if not transcript.strip():
+            return [self._zero(example, run_id, "transcript is empty — no turns to score", flags=["empty_transcript"])]
+
         audio_paths = _interleaved_audio(artifacts_dir)
         flags: list[str] = []
         modality = "audio"

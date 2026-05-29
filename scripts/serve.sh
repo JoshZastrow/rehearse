@@ -88,7 +88,10 @@ fi
 
 # ── LiteLLM proxy ─────────────────────────────────────────────────────────────
 LITELLM_PORT=4000
-if command -v litellm >/dev/null 2>&1 || uv run litellm --version >/dev/null 2>&1; then
+BACKEND_TYPE="${BACKEND_TYPE:-pipeline}"
+if [ "$BACKEND_TYPE" = "interactive" ] || [ "$BACKEND_TYPE" = "moshi" ]; then
+  echo "Inference: BACKEND_TYPE=$BACKEND_TYPE — skipping LiteLLM proxy"
+elif command -v litellm >/dev/null 2>&1 || uv run litellm --version >/dev/null 2>&1; then
   echo "Inference: starting LiteLLM proxy on port $LITELLM_PORT..."
   uv run litellm --config "$SCRIPT_DIR/../infra/litellm_config.yaml" \
     --port "$LITELLM_PORT" > /tmp/rehearse-litellm.log 2>&1 &
@@ -132,4 +135,4 @@ echo "Tunnel ready: $TUNNEL_URL"
 # ── Rehearse server ───────────────────────────────────────────────────────────
 export BASE_URL="$TUNNEL_URL"
 echo "Starting rehearse on port $PORT"
-uv run uvicorn rehearse.app:create_app --factory --host 0.0.0.0 --port "$PORT"
+uv run uvicorn rehearse.api.app:create_app --factory --host 0.0.0.0 --port "$PORT"

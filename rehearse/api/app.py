@@ -69,6 +69,22 @@ def create_app(config: RuntimeConfig | None = None) -> FastAPI:
                 AsyncAnthropic(api_key=config.anthropic_api_key),
                 config.anthropic_model,
             )
+        structlog.get_logger(__name__).info(
+            "rehearse.startup",
+            backend_type=config.backend_type,
+            public_base_url=config.public_base_url,
+        )
+        if config.backend_type in ("interactive", "moshi"):
+            import asyncio
+            from rehearse.backends.interactive.loader import load_models
+            await asyncio.get_running_loop().run_in_executor(
+                None,
+                lambda: load_models(
+                    config.interactive_checkpoint_path,
+                    config.interactive_model_repo,
+                    config.interactive_device,
+                ),
+            )
         if config.finalize_sweep_enabled:
             # Crash recovery: any session still `in_progress` on disk has no
             # in-memory handle (we just started), so its Twilio stream is

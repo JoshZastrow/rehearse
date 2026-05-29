@@ -1,7 +1,8 @@
 """create_backend — select a ConversationBackend implementation from config.
 
-BACKEND_TYPE=managed  → ManagedBackend (default, uses Hume EVI)
-BACKEND_TYPE=pipeline → PipelineBackend (Pipecat, open-source stack)
+BACKEND_TYPE=managed      → ManagedBackend (default, uses Hume EVI)
+BACKEND_TYPE=pipeline     → PipelineBackend (Pipecat, open-source stack)
+BACKEND_TYPE=interactive  → InteractiveBackend (Moshi full-duplex, local GPU)
 """
 
 from __future__ import annotations
@@ -28,13 +29,16 @@ def create_backend(config: RuntimeConfig) -> ConversationBackend:
                 clm_url=config.pipeline_clm_url,
                 clm_model=config.pipeline_clm_model,
             )
-        case "moshi":
-            from rehearse.backends.moshi import MoshiBackend
-            return MoshiBackend(
-                checkpoint_path=config.moshi_checkpoint_path,
-                hf_repo=config.moshi_hf_repo,
-                device=config.moshi_device,
-                asr_model=config.moshi_asr_model,
+        case "interactive" | "moshi":  # "moshi" kept as deprecated alias
+            if config.interactive_modal_endpoint:
+                from rehearse.backends.interactive.modal_backend import ModalInteractiveBackend
+                return ModalInteractiveBackend(endpoint=config.interactive_modal_endpoint)
+            from rehearse.backends.interactive import InteractiveBackend
+            return InteractiveBackend(
+                checkpoint_path=config.interactive_checkpoint_path,
+                hf_repo=config.interactive_model_repo,
+                device=config.interactive_device,
+                asr_model=config.interactive_asr_model,
             )
         case _:
             raise ValueError(f"Unknown backend_type: {config.backend_type!r}")

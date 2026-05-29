@@ -91,6 +91,8 @@ class StrictContentJudgeScorer:
         if not transcript_path.exists():
             return [self._zero(example, run_id, "no transcript.jsonl")]
         transcript = _render(transcript_path.read_text().splitlines())
+        if not transcript.strip():
+            return [self._zero(example, run_id, "transcript is empty — no turns to score")]
         scenario = example.payload.get("scenario") or {}
         user_prompt = (
             f"Scenario:\n  Situation: {scenario.get('situation', '<unspecified>')}\n"

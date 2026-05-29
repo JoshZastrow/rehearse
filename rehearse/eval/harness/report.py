@@ -25,37 +25,52 @@ from rich.table import Table
 
 # Legend abbreviations: human-readable, shown above the table.
 _METRIC_ABBREV: dict[str, str] = {
-    "weighted_reward":                  "reward",
-    "content_quality":                  "content",
-    "affect_perception":                "affect",
-    "delivery_quality":                 "delivery",
-    "intake_fidelity":                  "intake",
-    "naturalness.interruption_rate":    "no-int",
-    "naturalness.silence_after_affect": "silence",
-    "naturalness.speech_rate_band":     "speech",
+    "weighted_reward":                       "reward",
+    "content_quality":                       "content",
+    "affect_perception":                     "affect",
+    "delivery_quality":                      "delivery",
+    "intake_fidelity":                       "intake",
+    "naturalness.interruption_rate":         "no-int",
+    "naturalness.silence_after_affect":      "silence",
+    "naturalness.speech_rate_band":          "speech",
+    "stability.affect_perception":           "stab-afct",
+    "stability.delivery_quality":            "stab-dlvr",
+    "stability.naturalness.interruption_rate":    "stab-nint",
+    "stability.naturalness.silence_after_affect": "stab-slnc",
+    "stability.naturalness.speech_rate_band":     "stab-spch",
 }
 
 # Table column headers: exactly 4 chars, never truncated by Rich.
 _TABLE_COL: dict[str, str] = {
-    "weighted_reward":                  "rwrd",
-    "content_quality":                  "cont",
-    "affect_perception":                "afct",
-    "delivery_quality":                 "dlvr",
-    "intake_fidelity":                  "intk",
-    "naturalness.interruption_rate":    "nint",
-    "naturalness.silence_after_affect": "slnc",
-    "naturalness.speech_rate_band":     "spch",
+    "weighted_reward":                       "rwrd",
+    "content_quality":                       "cont",
+    "affect_perception":                     "afct",
+    "delivery_quality":                      "dlvr",
+    "intake_fidelity":                       "intk",
+    "naturalness.interruption_rate":         "nint",
+    "naturalness.silence_after_affect":      "slnc",
+    "naturalness.speech_rate_band":          "spch",
+    "stability.affect_perception":                "afct",
+    "stability.delivery_quality":                 "dlvr",
+    "stability.naturalness.interruption_rate":    "nint",
+    "stability.naturalness.silence_after_affect": "slnc",
+    "stability.naturalness.speech_rate_band":     "spch",
 }
 
 _METRIC_DESC: dict[str, str] = {
-    "reward":   "Weighted composite across all scored dimensions",
-    "content":  "Did the coach move the user toward clearer, more effective phrasing?",
-    "affect":   "Did the coach correctly read the user's emotional state?",
-    "delivery": "Did the coach's prosody and pacing match the emotional moment?",
-    "intake":   "Did the runtime correctly capture situation, relationship, and stakes?",
-    "no-int":   "Interruption rate — 0 interruptions per turn is ideal",
-    "silence":  "Silence after affect events — 1.5–4.0s is ideal",
-    "speech":   "Coach speech rate band — 130–170 wpm is ideal",
+    "reward":     "Weighted composite across all scored dimensions",
+    "content":    "Claude judge (G-Eval): did the coach move the user toward clearer, calmer, actionable phrasing? Scores what was said — ignores tone and delivery.",
+    "affect":     "Gemini multimodal judge: did the coach name, mirror, or act on the user's emotional state, and update as the user shifted? Listens to per-turn user audio.",
+    "delivery":   "Gemini multimodal judge: did coach prosody (pitch, rate, warmth, pauses) track the emotional moment? Scores how it was said — ignores content.",
+    "intake":     "Deterministic: did the runtime correctly capture situation, relationship, and stakes from the intake phase?",
+    "no-int":     "Deterministic: interruptions per turn from timing.jsonl — 0 is ideal, >0.5 is pathological",
+    "silence":    "Deterministic: coach silence after affect events from timing.jsonl — 1.5–4.0s is ideal",
+    "speech":     "Deterministic: coach speech rate from timing.jsonl — 130–170 wpm is ideal",
+    "stab-afct":  "Variance in affect score across repeated rollouts of the same scenario — lower is more stable",
+    "stab-dlvr":  "Variance in delivery score across repeated rollouts — lower is more stable",
+    "stab-nint":  "Variance in interruption rate across repeated rollouts — lower is more stable",
+    "stab-slnc":  "Variance in silence-after-affect across repeated rollouts — lower is more stable",
+    "stab-spch":  "Variance in speech rate score across repeated rollouts — lower is more stable",
 }
 
 # Minimum console width to render without column compression.
@@ -197,7 +212,7 @@ def render_report(runs_root: Path, highlight_run_id: str | None = None) -> None:
     console.print("[bold]Metrics[/bold]")
     for col, abbr, key in zip(col_headers, legend_abbrevs, seen_keys):
         desc = _METRIC_DESC.get(abbr, "")
-        console.print(f"  [cyan]{col}[/cyan]  {abbr:<8}  {desc}")
+        console.print(f"  [cyan]{col}[/cyan]  {abbr:<12}  {desc}")
     console.print()
 
     # ── table ─────────────────────────────────────────────────────────────────
