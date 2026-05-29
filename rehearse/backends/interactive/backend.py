@@ -1,4 +1,4 @@
-"""MoshiBackend — ConversationBackend backed by Moshi full-duplex speech model.
+"""InteractiveBackend — ConversationBackend backed by Moshi full-duplex speech model.
 
 Audio pipeline:
   send_caller_audio(PCM16 16kHz) → resample to 24kHz → mimi.encode()
@@ -28,8 +28,8 @@ import torch
 import torchaudio.functional as F
 
 from rehearse.backends.base import PersonaSpec
-from rehearse.backends.moshi_asr import MoshiASR
-from rehearse.backends.moshi_loader import load_models
+from rehearse.backends.interactive.asr import InteractiveASR
+from rehearse.backends.interactive.loader import load_models
 from rehearse.bus import FrameBus
 from rehearse.frames import AudioChunk, EndOfCall, ProsodyEvent, TranscriptDelta
 from rehearse.types import ProsodyScores, Speaker
@@ -45,7 +45,7 @@ _REHEARSE_SAMPLE_RATE = 16_000
 _SILENCE_FRAMES_TO_FLUSH = 10  # 10 × 80ms = 800ms of silence triggers turn flush
 
 
-class MoshiBackend:
+class InteractiveBackend:
     """ConversationBackend backed by Moshi full-duplex speech model."""
 
     def __init__(
@@ -61,21 +61,21 @@ class MoshiBackend:
             hf_repo=hf_repo,
             device=device,
         )
-        self._asr = MoshiASR(model_size=asr_model)
+        self._asr = InteractiveASR(model_size=asr_model)
         self._device = device
         self._frame_size: int = self._mimi.frame_size  # 1920 at 24 kHz
 
         self._audio_q: queue.Queue[bytes | object] = queue.Queue()
         self._stop = threading.Event()
         self._executor = concurrent.futures.ThreadPoolExecutor(
-            max_workers=1, thread_name_prefix="moshi-infer"
+            max_workers=1, thread_name_prefix="interactive-infer"
         )
         self._task: asyncio.Task | None = None
         self._session_id = ""
         self._bus: FrameBus | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
 
-    async def __aenter__(self) -> MoshiBackend:
+    async def __aenter__(self) -> InteractiveBackend:
         return self
 
     async def __aexit__(self, *args: object) -> None:
@@ -88,16 +88,16 @@ class MoshiBackend:
         self._loop = loop
         future = loop.run_in_executor(self._executor, self._sync_inference_loop)
         self._task = asyncio.ensure_future(future)
-        log.info("moshi_backend.started", session_id=session_id)
+        log.info("interactive_backend.started", session_id=session_id)
 
     async def send_caller_audio(self, pcm16_16k: bytes) -> None:
         self._audio_q.put_nowait(pcm16_16k)
 
     async def inject_speech(self, text: str) -> None:
-        log.warning("moshi_backend.inject_speech_not_supported", text=text[:50])
+        log.warning("interactive_backend.inject_speech_not_supported", text=text[:50])
 
     async def swap_persona(self, persona: PersonaSpec) -> None:
-        log.warning("moshi_backend.swap_persona_not_supported", name=persona["name"])
+        log.warning("interactive_backend.swap_persona_not_supported", name=persona["name"])
 
     async def close(self) -> None:
         self._stop.set()
@@ -110,9 +110,9 @@ class MoshiBackend:
         if self._task is not None and self._task.done() and not self._task.cancelled():
             exc = self._task.exception()
             if exc:
-                log.error("moshi_backend.inference_loop_error", exc_info=exc, session_id=self._session_id)
+                log.error("interactive_backend.inference_loop_error", exc_info=exc, session_id=self._session_id)
         self._executor.shutdown(wait=False)
-        log.info("moshi_backend.closed", session_id=self._session_id)
+        log.info("interactive_backend.closed", session_id=self._session_id)
 
     # ------------------------------------------------------------------
     # Sync inference loop — runs in ThreadPoolExecutor

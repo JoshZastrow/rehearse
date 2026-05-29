@@ -57,10 +57,12 @@ class RuntimeConfig:
     pipeline_clm_model: str = "coach"
     pipeline_e2e_model: str = ""
     pipeline_e2e_checkpoint: str = ""
-    moshi_checkpoint_path: str = ""          # MOSHI_CHECKPOINT_PATH — local dir; empty = use HF Hub
-    moshi_hf_repo: str = "kyutai/moshiko-pytorch-bf16"  # MOSHI_HF_REPO
-    moshi_device: str = "cuda"               # MOSHI_DEVICE — "cuda" or "cpu"
-    moshi_asr_model: str = "base"            # MOSHI_ASR_MODEL — whisper model size for user ASR
+    interactive_checkpoint_path: str = ""     # INTERACTIVE_CHECKPOINT_PATH — local dir; empty = HF Hub
+    interactive_model_repo: str = "kyutai/moshiko-pytorch-bf16"  # INTERACTIVE_MODEL_REPO
+    interactive_device: str = "cuda"         # INTERACTIVE_DEVICE — "cuda" or "cpu"
+    interactive_asr_model: str = "base"      # INTERACTIVE_ASR_MODEL — whisper model size for user ASR
+    interactive_model_type: str = "moshi"    # INTERACTIVE_MODEL_TYPE — "moshi" or "personaplex"
+    interactive_modal_endpoint: str = ""     # INTERACTIVE_MODAL_ENDPOINT — wss://... for interactive-modal
     enable_consent: bool = False
     enable_meeting_phase_processor: bool = False
     phase_classifier_model: str = "claude-haiku-4-5-20251001"
@@ -164,10 +166,12 @@ class RuntimeConfig:
                 or os.environ.get("LITELLM_MODEL", "coach"),
             pipeline_e2e_model=os.environ.get("PIPELINE_E2E_MODEL", ""),
             pipeline_e2e_checkpoint=os.environ.get("PIPELINE_E2E_CHECKPOINT", ""),
-            moshi_checkpoint_path=os.environ.get("MOSHI_CHECKPOINT_PATH", ""),
-            moshi_hf_repo=os.environ.get("MOSHI_HF_REPO", "kyutai/moshiko-pytorch-bf16"),
-            moshi_device=os.environ.get("MOSHI_DEVICE", "cuda"),
-            moshi_asr_model=os.environ.get("MOSHI_ASR_MODEL", "base"),
+            interactive_checkpoint_path=os.environ.get("INTERACTIVE_CHECKPOINT_PATH", ""),
+            interactive_model_repo=os.environ.get("INTERACTIVE_MODEL_REPO", "kyutai/moshiko-pytorch-bf16"),
+            interactive_device=os.environ.get("INTERACTIVE_DEVICE", "cuda"),
+            interactive_asr_model=os.environ.get("INTERACTIVE_ASR_MODEL", "base"),
+            interactive_model_type=os.environ.get("INTERACTIVE_MODEL_TYPE", "moshi"),
+            interactive_modal_endpoint=os.environ.get("INTERACTIVE_MODAL_ENDPOINT", ""),
             enable_consent=os.environ.get("ENABLE_CONSENT", "0") == "1",
             enable_meeting_phase_processor=os.environ.get("ENABLE_MEETING_PHASE_PROCESSOR", "0") == "1",
             phase_classifier_model=os.environ.get("PHASE_CLASSIFIER_MODEL", "claude-haiku-4-5-20251001"),

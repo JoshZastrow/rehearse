@@ -137,7 +137,7 @@ def test_config_backend_type_defaults_to_managed():
     assert cfg.managed_config_id == "c"
 
 
-def test_moshi_config_defaults():
+def test_interactive_config_defaults():
     from pathlib import Path
     from rehearse.config import RuntimeConfig
     cfg = RuntimeConfig(
@@ -146,17 +146,20 @@ def test_moshi_config_defaults():
         hume_api_key="x", hume_config_id="x",
         session_root=Path("/tmp"),
     )
-    assert cfg.moshi_checkpoint_path == ""
-    assert cfg.moshi_hf_repo == "kyutai/moshiko-pytorch-bf16"
-    assert cfg.moshi_device == "cuda"
-    assert cfg.moshi_asr_model == "base"
+    assert cfg.interactive_checkpoint_path == ""
+    assert cfg.interactive_model_repo == "kyutai/moshiko-pytorch-bf16"
+    assert cfg.interactive_device == "cuda"
+    assert cfg.interactive_asr_model == "base"
+    assert cfg.interactive_model_type == "moshi"
+    assert cfg.interactive_modal_endpoint == ""
 
 
-def test_moshi_config_from_env(monkeypatch, tmp_path):
-    monkeypatch.setenv("MOSHI_CHECKPOINT_PATH", "/models/moshi.safetensors")
-    monkeypatch.setenv("MOSHI_HF_REPO", "kyutai/moshiko-pytorch-bf16")
-    monkeypatch.setenv("MOSHI_DEVICE", "cpu")
-    monkeypatch.setenv("MOSHI_ASR_MODEL", "tiny")
+def test_interactive_config_from_env(monkeypatch, tmp_path):
+    monkeypatch.setenv("INTERACTIVE_CHECKPOINT_PATH", "/models/moshi.safetensors")
+    monkeypatch.setenv("INTERACTIVE_MODEL_REPO", "kyutai/moshiko-pytorch-bf16")
+    monkeypatch.setenv("INTERACTIVE_DEVICE", "cpu")
+    monkeypatch.setenv("INTERACTIVE_ASR_MODEL", "tiny")
+    monkeypatch.setenv("INTERACTIVE_MODEL_TYPE", "personaplex")
     monkeypatch.setenv("TWILIO_ACCOUNT_SID", "x")
     monkeypatch.setenv("TWILIO_AUTH_TOKEN", "x")
     monkeypatch.setenv("TWILIO_PHONE_NUMBER", "+1")
@@ -166,6 +169,7 @@ def test_moshi_config_from_env(monkeypatch, tmp_path):
     monkeypatch.setenv("SESSIONS_DIR", str(tmp_path))
     from rehearse.config import RuntimeConfig
     cfg = RuntimeConfig.from_env(load_dotenv_file=False)
-    assert cfg.moshi_checkpoint_path == "/models/moshi.safetensors"
-    assert cfg.moshi_device == "cpu"
-    assert cfg.moshi_asr_model == "tiny"
+    assert cfg.interactive_checkpoint_path == "/models/moshi.safetensors"
+    assert cfg.interactive_device == "cpu"
+    assert cfg.interactive_asr_model == "tiny"
+    assert cfg.interactive_model_type == "personaplex"

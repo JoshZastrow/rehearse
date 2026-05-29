@@ -1,6 +1,6 @@
-"""MoshiASR — faster-whisper wrapper for post-hoc user transcription.
+"""InteractiveASR — faster-whisper wrapper for post-hoc user transcription.
 
-Called from MoshiBackend after each user turn: push_audio() accumulates
+Called from InteractiveBackend after each user turn: push_audio() accumulates
 raw PCM16 16 kHz chunks; transcribe_and_reset() runs Whisper and clears.
 """
 from __future__ import annotations
@@ -12,7 +12,7 @@ from faster_whisper import WhisperModel
 log = structlog.get_logger(__name__)
 
 
-class MoshiASR:
+class InteractiveASR:
     """Buffer user audio and transcribe on demand."""
 
     def __init__(self, model_size: str = "base") -> None:
@@ -32,5 +32,5 @@ class MoshiASR:
         self._chunks.clear()
         segments, _ = self._model.transcribe(audio, language="en", vad_filter=True)
         text = " ".join(s.text.strip() for s in segments).strip()
-        log.debug("moshi_asr.transcribed", chars=len(text))
+        log.debug("interactive_asr.transcribed", chars=len(text))
         return text

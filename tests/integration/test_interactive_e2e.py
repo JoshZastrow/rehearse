@@ -1,9 +1,9 @@
-"""End-to-end test for MoshiBackend with real model weights.
+"""End-to-end test for InteractiveBackend with real model weights.
 
-Skipped automatically if weights are absent or SKIP_MOSHI_E2E=1.
+Skipped automatically if weights are absent or SKIP_INTERACTIVE_E2E=1.
 
 Run:
-    uv run python -m pytest tests/integration/test_moshi_e2e.py -v -s
+    uv run python -m pytest tests/integration/test_interactive_e2e.py -v -s
 
 CPU note: Moshi inference on CPU takes ~20s per 80ms frame (250x slower than
 real-time). test_produces_audio waits up to 90s for the first output frame.
@@ -28,8 +28,8 @@ _REQUIRED_FILES = [
 _WEIGHTS_PRESENT = all((_WEIGHTS_DIR / f).exists() for f in _REQUIRED_FILES)
 
 skip_no_weights = pytest.mark.skipif(
-    not _WEIGHTS_PRESENT or os.environ.get("SKIP_MOSHI_E2E") == "1",
-    reason="Moshi weights not present — run scripts/download_moshi_weights.py first",
+    not _WEIGHTS_PRESENT or os.environ.get("SKIP_INTERACTIVE_E2E") == "1",
+    reason="Model weights not present — run scripts/download_moshi_weights.py first",
 )
 
 
@@ -44,19 +44,19 @@ def _device() -> str:
 @skip_no_weights
 @pytest.mark.asyncio
 @pytest.mark.timeout(180)
-async def test_moshi_backend_produces_audio_and_transcript():
+async def test_interactive_backend_produces_audio_and_transcript():
     """Feed silence until AudioChunk(COACH) frames arrive.
 
     On GPU: first output in <5s. On CPU: ~40s (two 20s forward passes).
     Test waits up to 90s to accommodate CPU-only CI.
     """
-    from rehearse.backends.moshi import MoshiBackend
+    from rehearse.backends.interactive import InteractiveBackend
     from rehearse.bus import FrameBus
     from rehearse.frames import AudioChunk, TranscriptDelta
     from rehearse.types import Speaker
 
     device = _device()
-    backend = MoshiBackend(
+    backend = InteractiveBackend(
         checkpoint_path=str(_WEIGHTS_DIR),
         hf_repo="kyutai/moshiko-pytorch-bf16",
         device=device,
@@ -106,19 +106,19 @@ async def test_moshi_backend_produces_audio_and_transcript():
 @skip_no_weights
 @pytest.mark.asyncio
 @pytest.mark.timeout(30)
-async def test_moshi_backend_closes_cleanly():
+async def test_interactive_backend_closes_cleanly():
     """Verify close() terminates the inference loop without hanging.
 
     Sends fewer chunks than one full Moshi frame (< 4 × 320 samples) so the
     inference thread stays in the queue-wait loop and can respond to the stop
     sentinel immediately — no long forward pass to wait out.
     """
-    from rehearse.backends.moshi import MoshiBackend
+    from rehearse.backends.interactive import InteractiveBackend
     from rehearse.bus import FrameBus
     from rehearse.frames import EndOfCall
 
     device = _device()
-    backend = MoshiBackend(
+    backend = InteractiveBackend(
         checkpoint_path=str(_WEIGHTS_DIR),
         hf_repo="kyutai/moshiko-pytorch-bf16",
         device=device,
