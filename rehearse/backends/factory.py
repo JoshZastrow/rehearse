@@ -30,6 +30,9 @@ def create_backend(config: RuntimeConfig) -> ConversationBackend:
                 clm_model=config.pipeline_clm_model,
             )
         case "interactive" | "moshi":  # "moshi" kept as deprecated alias
+            if config.interactive_modal_endpoint:
+                from rehearse.backends.interactive.modal_backend import ModalInteractiveBackend
+                return ModalInteractiveBackend(endpoint=config.interactive_modal_endpoint)
             from rehearse.backends.interactive import InteractiveBackend
             return InteractiveBackend(
                 checkpoint_path=config.interactive_checkpoint_path,
