@@ -13,12 +13,15 @@ model_slots={"backend_type": "pipeline"} to override per-run.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sys
 import traceback
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+log = logging.getLogger(__name__)
 
 from rehearse.backends.factory import create_backend
 from rehearse.config import RuntimeConfig
@@ -59,13 +62,10 @@ class LiveAudioSandboxEnvironment:
         self.model_slots = dict(model_slots or {})
         self._tts_provider = tts_provider
         self._customer_max_turns = customer_max_turns
-
-        # Resolve caller client: injected > model_slots["caller"] > default
-        if llm_client is not None:
-            self._llm_client = llm_client
-        else:
-            caller_model = self.model_slots.get("caller", DEFAULT_CALLER_MODEL)
-            self._llm_client = make_caller_client(caller_model)
+        # Injected client is used as-is (tests); otherwise a fresh client is
+        # created per rollout via _make_caller_client() to avoid shared _usage state.
+        self._injected_llm_client = llm_client
+        self._caller_model = self.model_slots.get("caller", DEFAULT_CALLER_MODEL)
 
         if not os.environ.get("HUME_API_KEY") and tts_provider is None and coach_adapter_factory is None:
             raise RuntimeError(
@@ -91,6 +91,9 @@ class LiveAudioSandboxEnvironment:
         store = LocalFilesystemStore(session_dir.parent, public_base_url="http://localhost")
         scenario = example.payload.get("scenario", example.payload)
 
+        # Fresh client per rollout so _usage is isolated (no cross-rollout accumulation).
+        llm_client = self._injected_llm_client or make_caller_client(self._caller_model)
+
         tts = self._tts_provider or get_default_provider()
         if tts is None:
             raise RuntimeError("LiveAudioSandboxEnvironment requires a TTSProvider")
@@ -109,7 +112,7 @@ class LiveAudioSandboxEnvironment:
         caller = EvalCallerParticipant(
             scenario=scenario,
             tts=tts,
-            llm_client=self._llm_client,
+            llm_client=llm_client,
             max_turns=self._customer_max_turns,
         )
 
@@ -117,6 +120,17 @@ class LiveAudioSandboxEnvironment:
         env_overrides = {k: v for k, v in self.model_slots.items()}
         config = _minimal_config(env_overrides)
         backend = create_backend(config)
+
+        log.info(
+            "[%s] starting rollout: backend_type=%s caller_model=%s "
+            "anthropic_key=%s hume_key=%s gemini_key=%s",
+            session_id,
+            config.backend_type,
+            self._caller_model,
+            bool(os.environ.get("ANTHROPIC_API_KEY")),
+            bool(os.environ.get("HUME_API_KEY")),
+            bool(os.environ.get("GEMINI_API_KEY")),
+        )
 
         error: str | None = None
         try:
@@ -135,6 +149,7 @@ class LiveAudioSandboxEnvironment:
                 )
         except Exception as exc:
             error = f"{type(exc).__name__}: {exc}"
+            log.error("[%s] rollout failed: %s", session_id, error)
             traceback.print_exc(file=sys.stderr)
 
         provenance = {
@@ -149,14 +164,36 @@ class LiveAudioSandboxEnvironment:
         }
         (session_dir / "provenance.json").write_text(json.dumps(provenance, indent=2) + "\n")
 
+        # Wrapper clients track usage on their own _usage dict.
+        # EvalCallerParticipant._usage only updates on the legacy Anthropic SDK
+        # fallback path — check both and take whichever is non-zero.
+        wrapper_usage = getattr(llm_client, "_usage", {})
         caller_usage = caller._usage  # noqa: SLF001
+        llm_usage = wrapper_usage if any(wrapper_usage.values()) else caller_usage
         token_usage: dict[str, int] = {
-            "customer_prompt_tokens": caller_usage.get("prompt_tokens", 0),
-            "customer_completion_tokens": caller_usage.get("completion_tokens", 0),
+            "customer_prompt_tokens": llm_usage.get("prompt_tokens", 0),
+            "customer_completion_tokens": llm_usage.get("completion_tokens", 0),
         }
         token_usage["total_tokens"] = sum(token_usage.values())
 
         completed = datetime.now()
+        duration_s = (completed - started).total_seconds()
+
+        # Log key outcome artifacts for post-run debugging
+        transcript_path = session_dir / "transcript.jsonl"
+        audio_path = session_dir / "audio.wav"
+        transcript_lines = len(transcript_path.read_text().splitlines()) if transcript_path.exists() else 0
+        audio_bytes = audio_path.stat().st_size if audio_path.exists() else 0
+        log.info(
+            "[%s] rollout done in %.1fs: status=%s transcript_lines=%d audio_bytes=%d tokens=%s",
+            session_id,
+            duration_s,
+            "error" if error else "ok",
+            transcript_lines,
+            audio_bytes,
+            token_usage if token_usage["total_tokens"] > 0 else "none",
+        )
+
         return RolloutResult(
             example_id=example.id,
             target_name=self.name,
@@ -164,7 +201,7 @@ class LiveAudioSandboxEnvironment:
             status="error" if error else "ok",
             started_at=started,
             completed_at=completed,
-            duration_ms=int((completed - started).total_seconds() * 1000),
+            duration_ms=int(duration_s * 1000),
             artifacts_dir=session_dir,
             error=error,
             payload={"tts_provider": getattr(tts, "name", "unknown")},

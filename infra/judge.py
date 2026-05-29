@@ -51,7 +51,7 @@ vllm_cache_vol = modal.Volume.from_name("vllm-cache", create_if_missing=True)
 
 # True  = faster cold start, lower throughput (good for dev iteration)
 # False = slower cold start, higher throughput (good for CI/eval batches)
-FAST_BOOT = False
+FAST_BOOT = True
 
 # ---------------------------------------------------------------------------
 # App
@@ -65,7 +65,7 @@ VLLM_PORT = 8000
 
 @app.function(
     image=vllm_image,
-    gpu="H200:1",
+    gpu="H100:1",
     # Release GPU 30 seconds after the last request.
     # Enough buffer for back-to-back calls in a single eval run.
     # Cold start is ~25s from cache — cheaper to restart than idle.
