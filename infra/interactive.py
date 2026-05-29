@@ -122,6 +122,15 @@ class InteractiveServer:
         return web
 
     async def _handle_session(self, ws) -> None:
+        import structlog as _structlog
+        _log = _structlog.get_logger(__name__)
+        try:
+            await self._run_session(ws)
+        except Exception as exc:
+            _log.error("ws.session_error", error=str(exc), exc_info=True)
+            raise
+
+    async def _run_session(self, ws) -> None:
         await ws.accept()
 
         # Handshake: {"type": "start", "session_id": "..."}
@@ -178,7 +187,6 @@ class InteractiveServer:
                     elif msg.get("text"):
                         ctrl = json.loads(msg["text"])
                         if ctrl.get("type") == "inject":
-                            # inject_speech: not supported by Moshi, logged server-side
                             pass
         except Exception:
             pass
