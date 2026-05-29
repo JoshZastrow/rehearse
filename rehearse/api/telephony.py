@@ -50,7 +50,7 @@ async def _inference_ready(endpoint: str) -> bool:
     if not endpoint:
         return True
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=5.0) as client:
             resp = await client.get(_health_url(endpoint))
         return resp.status_code == 200
     except Exception:

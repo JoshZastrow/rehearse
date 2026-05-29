@@ -89,11 +89,10 @@ MINUTES = 60
     scaledown_window=3 * MINUTES,
     timeout=30 * MINUTES,
     volumes={"/root/.cache/huggingface": hf_cache_vol},
-    enable_memory_snapshot=True,
 )
 class InteractiveServer:
 
-    @modal.enter(snap=True)
+    @modal.enter()
     def load(self) -> None:
         sys.path.insert(0, "/app")
         from rehearse.backends.interactive.loader import load_models  # type: ignore[import]
