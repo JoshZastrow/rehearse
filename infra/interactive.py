@@ -56,19 +56,19 @@ interactive_image = (
         "pip install 'moshi @ git+https://github.com/kyutai-labs/moshi.git#subdirectory=moshi'"
     )
     .env({"HF_XET_HIGH_PERFORMANCE": "1"})
+    # Mount rehearse source so loader.py is importable inside the container.
+    # add_local_dir replaces the deprecated modal.Mount API (Modal >= 1.0).
+    .add_local_dir(
+        str(Path(__file__).parents[1] / "rehearse"),
+        remote_path="/app/rehearse",
+    )
 )
 
 # ---------------------------------------------------------------------------
-# Volumes and mounts
+# Volumes
 # ---------------------------------------------------------------------------
 
 hf_cache_vol = modal.Volume.from_name("huggingface-cache", create_if_missing=True)
-
-# Mount the rehearse source so loader.py is importable inside the container.
-rehearse_src = modal.Mount.from_local_dir(
-    str(Path(__file__).parents[1] / "rehearse"),
-    remote_path="/app/rehearse",
-)
 
 # ---------------------------------------------------------------------------
 # App
@@ -89,7 +89,6 @@ MINUTES = 60
     scaledown_window=5 * MINUTES,
     timeout=30 * MINUTES,
     volumes={"/root/.cache/huggingface": hf_cache_vol},
-    mounts=[rehearse_src],
 )
 class InteractiveServer:
 
