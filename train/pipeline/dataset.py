@@ -6,12 +6,12 @@ audio.json annotation, computes duration for each, and writes a manifest
 in the same format as DailyTalk's dailytalk.jsonl.
 
 ── Usage ────────────────────────────────────────────────────────────────────
-    python train/components/build_manifest.py \\
+    python train/pipeline/dataset.py \\
         sessions_root=/path/to/sessions \\
         out=/path/to/sessions.jsonl
 
     # Only include sessions that already have audio.json annotations:
-    python train/components/build_manifest.py \\
+    python train/pipeline/dataset.py \\
         sessions_root=/path/to/sessions \\
         out=/path/to/sessions.jsonl \\
         require_annotation=true
@@ -125,10 +125,18 @@ def _run(config: ManifestConfig) -> None:
                 remote_ann = f"/data/data/sessions/{session_id}/audio.json"
                 files.append((remote_ann, ann.read_bytes()))
             rewritten_entries.append({"path": remote_wav, "duration": entry["duration"]})
-        manifest_content = "\n".join(json.dumps(e) for e in rewritten_entries).encode()
-        from rehearse.train.modal import push_data
-        push_data(files, manifest_content)
-        logger.info("Pushed %d files to Modal Volume 'rehearse-training'", len(files))
+        manifest_content = (
+            "\n".join(json.dumps(e) for e in rewritten_entries) + "\n"
+        ).encode()
+        try:
+            from rehearse.train.modal import push_data
+            push_data(files, manifest_content)
+            logger.info("Pushed %d files to Modal Volume 'rehearse-training'", len(files))
+        except Exception as exc:
+            logger.error(
+                "Failed to push to Modal Volume (is modal authenticated? run `modal token new`): %s",
+                exc,
+            )
 
 
 if __name__ == "__main__":

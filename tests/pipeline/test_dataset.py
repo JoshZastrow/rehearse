@@ -50,6 +50,7 @@ def test_push_to_volume_calls_push_data(sessions_dir, tmp_path, monkeypatch):
     assert any("/data/data/sessions/session_a/audio.wav" in p for p in remote_paths)
     assert any("/data/data/sessions/session_b/audio.wav" in p for p in remote_paths)
     assert any("/data/data/sessions/session_a/audio.json" in p for p in remote_paths)
+    assert any("/data/data/sessions/session_b/audio.json" in p for p in remote_paths)
 
     rewritten = [json.loads(line) for line in manifest_content.decode().splitlines() if line]
     assert all(e["path"].startswith("/data/data/sessions/") for e in rewritten)
