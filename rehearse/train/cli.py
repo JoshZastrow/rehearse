@@ -3,11 +3,12 @@ Training CLI for moshi fine-tuning.
 
 Wraps torchrun with a chz-based configuration layer. Accepts a base YAML
 and override flags; merges them and delegates to lib/moshi-finetune/train.py.
+By default runs on Modal A10G GPU; set with_modal=false for local torchrun.
 
 ── Usage ──────────────────────────────────────────────────────────────────────
     rehearse-train
-    rehearse-train run_dir=runs/my-run max_steps=500 gpus=4
-    rehearse-train config=rehearse/models/moshi_7B/config.yaml
+    rehearse-train run_dir=runs/my-run max_steps=500
+    rehearse-train with_modal=false run_dir=runs/local max_steps=5
     rehearse-train dry_run=true
 """
 from __future__ import annotations
@@ -66,6 +67,9 @@ class TrainConfig:
     dry_run: bool = False
     """Print the resolved torchrun command without executing."""
 
+    with_modal: bool = True
+    """Run training on Modal A10G GPU (default). Set to false for local torchrun (requires CUDA)."""
+
 
 def _set_nested(d: dict, keys: tuple[str, ...], value: object) -> None:
     for k in keys[:-1]:
@@ -116,11 +120,18 @@ def _run(config: TrainConfig) -> None:
         temp_yaml,
     ]
     if config.dry_run:
+        route = "Modal (A10G GPU)" if config.with_modal else "local torchrun"
+        print(f"Routing: {route}")
         print(f"PYTHONPATH={finetune_dir} {' '.join(cmd)}")
         print(f"\nResolved config written to: {temp_yaml}")
         return
-    env = {**os.environ, "PYTHONPATH": finetune_dir}
-    subprocess.run(cmd, check=True, env=env)
+    if config.with_modal:
+        from rehearse.train.modal import run_training
+        config_dict = yaml.safe_load(Path(temp_yaml).read_text())
+        run_training(config_dict)
+    else:
+        env = {**os.environ, "PYTHONPATH": finetune_dir}
+        subprocess.run(cmd, check=True, env=env)
 
 
 def main() -> None:

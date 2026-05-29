@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from rehearse.train.cli import TrainConfig, _merge_yaml
+from rehearse.train.cli import TrainConfig, _merge_yaml, _run
 
 
 @pytest.fixture
@@ -111,3 +111,39 @@ def test_merge_yaml_output_is_valid_yaml(base_yaml):
     out = _merge_yaml(tc)
     result = yaml.safe_load(Path(out).read_text())
     assert isinstance(result, dict)
+
+
+def test_run_routes_to_modal_when_flag_true(base_yaml, monkeypatch):
+    """_run calls modal.run_training when with_modal=True."""
+    called = []
+    monkeypatch.setattr("rehearse.train.modal.run_training", lambda d: called.append(d))
+    tc = TrainConfig(config=base_yaml, run_dir="runs/test", with_modal=True)
+    _run(tc)
+    assert len(called) == 1
+    assert called[0]["run_dir"] == "runs/test"
+
+
+def test_run_routes_to_local_when_flag_false(base_yaml, monkeypatch):
+    """_run calls subprocess.run when with_modal=False."""
+    calls = []
+    monkeypatch.setattr("subprocess.run", lambda cmd, **kw: calls.append(cmd))
+    tc = TrainConfig(config=base_yaml, run_dir="runs/test", with_modal=False)
+    _run(tc)
+    assert len(calls) == 1
+    assert calls[0][0] == "torchrun"
+
+
+def test_dry_run_shows_routing_modal(base_yaml, capsys):
+    """dry_run prints routing decision for Modal."""
+    tc = TrainConfig(config=base_yaml, run_dir="runs/test", with_modal=True, dry_run=True)
+    _run(tc)
+    out = capsys.readouterr().out
+    assert "Modal" in out
+
+
+def test_dry_run_shows_routing_local(base_yaml, capsys):
+    """dry_run prints routing decision for local torchrun."""
+    tc = TrainConfig(config=base_yaml, run_dir="runs/test", with_modal=False, dry_run=True)
+    _run(tc)
+    out = capsys.readouterr().out
+    assert "local" in out
