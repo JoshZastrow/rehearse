@@ -133,6 +133,22 @@ def _run(cmd: list[str], cwd: Path | None = None) -> int:
     return result.returncode
 
 
+def _modal_token() -> str:
+    """Return the active Modal token ID from `modal token info`, or empty string."""
+    try:
+        result = subprocess.run(
+            ["modal", "token", "info"],
+            capture_output=True, text=True,
+        )
+        if result.returncode == 0:
+            for line in result.stdout.splitlines():
+                if line.startswith("Token:"):
+                    return line.split(":", 1)[1].strip()
+    except FileNotFoundError:
+        pass
+    return ""
+
+
 def _repo_root() -> Path:
     """Find the project root (directory containing pyproject.toml)."""
     here = Path(__file__).resolve()
@@ -244,11 +260,23 @@ def _collect_interactive(existing: dict[str, str], force: bool, env_only: bool, 
                 print(_err("modal deploy failed. Set INTERACTIVE_MODAL_ENDPOINT manually in .env."))
                 updates["INTERACTIVE_MODAL_ENDPOINT"] = current_endpoint
             else:
-                # modal deploy prints the URL; ask the user to copy it
-                print()
+                # Try to resolve the endpoint automatically via `modal app url`
+                auto_url = ""
+                try:
+                    r = subprocess.run(
+                        ["modal", "app", "url", "rehearse-interactive"],
+                        capture_output=True, text=True,
+                    )
+                    if r.returncode == 0 and r.stdout.strip():
+                        raw = r.stdout.strip().rstrip("/")
+                        auto_url = raw.replace("https://", "wss://").replace("http://", "ws://") + "/ws"
+                        print(_ok(f"Endpoint resolved automatically: {auto_url}"))
+                except FileNotFoundError:
+                    pass
+
                 endpoint = _ask(
-                    "Paste the wss:// endpoint printed above",
-                    default=current_endpoint,
+                    "wss:// endpoint" if not auto_url else "Confirm or override endpoint",
+                    default=auto_url or current_endpoint,
                 )
                 updates["INTERACTIVE_MODAL_ENDPOINT"] = endpoint
 
@@ -287,7 +315,14 @@ def _setup_judge(existing: dict[str, str], env_only: bool, root: Path) -> dict[s
 
     print()
     vllm_url = _ask("Paste the VLLM_BASE_URL printed above", default=current_url)
-    vllm_key = _ask("VLLM_API_KEY (your Modal token)", default=existing.get("VLLM_API_KEY", ""), secret=True)
+
+    auto_token = _modal_token()
+    current_key = existing.get("VLLM_API_KEY", "")
+    if auto_token and not current_key:
+        print(_ok(f"Modal token detected automatically: {auto_token[:12]}..."))
+        vllm_key = auto_token
+    else:
+        vllm_key = _ask("VLLM_API_KEY (Modal token)", default=current_key or auto_token, secret=True)
 
     updates: dict[str, str] = {}
     if vllm_url:
