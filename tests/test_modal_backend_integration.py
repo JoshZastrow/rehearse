@@ -15,14 +15,17 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import os
 import socket
 import struct
 import threading
 import xml.etree.ElementTree as ET
 from datetime import UTC, datetime
+from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import pytest
+import websockets
 import websockets.asyncio.server
 from fastapi.testclient import TestClient
 
@@ -31,6 +34,17 @@ from rehearse.audio.mulaw import encode_pcm16
 from rehearse.backends.interactive.modal_backend import ModalInteractiveBackend
 from rehearse.config import RuntimeConfig
 from rehearse.types import Session
+
+
+def _modal_endpoint() -> str:
+    """Read INTERACTIVE_MODAL_ENDPOINT from .env or environment."""
+    env_path = Path(__file__).parents[1] / ".env"
+    if env_path.exists():
+        for line in env_path.read_text().splitlines():
+            line = line.strip()
+            if line.startswith("INTERACTIVE_MODAL_ENDPOINT="):
+                return line.split("=", 1)[1].strip().strip('"').strip("'")
+    return os.getenv("INTERACTIVE_MODAL_ENDPOINT", "")
 
 
 def _free_port() -> int:
@@ -275,3 +289,52 @@ def test_full_twilio_webhook_flow(tmp_path, monkeypatch):
     finally:
         stop.set()
         server_thread.join(timeout=3.0)
+
+
+@pytest.mark.skipif(
+    not _modal_endpoint(),
+    reason="INTERACTIVE_MODAL_ENDPOINT not set — skipping live Modal test",
+)
+def test_live_modal_server_audio_roundtrip():
+    """Connect to the real deployed Modal inference server and verify audio comes back.
+
+    Requires INTERACTIVE_MODAL_ENDPOINT set in .env. Exercises the full wire
+    protocol: WebSocket connect → {"type":"start"} handshake → PCM16 audio in
+    → PCM16 audio frames back.
+
+    Skipped automatically in CI unless the secret is present.
+    """
+
+    async def _run() -> list[bytes]:
+        endpoint = _modal_endpoint()
+        session_id = "live-modal-test"
+        audio_frames: list[bytes] = []
+
+        async with websockets.connect(endpoint, open_timeout=60.0) as ws:
+            await ws.send(json.dumps({"type": "start", "session_id": session_id}))
+
+            silence = struct.pack("<320h", *([0] * 320))
+            deadline = asyncio.get_event_loop().time() + 30.0
+
+            async def _send_silence() -> None:
+                while asyncio.get_event_loop().time() < deadline:
+                    await ws.send(silence)
+                    await asyncio.sleep(0.02)
+
+            send_task = asyncio.create_task(_send_silence())
+            try:
+                async for msg in ws:
+                    if isinstance(msg, bytes):
+                        audio_frames.append(msg)
+                        if len(audio_frames) >= 3:
+                            break
+                    if asyncio.get_event_loop().time() > deadline:
+                        break
+            finally:
+                send_task.cancel()
+
+        return audio_frames
+
+    frames = asyncio.run(_run())
+    assert frames, "no audio frames received from live Modal server"
+    assert all(isinstance(f, bytes) for f in frames)

@@ -44,7 +44,7 @@ async def _inference_ready(endpoint: str) -> bool:
         return True
     health_url = endpoint.replace("wss://", "https://").replace("ws://", "http://").replace("/ws", "/health")
     try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.get(health_url)
         return resp.status_code == 200
     except Exception:

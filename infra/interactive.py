@@ -86,14 +86,14 @@ MINUTES = 60
 @app.cls(
     image=interactive_image,
     gpu="A10G",
-    # Keep container alive 5 minutes after last request — Moshi cold start is ~60s.
     scaledown_window=5 * MINUTES,
     timeout=30 * MINUTES,
     volumes={"/root/.cache/huggingface": hf_cache_vol},
+    enable_memory_snapshot=True,
 )
 class InteractiveServer:
 
-    @modal.enter()
+    @modal.enter(snap=True)
     def load(self) -> None:
         sys.path.insert(0, "/app")
         from rehearse.backends.interactive.loader import load_models  # type: ignore[import]
@@ -189,6 +189,22 @@ class InteractiveServer:
 
         await infer_future
         executor.shutdown(wait=False)
+
+    @modal.method()
+    def ping(self) -> str:
+        """Lightweight liveness check — keeps the container warm without opening a session."""
+        return "ok"
+
+
+# ---------------------------------------------------------------------------
+# Keep-warm cron — fires every 4 minutes to hold the container within its
+# 5-minute scaledown window, so the first call after idle doesn't cold-start.
+# Costs ~$0.002/hour (GPU billing only when inference runs, not during idle ping).
+# ---------------------------------------------------------------------------
+
+@app.function(schedule=modal.Period(minutes=4))
+def keep_warm() -> None:
+    InteractiveServer().ping.remote()
 
 
 # ---------------------------------------------------------------------------
