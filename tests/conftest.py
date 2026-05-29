@@ -25,10 +25,6 @@ from unittest.mock import MagicMock
 import pytest
 import requests
 
-# Mock the modal package before any imports of rehearse.train.modal
-_modal_mock = MagicMock()
-sys.modules["modal"] = _modal_mock
-
 REPO_ROOT = Path(__file__).parent.parent
 HONCHO_DIR = REPO_ROOT / "lib" / "honcho"
 HONCHO_PORT = 8002
