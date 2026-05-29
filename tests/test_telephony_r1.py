@@ -607,7 +607,7 @@ def test_voice_wait_hangs_up_after_max_attempts(
 
     # Simulate Modal never becoming ready
     async def _never_ready(_): return False
-    monkeypatch.setattr(telephony_module, "_modal_ready", _never_ready)
+    monkeypatch.setattr(telephony_module, "_inference_ready", _never_ready)
 
     # Simulate all 30 attempts having elapsed
     resp = client.post(
@@ -620,7 +620,7 @@ def test_voice_wait_hangs_up_after_max_attempts(
     assert "unable to connect" in resp.text.lower()
 
 
-def test_voice_wait_connects_stream_when_modal_ready(
+def test_voice_wait_connects_stream_when_inference_ready(
     config: RuntimeConfig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """When Modal /health returns 200, /twilio/voice/wait returns <Connect><Stream>."""
@@ -634,7 +634,7 @@ def test_voice_wait_connects_stream_when_modal_ready(
     client = TestClient(app)
 
     async def _always_ready(_): return True
-    monkeypatch.setattr(telephony_module, "_modal_ready", _always_ready)
+    monkeypatch.setattr(telephony_module, "_inference_ready", _always_ready)
 
     resp = client.post(
         "/twilio/voice/wait",

@@ -38,7 +38,7 @@ from rehearse.types import ParticipantConfig, Session
 log = structlog.get_logger(__name__)
 
 
-async def _modal_ready(endpoint: str) -> bool:
+async def _inference_ready(endpoint: str) -> bool:
     """Return True if the Modal inference server responds 200 on /health."""
     if not endpoint:
         return True
@@ -217,7 +217,7 @@ def mount_twilio_routes(
                 "</Response>",
                 media_type="application/xml",
             )
-        if await _modal_ready(config.interactive_modal_endpoint):
+        if await _inference_ready(config.interactive_modal_endpoint):
             log.info("twilio.voice.wait.ready", session_id=session_id, attempt=attempt)
             return PlainTextResponse(_stream_twiml(config, session_id), media_type="application/xml")
         log.debug("twilio.voice.wait.polling", session_id=session_id, attempt=attempt)

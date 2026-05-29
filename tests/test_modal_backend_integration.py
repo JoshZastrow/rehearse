@@ -206,7 +206,7 @@ def test_full_twilio_webhook_flow(tmp_path, monkeypatch):
         async def _noop_prewarm(_endpoint: str) -> None:
             pass
 
-        monkeypatch.setattr(telephony_module, "_modal_ready", _always_ready)
+        monkeypatch.setattr(telephony_module, "_inference_ready", _always_ready)
         monkeypatch.setattr(telephony_module, "_prewarm_modal", _noop_prewarm)
 
         app = create_app(config)
