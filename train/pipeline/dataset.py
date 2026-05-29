@@ -16,6 +16,9 @@ in the same format as DailyTalk's dailytalk.jsonl.
         out=/path/to/sessions.jsonl \\
         require_annotation=true
 
+    # Push data to Modal Volume after building (default: true):
+    python train/pipeline/dataset.py sessions_root=sessions/ out=runs/sessions.jsonl
+
 ── Output format ────────────────────────────────────────────────────────────
     Each line: {"path": "/abs/path/to/audio.wav", "duration": 12.34}
 
@@ -49,6 +52,12 @@ class ManifestConfig:
 
     min_duration: float = 1.0
     """Skip audio files shorter than this many seconds."""
+
+    push_to_volume: bool = True
+    """After writing the manifest, sync session audio files to Modal Volume
+    'rehearse-training'. The local manifest is unchanged; a rewritten copy
+    with /data/data/... paths is written to the Volume at
+    /data/data/sessions.jsonl."""
 
     verbose: bool = False
 
@@ -102,6 +111,24 @@ def _run(config: ManifestConfig) -> None:
             fh.write(json.dumps(entry) + "\n")
 
     logger.info("Wrote %s", config.out)
+
+    if config.push_to_volume and entries:
+        files: list[tuple[str, bytes]] = []
+        rewritten_entries = []
+        for entry in entries:
+            wav = Path(entry["path"])
+            session_id = wav.parent.name
+            remote_wav = f"/data/data/sessions/{session_id}/audio.wav"
+            files.append((remote_wav, wav.read_bytes()))
+            ann = wav.with_suffix(".json")
+            if ann.exists():
+                remote_ann = f"/data/data/sessions/{session_id}/audio.json"
+                files.append((remote_ann, ann.read_bytes()))
+            rewritten_entries.append({"path": remote_wav, "duration": entry["duration"]})
+        manifest_content = "\n".join(json.dumps(e) for e in rewritten_entries).encode()
+        from rehearse.train.modal import push_data
+        push_data(files, manifest_content)
+        logger.info("Pushed %d files to Modal Volume 'rehearse-training'", len(files))
 
 
 if __name__ == "__main__":
