@@ -132,6 +132,36 @@ class ProsodyEntry(BaseModel):
     scores: ProsodyScores
 
 
+# ─── Diarization output schema ───────────────────────────────────────────────
+
+
+class DiarizationSegment(BaseModel):
+    """One speaker segment from diarize.py.
+
+    Example:
+        {"speaker": "SPEAKER_00", "start": 0.0, "end": 2.3}
+    """
+
+    speaker: str
+    """Speaker label, e.g. "SPEAKER_00" or "SPEAKER_01"."""
+
+    start: float
+    """Segment start time in seconds."""
+
+    end: float
+    """Segment end time in seconds."""
+
+
+class DiarizationOutput(BaseModel):
+    """Schema for audio_segments.json produced by diarize.py.
+
+    Example:
+        {"segments": [{"speaker": "SPEAKER_00", "start": 0.0, "end": 2.3}, ...]}
+    """
+
+    segments: list[DiarizationSegment]
+
+
 # ─── Annotation output schema ─────────────────────────────────────────────────
 
 
