@@ -219,44 +219,33 @@ rehearse/
 ### Prerequisites
 
 - Python 3.11+
-- [`uv`](https://docs.astral.sh/uv/)
-- [`ngrok`](https://ngrok.com/)
+- [`uv`](https://docs.astral.sh/uv/) — fast Python package manager
+- [`ngrok`](https://ngrok.com/) — tunnel for Twilio webhooks (free tier works)
 - [Twilio](https://twilio.com) account with a phone number
 - [Hume AI](https://hume.ai) account (EVI voice + prosody)
 - [Anthropic](https://console.anthropic.com) API key
 
+**For the interactive backend or eval judges (optional):**
+- [Modal](https://modal.com) account — GPU inference and LLM judges run on Modal. Free tier is sufficient for development.
+
 ### Setup
 
 ```bash
-git clone https://github.com/yourusername/rehearse.git
+git clone https://github.com/JoshZastrow/rehearse.git
 cd rehearse
-make setup
+make setup       # install deps + create .env from template
+uv run rehearse-init  # interactive wizard: API keys, backend, infra
 ```
 
-Configure `.env`:
+`rehearse-init` walks through every required and optional setting and writes `.env` for you. It covers:
 
-```bash
-TWILIO_ACCOUNT_SID=...
-TWILIO_AUTH_TOKEN=...
-TWILIO_PHONE_NUMBER=+1...
-HUME_API_KEY=...
-HUME_CONFIG_ID=...
-HUME_CLM_SECRET=...
-ANTHROPIC_API_KEY=...
-```
+- Twilio, Hume, and Anthropic API keys
+- Backend selection (managed / pipeline / interactive)
+- Optional: Modal judge deploy (`infra/judge.py`) — needed for live evals
+- Optional: Modal interactive backend deploy (`infra/interactive.py`) — full-duplex Moshi on A10G GPU
+- Optional: caller memory setup (self-hosted or cloud)
 
-**Caller memory** (optional — new callers always hear the full consent prompt):
-
-```bash
-# Option A — Honcho cloud (recommended for production)
-HONCHO_API_KEY=<your-key>
-
-# Option B — Self-hosted
-make setup-honcho
-HONCHO_BASE_URL=http://localhost:8001
-
-# Option C — No memory (leave both unset)
-```
+Re-run any time with `--force` to update values or `--env-only` to skip deploys.
 
 **Sync Hume EVI configs** (voice, prompt, and timeouts are declared in code):
 
@@ -268,7 +257,7 @@ uv run rehearse-hume diff   # see what's out of sync before applying
 **Start:**
 
 ```bash
-make serve   # opens ngrok tunnel, syncs Hume configs, starts server
+make serve   # opens ngrok tunnel, starts server (+ Honcho if self-hosted)
 ```
 
 Text your Twilio number. Answer the call.
