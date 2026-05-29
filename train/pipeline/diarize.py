@@ -66,8 +66,9 @@ image = (
     modal.Image.debian_slim(python_version="3.12")
     .apt_install("ffmpeg")
     .pip_install(
-        "torch",
-        "torchaudio",
+        "numpy<2",
+        "torch==2.2.2",
+        "torchaudio==2.2.2",
         "pyannote.audio==3.3.2",
         "sphn==0.1.12",
         # chz and pydantic are needed so Modal can import this module remotely
@@ -98,6 +99,18 @@ def diarize_remote(audio_bytes: bytes, num_speakers: int = 2) -> list[dict]:
         List of segments: [{"speaker": "SPEAKER_00", "start": 0.0, "end": 2.3}, ...]
     """
     import torch
+    import pyannote.audio.core.pipeline as _pap
+
+    # pyannote.audio==3.3.2 calls hf_hub_download(use_auth_token=...) which was
+    # removed in huggingface_hub>=0.23.0. Patch pyannote's module-level reference
+    # to remap use_auth_token → token before the validator runs.
+    _orig_dl = _pap.hf_hub_download
+    def _compat_dl(*args, **kwargs):
+        if "use_auth_token" in kwargs:
+            kwargs.setdefault("token", kwargs.pop("use_auth_token"))
+        return _orig_dl(*args, **kwargs)
+    _pap.hf_hub_download = _compat_dl
+
     from pyannote.audio import Pipeline
 
     device = torch.device("cuda:0")
