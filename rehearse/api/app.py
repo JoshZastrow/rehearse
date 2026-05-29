@@ -6,9 +6,11 @@ handlers, and static artifact serving. It does not hold core business logic.
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable, Coroutine
 from contextlib import asynccontextmanager
+from typing import Any
 
 import structlog
 from anthropic import AsyncAnthropic
@@ -17,12 +19,52 @@ from fastapi.staticfiles import StaticFiles
 
 from rehearse.agents import build_clm_responder, mount_clm_routes
 from rehearse.agents.clm import validate_anthropic_credentials
+from rehearse.api.telephony import TwilioRestClient, mount_twilio_routes
+from rehearse.api.viewer import mount_viewer_routes
 from rehearse.config import RuntimeConfig
 from rehearse.session.finalize_sweeper import FinalizeSweeper
 from rehearse.session.session import SessionOrchestrator
 from rehearse.storage import LocalFilesystemStore
-from rehearse.api.telephony import TwilioRestClient, mount_twilio_routes
-from rehearse.api.viewer import mount_viewer_routes
+
+# Backends that use the CLM webhook (Anthropic/LiteLLM required).
+# interactive/moshi handle the full conversation loop via Moshi — no CLM calls.
+_CLM_BACKENDS: frozenset[str] = frozenset({"managed", "pipeline"})
+
+
+async def _validate_anthropic(config: RuntimeConfig) -> None:
+    if config.anthropic_api_key:
+        await validate_anthropic_credentials(
+            AsyncAnthropic(api_key=config.anthropic_api_key),
+            config.anthropic_model,
+        )
+
+
+async def _load_interactive_models(config: RuntimeConfig) -> None:
+    if config.interactive_modal_endpoint:
+        structlog.get_logger(__name__).info(
+            "startup.handler.skipped",
+            handler="interactive_models",
+            reason="using_modal_endpoint",
+        )
+        return
+    from rehearse.backends.interactive.loader import load_models
+    await asyncio.get_running_loop().run_in_executor(
+        None,
+        lambda: load_models(
+            config.interactive_checkpoint_path,
+            config.interactive_model_repo,
+            config.interactive_device,
+        ),
+    )
+
+
+# Each entry: (handler_name, set_of_applicable_backend_types, async_handler_fn)
+_STARTUP_HANDLERS: list[
+    tuple[str, frozenset[str], Callable[[RuntimeConfig], Coroutine[Any, Any, None]]]
+] = [
+    ("anthropic_credentials", _CLM_BACKENDS, _validate_anthropic),
+    ("interactive_models", frozenset({"interactive", "moshi"}), _load_interactive_models),
+]
 
 
 def _configure_logging(level: str) -> None:
@@ -63,28 +105,18 @@ def create_app(config: RuntimeConfig | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
-        """Validate provider credentials, then run background tasks for the app."""
-        if config.anthropic_api_key:
-            await validate_anthropic_credentials(
-                AsyncAnthropic(api_key=config.anthropic_api_key),
-                config.anthropic_model,
-            )
-        structlog.get_logger(__name__).info(
+        log = structlog.get_logger(__name__)
+        for name, backends, handler in _STARTUP_HANDLERS:
+            if config.backend_type in backends:
+                log.info("startup.handler.running", handler=name, backend=config.backend_type)
+                await handler(config)
+            else:
+                log.info("startup.handler.skipped", handler=name, backend=config.backend_type)
+        log.info(
             "rehearse.startup",
             backend_type=config.backend_type,
             public_base_url=config.public_base_url,
         )
-        if config.backend_type in ("interactive", "moshi"):
-            import asyncio
-            from rehearse.backends.interactive.loader import load_models
-            await asyncio.get_running_loop().run_in_executor(
-                None,
-                lambda: load_models(
-                    config.interactive_checkpoint_path,
-                    config.interactive_model_repo,
-                    config.interactive_device,
-                ),
-            )
         if config.finalize_sweep_enabled:
             # Crash recovery: any session still `in_progress` on disk has no
             # in-memory handle (we just started), so its Twilio stream is
