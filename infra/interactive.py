@@ -106,9 +106,15 @@ class InteractiveServer:
 
     @modal.asgi_app()
     def serve(self):
-        from fastapi import FastAPI, WebSocket
+        from fastapi import FastAPI, Response, WebSocket
 
         web = FastAPI()
+
+        @web.get("/health")
+        async def health() -> Response:
+            """Lightweight wake-up target. Hitting this starts the container cold-start
+            clock without opening a full inference session."""
+            return Response(status_code=200)
 
         @web.websocket("/ws")
         async def ws_endpoint(ws: WebSocket) -> None:

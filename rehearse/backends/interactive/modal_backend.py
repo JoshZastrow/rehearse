@@ -50,10 +50,36 @@ class ModalInteractiveBackend:
     async def __aexit__(self, *args: object) -> None:
         await self.close()
 
+    _CONNECT_ATTEMPTS = 18   # 18 × 5s = 90s total — covers Modal's ~60s GPU cold start
+    _CONNECT_RETRY_DELAY = 5.0  # seconds between retries
+
     async def start(self, session_id: str, bus: FrameBus) -> None:
         self._session_id = session_id
         self._bus = bus
-        self._ws = await websockets.connect(self._endpoint)
+        last_exc: Exception | None = None
+        for attempt in range(self._CONNECT_ATTEMPTS):
+            try:
+                self._ws = await websockets.connect(self._endpoint)
+                break
+            except Exception as exc:
+                last_exc = exc
+                log.warning(
+                    "modal_interactive_backend.connect_attempt_failed",
+                    session_id=session_id,
+                    attempt=attempt + 1,
+                    error=str(exc),
+                )
+                if attempt < self._CONNECT_ATTEMPTS - 1:
+                    await asyncio.sleep(self._CONNECT_RETRY_DELAY)
+        else:
+            log.error(
+                "modal_interactive_backend.connect_failed",
+                session_id=session_id,
+                endpoint=self._endpoint,
+                error=str(last_exc),
+            )
+            await bus.publish(EndOfCall(session_id=session_id, reason="error", ts=time.time()))
+            return
         await self._ws.send(json.dumps({"type": "start", "session_id": session_id}))
         self._recv_task = asyncio.create_task(self._recv_loop(), name=f"modal-recv-{session_id}")
         log.info("modal_interactive_backend.started", session_id=session_id, endpoint=self._endpoint)
@@ -61,6 +87,10 @@ class ModalInteractiveBackend:
     async def send_caller_audio(self, pcm16_16k: bytes) -> None:
         if self._ws:
             await self._ws.send(pcm16_16k)
+
+    async def say(self, request: object) -> None:
+        """Speaker protocol: delegates to inject_speech."""
+        await self.inject_speech(getattr(request, "text", str(request)))
 
     async def inject_speech(self, text: str) -> None:
         if self._ws:

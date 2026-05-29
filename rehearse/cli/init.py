@@ -259,7 +259,7 @@ def _collect_interactive(existing: dict[str, str], force: bool, env_only: bool, 
 
     if current_endpoint:
         print(_ok(f"Modal endpoint already set: {current_endpoint}"))
-        if not force:
+        if not force and not _confirm("Re-deploy interactive server?", default=False):
             return {"INTERACTIVE_MODAL_ENDPOINT": current_endpoint}
 
     print("  How should the interactive backend run?")

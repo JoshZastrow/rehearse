@@ -1,0 +1,37 @@
+name: modal-backend
+
+# Verifies that ModalInteractiveBackend satisfies the speaker protocol used by
+# PersonaSwapCoordinator and ConversationBackend. Runs on changes to any file
+# in the interactive backend stack or the session conversation layer.
+
+on:
+  pull_request:
+    paths:
+      - "rehearse/backends/interactive/**"
+      - "rehearse/backends/base.py"
+      - "rehearse/backends/factory.py"
+      - "rehearse/session/conversation.py"
+      - "rehearse/agents/persona_swap.py"
+      - "infra/interactive.py"
+      - "tests/test_modal_backend.py"
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run modal backend tests
+        run: uv run pytest tests/test_modal_backend.py -v

@@ -10,6 +10,8 @@ from __future__ import annotations
 import asyncio
 from typing import Protocol
 
+import httpx
+
 import structlog
 from fastapi import (
     BackgroundTasks,
@@ -34,6 +36,36 @@ from rehearse.session.session import SessionOrchestrator, TriggerEvent, utcnow
 from rehearse.types import ParticipantConfig, Session
 
 log = structlog.get_logger(__name__)
+
+
+async def _modal_ready(endpoint: str) -> bool:
+    """Return True if the Modal inference server responds 200 on /health."""
+    if not endpoint:
+        return True
+    health_url = endpoint.replace("wss://", "https://").replace("ws://", "http://").replace("/ws", "/health")
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            resp = await client.get(health_url)
+        return resp.status_code == 200
+    except Exception:
+        return False
+
+
+async def _prewarm_modal(endpoint: str) -> None:
+    """Fire a GET /health to the Modal inference server to start its cold-boot clock.
+
+    The WebSocket connect will still fail until the container is ready (~60s), but
+    ModalInteractiveBackend retries for ~90s, so starting the clock here covers the gap.
+    """
+    if not endpoint:
+        return
+    health_url = endpoint.replace("wss://", "https://").replace("ws://", "http://").replace("/ws", "/health")
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            await client.get(health_url)
+        log.info("modal.prewarm.sent", url=health_url)
+    except Exception as exc:
+        log.debug("modal.prewarm.failed", url=health_url, error=str(exc))
 
 
 class TelephonyClient(Protocol):
@@ -117,6 +149,7 @@ def mount_twilio_routes(
 
         async def _place() -> None:
             """Place the outbound call and attach its SID to the session."""
+            await _prewarm_modal(config.interactive_modal_endpoint)
             try:
                 call_sid = await client.place_call(From, voice_url, status_url)
                 await orchestrator.attach_call(handle.session_id, call_sid)
@@ -144,20 +177,40 @@ def mount_twilio_routes(
     @app.post("/twilio/voice/inbound")
     async def twilio_voice_inbound(
         request: Request,
+        background: BackgroundTasks,
         From: str = Form(...),
         CallSid: str = Form(""),
     ) -> Response:
         """Start a new session from a direct inbound phone call."""
         await _validate(request)
+        background.add_task(_prewarm_modal, config.interactive_modal_endpoint)
         trigger = TriggerEvent(from_number=From, body="<inbound-call>", received_at=utcnow())
         handle = await orchestrator.start(trigger)
         if CallSid:
             await orchestrator.attach_call(handle.session_id, CallSid)
         log.info("twilio.voice.inbound", session_id=handle.session_id, call_sid=CallSid)
+        if config.interactive_modal_endpoint:
+            twiml = _hold_twiml(config, handle.session_id, first=True)
+        else:
+            twiml = _stream_twiml(config, handle.session_id)
         return PlainTextResponse(
-            _stream_twiml(config, handle.session_id),
+            twiml,
             media_type="application/xml",
         )
+
+    @app.post("/twilio/voice/wait")
+    async def twilio_voice_wait(request: Request, session_id: str) -> Response:
+        """Poll Modal until the inference container is ready, then connect the stream.
+
+        Twilio calls this repeatedly via <Redirect> while the Modal GPU cold-starts.
+        Each iteration either connects the stream (Modal ready) or pauses 3s and loops.
+        """
+        await _validate(request)
+        if await _modal_ready(config.interactive_modal_endpoint):
+            log.info("twilio.voice.wait.ready", session_id=session_id)
+            return PlainTextResponse(_stream_twiml(config, session_id), media_type="application/xml")
+        log.debug("twilio.voice.wait.polling", session_id=session_id)
+        return PlainTextResponse(_hold_twiml(config, session_id, first=False), media_type="application/xml")
 
     @app.post("/twilio/status")
     async def twilio_status(
@@ -241,6 +294,22 @@ def mount_twilio_routes(
                 )
         except WebSocketDisconnect:
             log.info("media.disconnect", session_id=session_id)
+
+
+def _hold_twiml(config: RuntimeConfig, session_id: str, *, first: bool) -> str:
+    """TwiML that says a hold message (first call) or pauses silently, then redirects back."""
+    wait_url = f"{config.public_base_url}/twilio/voice/wait?session_id={session_id}"
+    hold = (
+        '<Say voice="alice">Just a moment while I connect you.</Say>'
+        if first
+        else "<Pause length=\"3\"/>"
+    )
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        f"<Response>{hold}"
+        f'<Redirect method="POST">{wait_url}</Redirect>'
+        "</Response>"
+    )
 
 
 def _stream_twiml(config: RuntimeConfig, session_id: str) -> str:
