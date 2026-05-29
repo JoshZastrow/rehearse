@@ -43,6 +43,7 @@ Annotate audio files with word-level transcripts using Whisper on Modal GPU.
 
 from __future__ import annotations
 
+import asyncio
 import gc
 import gzip
 import importlib
@@ -337,6 +338,51 @@ def _run(config: AnnotateConfig) -> None:
                 raise
             logger.exception("Error processing %s", path)
             err_path.touch()
+
+
+# ─── Async integration ───────────────────────────────────────────────────────
+
+
+async def annotate_session_async(
+    session_id: str,
+    audio_path: Path,
+    lang: str = "en",
+    whisper_model: str = "medium",
+    keep_silence: float = 0.5,
+) -> None:
+    """Annotate one session audio file asynchronously via Modal GPU.
+
+    Intended to be fired as an asyncio background task after session synthesis
+    completes. Spawns process_remote on Modal (non-blocking), awaits the result
+    in a thread executor so the event loop is not blocked, then writes audio.json
+    next to the WAV file.
+
+    Skips silently if audio.json already exists.
+    """
+    out_path = audio_path.with_suffix(".json")
+    if out_path.exists():
+        logger.debug("annotate_session_async: already annotated, skipping %s", session_id)
+        return
+
+    if not audio_path.exists():
+        logger.warning("annotate_session_async: audio.wav not found for %s", session_id)
+        return
+
+    logger.info("annotate_session_async: starting annotation for session %s", session_id)
+    try:
+        audio_bytes = audio_path.read_bytes()
+        call = process_remote.spawn(audio_bytes, lang, whisper_model, keep_silence)
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, call.get)
+        with _write_and_rename(out_path) as fh:
+            json.dump(result, fh, ensure_ascii=False)
+        logger.info(
+            "annotate_session_async: wrote %d alignments for session %s",
+            len(result.get("alignments", [])),
+            session_id,
+        )
+    except Exception:
+        logger.exception("annotate_session_async: failed for session %s", session_id)
 
 
 # ─── Entrypoints ─────────────────────────────────────────────────────────────

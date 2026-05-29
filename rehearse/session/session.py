@@ -7,6 +7,7 @@ ends.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -18,6 +19,11 @@ import structlog
 from rehearse.storage import LocalFilesystemStore
 from rehearse.session.synthesis import SessionSynthesizer, persist_synthesis
 from rehearse.types import ConsentState, Session
+
+try:
+    from train.pipeline.annotate import annotate_session_async as _annotate_session_async
+except ImportError:
+    _annotate_session_async = None  # train package not installed
 
 log = structlog.get_logger(__name__)
 
@@ -162,6 +168,9 @@ class SessionOrchestrator:
         await self._promote_outcome_status(session_id, session)
         await self._send_viewer_sms(handle)
         log.info("session.finalize", session_id=session_id, status=status)
+        if _annotate_session_async is not None:
+            audio_path = self._store.session_dir(session_id) / "audio.wav"
+            asyncio.create_task(_annotate_session_async(session_id, audio_path))
 
     async def _finalize_declined(self, session_id: str) -> None:
         """Skip synthesis, purge audio + prosody, and truncate transcript on decline."""
