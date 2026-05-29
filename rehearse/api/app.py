@@ -41,12 +41,7 @@ async def _validate_anthropic(config: RuntimeConfig) -> None:
 
 async def _load_interactive_models(config: RuntimeConfig) -> None:
     if config.interactive_modal_endpoint:
-        structlog.get_logger(__name__).info(
-            "startup.handler.skipped",
-            handler="interactive_models",
-            reason="using_modal_endpoint",
-        )
-        return
+        return  # models run on Modal; nothing to load locally
     from rehearse.backends.interactive.loader import load_models
     await asyncio.get_running_loop().run_in_executor(
         None,
@@ -79,8 +74,8 @@ def _configure_logging(level: str) -> None:
     structlog.configure(
         processors=[
             structlog.processors.add_log_level,
-            structlog.processors.TimeStamper(fmt="iso"),
-            structlog.processors.JSONRenderer(),
+            structlog.processors.TimeStamper(fmt="%Y-%m-%d %H:%M:%S", utc=False),
+            structlog.dev.ConsoleRenderer(),
         ],
         wrapper_class=structlog.make_filtering_bound_logger(
             getattr(logging, level.upper(), logging.INFO)
@@ -114,14 +109,11 @@ def create_app(config: RuntimeConfig | None = None) -> FastAPI:
         log = structlog.get_logger(__name__)
         for name, backends, handler in _STARTUP_HANDLERS:
             if config.backend_type in backends:
-                log.info("startup.handler.running", handler=name, backend=config.backend_type)
                 await handler(config)
-            else:
-                log.info("startup.handler.skipped", handler=name, backend=config.backend_type)
         log.info(
-            "rehearse.startup",
-            backend_type=config.backend_type,
-            public_base_url=config.public_base_url,
+            "Server ready",
+            backend=config.backend_type,
+            url=config.public_base_url,
         )
         if config.finalize_sweep_enabled:
             # Crash recovery: any session still `in_progress` on disk has no

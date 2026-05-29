@@ -38,34 +38,38 @@ from rehearse.types import ParticipantConfig, Session
 log = structlog.get_logger(__name__)
 
 
+import time as _time
+
+
+def _health_url(endpoint: str) -> str:
+    return endpoint.replace("wss://", "https://").replace("ws://", "http://").replace("/ws", "/health")
+
+
 async def _inference_ready(endpoint: str) -> bool:
-    """Return True if the Modal inference server responds 200 on /health."""
+    """Return True if the inference server responds 200 on /health."""
     if not endpoint:
         return True
-    health_url = endpoint.replace("wss://", "https://").replace("ws://", "http://").replace("/ws", "/health")
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.get(health_url)
+            resp = await client.get(_health_url(endpoint))
         return resp.status_code == 200
     except Exception:
         return False
 
 
 async def _prewarm_modal(endpoint: str) -> None:
-    """Fire a GET /health to the Modal inference server to start its cold-boot clock.
-
-    The WebSocket connect will still fail until the container is ready (~60s), but
-    ModalInteractiveBackend retries for ~90s, so starting the clock here covers the gap.
-    """
+    """Trigger the inference server cold-start clock by hitting /health."""
     if not endpoint:
         return
-    health_url = endpoint.replace("wss://", "https://").replace("ws://", "http://").replace("/ws", "/health")
+    url = _health_url(endpoint)
+    log.info("Prewarming inference server", url=url)
+    t0 = _time.monotonic()
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
-            await client.get(health_url)
-        log.info("modal.prewarm.sent", url=health_url)
+            await client.get(url)
+        log.info("Inference server responding", elapsed=f"{_time.monotonic() - t0:.1f}s")
     except Exception as exc:
-        log.debug("modal.prewarm.failed", url=health_url, error=str(exc))
+        log.debug("Prewarm request failed (server may still be booting)", error=str(exc))
 
 
 class TelephonyClient(Protocol):
@@ -208,7 +212,7 @@ def mount_twilio_routes(
         """
         await _validate(request)
         if attempt >= 30:
-            log.warning("twilio.voice.wait.timeout", session_id=session_id)
+            log.warning("Inference server not ready after 90s — hanging up", session_id=session_id)
             return PlainTextResponse(
                 '<?xml version="1.0" encoding="UTF-8"?>'
                 "<Response>"
@@ -218,9 +222,9 @@ def mount_twilio_routes(
                 media_type="application/xml",
             )
         if await _inference_ready(config.interactive_modal_endpoint):
-            log.info("twilio.voice.wait.ready", session_id=session_id, attempt=attempt)
+            log.info("Inference server ready — connecting stream", session_id=session_id, attempt=attempt)
             return PlainTextResponse(_stream_twiml(config, session_id), media_type="application/xml")
-        log.debug("twilio.voice.wait.polling", session_id=session_id, attempt=attempt)
+        log.debug("Inference server not yet ready, retrying...", session_id=session_id, attempt=attempt)
         return PlainTextResponse(_hold_twiml(config, session_id, first=False, attempt=attempt + 1), media_type="application/xml")
 
     @app.post("/twilio/status")
