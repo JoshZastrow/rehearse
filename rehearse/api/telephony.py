@@ -309,7 +309,7 @@ def mount_twilio_routes(
 
 def _hold_twiml(config: RuntimeConfig, session_id: str, *, first: bool, attempt: int) -> str:
     """TwiML that says a hold message (first call) or pauses silently, then redirects back."""
-    wait_url = f"{config.public_base_url}/twilio/voice/wait?session_id={session_id}&attempt={attempt}"
+    wait_url = f"{config.public_base_url}/twilio/voice/wait?session_id={session_id}&amp;attempt={attempt}"
     hold = (
         '<Say voice="alice">Just a moment while I connect you.</Say>'
         if first
