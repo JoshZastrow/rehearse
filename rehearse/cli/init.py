@@ -166,16 +166,15 @@ def _modal_workspace() -> str:
     return ""
 
 
-def _modal_app_endpoint(app_name: str, method: str, path: str) -> str:
-    """Derive the Modal ASGI WebSocket endpoint URL from workspace + app name.
+def _modal_app_endpoint(app_name: str, class_name: str, method: str, path: str) -> str:
+    """Derive the Modal ASGI WebSocket endpoint URL for a class-based app.
 
-    Pattern: wss://<workspace>--<app-name>-<method>.modal.run/<path>
-    Hyphens in app_name and method are preserved as-is.
+    Pattern: wss://<workspace>--<app-name>-<classname>-<method>.modal.run/<path>
     """
     workspace = _modal_workspace()
     if not workspace:
         return ""
-    slug = f"{workspace}--{app_name}-{method}".replace("_", "-")
+    slug = f"{workspace}--{app_name}-{class_name}-{method}".replace("_", "-")
     return f"wss://{slug}.modal.run/{path.lstrip('/')}"
 
 
@@ -290,7 +289,7 @@ def _collect_interactive(existing: dict[str, str], force: bool, env_only: bool, 
                 print(_err("modal deploy failed. Set INTERACTIVE_MODAL_ENDPOINT manually in .env."))
                 updates["INTERACTIVE_MODAL_ENDPOINT"] = current_endpoint
             else:
-                auto_url = _modal_app_endpoint("rehearse-interactive", "serve", "ws")
+                auto_url = _modal_app_endpoint("rehearse-interactive", "interactiveserver", "serve", "ws")
                 if auto_url:
                     print(_ok(f"Endpoint derived from workspace: {auto_url}"))
                 endpoint = _ask(
