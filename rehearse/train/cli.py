@@ -119,19 +119,22 @@ def _run(config: TrainConfig) -> None:
         str(_TRAIN_PY),
         temp_yaml,
     ]
-    if config.dry_run:
-        route = "Modal (A10G GPU)" if config.with_modal else "local torchrun"
-        print(f"Routing: {route}")
-        print(f"PYTHONPATH={finetune_dir} {' '.join(cmd)}")
-        print(f"\nResolved config written to: {temp_yaml}")
-        return
-    if config.with_modal:
-        from rehearse.train.modal import run_training
-        config_dict = yaml.safe_load(Path(temp_yaml).read_text())
-        run_training(config_dict)
-    else:
-        env = {**os.environ, "PYTHONPATH": finetune_dir}
-        subprocess.run(cmd, check=True, env=env)
+    try:
+        if config.dry_run:
+            route = "Modal (A10G GPU)" if config.with_modal else "local torchrun"
+            print(f"Routing: {route}")
+            print(f"PYTHONPATH={finetune_dir} {' '.join(cmd)}")
+            print(f"\nResolved config written to: {temp_yaml}")
+            return
+        if config.with_modal:
+            from rehearse.train.modal import run_training
+            config_dict = yaml.safe_load(Path(temp_yaml).read_text())
+            run_training(config_dict)
+        else:
+            env = {**os.environ, "PYTHONPATH": finetune_dir}
+            subprocess.run(cmd, check=True, env=env)
+    finally:
+        Path(temp_yaml).unlink(missing_ok=True)
 
 
 def main() -> None:
