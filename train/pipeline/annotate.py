@@ -91,12 +91,91 @@ image = (
 # ─── Modal GPU function ───────────────────────────────────────────────────────
 
 
+def _assign_speakers_from_segments(
+    words: list[dict],
+    segments: list[dict],
+    id_to_role: dict[str, str],
+) -> list[str]:
+    """Map each word to a role using pyannote segment overlap.
+
+    For each word, finds the diarization segment with the most overlap
+    and maps its speaker ID to 'user' or 'coach' via id_to_role.
+    Falls back to 'user' if no segment overlaps.
+    """
+    labels = []
+    for word in words:
+        ws, we = word["start"], word["end"]
+        best_speaker, best_overlap = None, 0.0
+        for seg in segments:
+            overlap = max(0.0, min(we, seg["end"]) - max(ws, seg["start"]))
+            if overlap > best_overlap:
+                best_overlap = overlap
+                best_speaker = seg["speaker"]
+        role = id_to_role.get(best_speaker, "user") if best_speaker else "user"
+        labels.append(role)
+    return labels
+
+
+def _assign_speakers_from_transcript(
+    words: list[dict],
+    transcript: list[dict],
+) -> list[str]:
+    """Map each word to a role using transcript utterance timestamps.
+
+    For each word, finds the transcript utterance whose [ts_start, ts_end]
+    window contains the word midpoint and inherits its speaker label.
+    Falls back to 'user' if no utterance matches.
+    """
+    labels = []
+    for word in words:
+        mid = (word["start"] + word["end"]) / 2
+        role = "user"
+        for utt in transcript:
+            if utt["ts_start"] <= mid <= utt["ts_end"]:
+                raw = utt.get("speaker", "user")
+                role = raw if raw in ("user", "coach") else "user"
+                break
+        labels.append(role)
+    return labels
+
+
+def _map_speaker_ids_to_roles(
+    segments: list[dict],
+    transcript: list[dict],
+) -> dict[str, str]:
+    """Determine which pyannote speaker ID is 'coach' vs 'user'.
+
+    Uses the first non-interim coach utterance in the transcript as an anchor:
+    whichever diarization segment overlaps it most is labeled 'coach',
+    the other 'user'. Falls back to SPEAKER_00=coach if no anchor found.
+    """
+    coach_utt = next(
+        (u for u in transcript if u.get("speaker") == "coach" and not u.get("is_interim")),
+        None,
+    )
+    if coach_utt is None:
+        return {"SPEAKER_00": "coach", "SPEAKER_01": "user"}
+
+    ts, te = coach_utt["ts_start"], coach_utt["ts_end"]
+    best_id, best_overlap = "SPEAKER_00", 0.0
+    for seg in segments:
+        overlap = max(0.0, min(te, seg["end"]) - max(ts, seg["start"]))
+        if overlap > best_overlap:
+            best_overlap = overlap
+            best_id = seg["speaker"]
+
+    speaker_ids = sorted({seg["speaker"] for seg in segments})
+    return {sid: ("coach" if sid == best_id else "user") for sid in speaker_ids}
+
+
 @app.function(image=image, gpu=_GPU_TYPE, timeout=1800)
 def process_remote(
     audio_bytes: bytes,
     lang: str,
     whisper_model: str,
     keep_silence: float,
+    segments: list[dict] | None = None,
+    transcript: list[dict] | None = None,
 ) -> dict:
     """Transcribe audio on a Modal GPU worker using Whisper with forced alignment.
 
@@ -105,9 +184,14 @@ def process_remote(
         lang: Whisper language code (e.g. "en", "fr").
         whisper_model: Whisper model size (e.g. "medium", "large-v2").
         keep_silence: Seconds of silence to pad around VAD segment boundaries.
+        segments: Diarization segments from audio_segments.json (optional).
+            If provided, used to assign speaker labels to each word.
+        transcript: Transcript utterances from transcript.jsonl (optional).
+            Used to map diarization speaker IDs to roles, or as fallback
+            speaker assignment when segments is None.
 
     Returns:
-        {"alignments": [["word", [start_sec, end_sec], "SPEAKER_MAIN"], ...]}
+        {"alignments": [["word", [start_sec, end_sec], "user|coach"], ...]}
     """
     import torch
     import torchaudio.functional as F
@@ -163,14 +247,25 @@ def process_remote(
         if keep_silence > 0:
             transcribe_mod.get_vad_segments = old_get_vad
 
-    alignments = []
+    all_words = []
     for segment in result["segments"]:
         if "words" not in segment:
             logger.warning("No word-level timestamps in segment: %r", segment)
             continue
-        for word in segment["words"]:
-            alignments.append([word["text"], [word["start"], word["end"]], "SPEAKER_MAIN"])
+        all_words.extend(segment["words"])
 
+    if segments:
+        id_to_role = _map_speaker_ids_to_roles(segments, transcript or [])
+        speaker_labels = _assign_speakers_from_segments(all_words, segments, id_to_role)
+    elif transcript:
+        speaker_labels = _assign_speakers_from_transcript(all_words, transcript)
+    else:
+        speaker_labels = ["user"] * len(all_words)
+
+    alignments = [
+        [w["text"], [w["start"], w["end"]], label]
+        for w, label in zip(all_words, speaker_labels)
+    ]
     return {"alignments": alignments}
 
 
@@ -232,6 +327,26 @@ def _load_audio_paths(egs: Path) -> list[Path]:
     open_fn = gzip.open if str(egs).endswith(".gz") else open
     with open_fn(egs, "rb") as fh:
         return [Path(json.loads(line)["path"]) for line in fh]
+
+
+def _load_json_if_exists(path: Path, key: str) -> list[dict] | None:
+    """Return the list at path[key] if the file exists, else None."""
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text()).get(key)
+    except Exception:
+        return None
+
+
+def _load_jsonl_if_exists(path: Path) -> list[dict] | None:
+    """Return parsed lines from a JSONL file if it exists, else None."""
+    if not path.exists():
+        return None
+    try:
+        return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    except Exception:
+        return None
 
 
 @contextmanager
@@ -317,11 +432,22 @@ def _run(config: AnnotateConfig) -> None:
         err_path = path.with_suffix(".json.err")
         try:
             audio_bytes = path.read_bytes()
+            session_dir = path.parent
+            segments = _load_json_if_exists(session_dir / "audio_segments.json", "segments")
+            transcript = _load_jsonl_if_exists(session_dir / "transcript.jsonl")
+            if segments:
+                logger.info("  → using diarization segments (%d)", len(segments))
+            elif transcript:
+                logger.info("  → using transcript fallback (%d utterances)", len(transcript))
+            else:
+                logger.warning("  → no speaker data found, defaulting to 'user'")
             result = process_remote.remote(
                 audio_bytes,
                 config.lang,
                 config.whisper_model,
                 config.keep_silence_in_segments,
+                segments,
+                transcript,
             )
 
             logger.info("  → remote returned %d alignments", len(result.get("alignments", [])))
@@ -371,7 +497,10 @@ async def annotate_session_async(
     logger.info("annotate_session_async: starting annotation for session %s", session_id)
     try:
         audio_bytes = audio_path.read_bytes()
-        call = process_remote.spawn(audio_bytes, lang, whisper_model, keep_silence)
+        session_dir = audio_path.parent
+        segments = _load_json_if_exists(session_dir / "audio_segments.json", "segments")
+        transcript = _load_jsonl_if_exists(session_dir / "transcript.jsonl")
+        call = process_remote.spawn(audio_bytes, lang, whisper_model, keep_silence, segments, transcript)
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(None, call.get)
         with _write_and_rename(out_path) as fh:

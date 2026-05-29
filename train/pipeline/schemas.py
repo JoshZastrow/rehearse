@@ -14,9 +14,11 @@ Output schemas (annotation result):
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, Any, Optional
+from typing import Annotated, Any, Literal, Optional
 
 from pydantic import BaseModel, BeforeValidator
+
+Speaker = Literal["user", "coach"]
 
 
 # ─── Session input schemas ────────────────────────────────────────────────────
@@ -133,18 +135,20 @@ class ProsodyEntry(BaseModel):
 # ─── Annotation output schema ─────────────────────────────────────────────────
 
 
-def _parse_alignment_item(v: Any) -> tuple[str, tuple[float, float], str]:
+def _parse_alignment_item(v: Any) -> tuple[str, tuple[float, float], Speaker]:
     """Coerce a raw JSON list [word, [start, end], speaker] into a typed tuple."""
     if not isinstance(v, (list, tuple)) or len(v) != 3:
         raise ValueError(f"alignment item must be [word, [start, end], speaker], got {v!r}")
     text, ts, speaker = v
     if not isinstance(ts, (list, tuple)) or len(ts) != 2:
         raise ValueError(f"timestamp must be [start, end], got {ts!r}")
-    return (str(text), (float(ts[0]), float(ts[1])), str(speaker))
+    if speaker not in ("user", "coach"):
+        raise ValueError(f"speaker must be 'user' or 'coach', got {speaker!r}")
+    return (str(text), (float(ts[0]), float(ts[1])), speaker)
 
 
 AlignmentItem = Annotated[
-    tuple[str, tuple[float, float], str],
+    tuple[str, tuple[float, float], Speaker],
     BeforeValidator(_parse_alignment_item),
 ]
 
@@ -155,7 +159,7 @@ class AnnotationOutput(BaseModel):
     Each alignment is [word_text, [start_sec, end_sec], speaker_label].
 
     Example:
-        {"alignments": [["Hello", [0.0, 0.4], "SPEAKER_MAIN"], ...]}
+        {"alignments": [["Hello", [0.0, 0.4], "user"], ...]}
     """
 
     alignments: list[AlignmentItem]

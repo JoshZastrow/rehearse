@@ -17,8 +17,8 @@ from train.pipeline.annotate import annotate_session_async
 
 _FAKE_RESULT = {
     "alignments": [
-        ["Hello", [0.0, 0.4], "SPEAKER_MAIN"],
-        ["world", [0.5, 0.9], "SPEAKER_MAIN"],
+        ["Hello", [0.0, 0.4], "user"],
+        ["world", [0.5, 0.9], "coach"],
     ]
 }
 
@@ -70,7 +70,7 @@ async def test_annotate_session_async_writes_audio_json(audio_dir: Path) -> None
     written = json.loads(out.read_text())
     assert written == _FAKE_RESULT
     assert len(written["alignments"]) == 2
-    assert written["alignments"][0] == ["Hello", [0.0, 0.4], "SPEAKER_MAIN"]
+    assert written["alignments"][0] == ["Hello", [0.0, 0.4], "user"]
 
 
 @pytest.mark.asyncio
