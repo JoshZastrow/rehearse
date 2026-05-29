@@ -589,3 +589,58 @@ async def test_twilio_rest_client_wraps_underlying_sdk_calls() -> None:
     assert fake_calls.last_kwargs is not None
     assert fake_messages.last_kwargs is not None
     monkeypatch.undo()
+
+
+def test_voice_wait_hangs_up_after_max_attempts(
+    config: RuntimeConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """After 30 failed health checks (90s × 3s each), /twilio/voice/wait must
+    return a <Hangup> instead of another <Redirect>."""
+    from rehearse.api import app as app_module, telephony as telephony_module
+
+    monkeypatch.setattr(app_module, "TwilioRestClient", lambda cfg: FakeTwilioClient())
+    modal_config = RuntimeConfig(
+        **{**config.__dict__, "interactive_modal_endpoint": "wss://fake.modal.run/ws"}
+    )
+    app = create_app(modal_config)
+    client = TestClient(app)
+
+    # Simulate Modal never becoming ready
+    async def _never_ready(_): return False
+    monkeypatch.setattr(telephony_module, "_modal_ready", _never_ready)
+
+    # Simulate all 30 attempts having elapsed
+    resp = client.post(
+        "/twilio/voice/wait",
+        data={"CallSid": "CA_test"},
+        params={"session_id": "any", "attempt": 30},
+    )
+    assert resp.status_code == 200
+    assert "<Hangup" in resp.text
+    assert "unable to connect" in resp.text.lower()
+
+
+def test_voice_wait_connects_stream_when_modal_ready(
+    config: RuntimeConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When Modal /health returns 200, /twilio/voice/wait returns <Connect><Stream>."""
+    from rehearse.api import app as app_module, telephony as telephony_module
+
+    monkeypatch.setattr(app_module, "TwilioRestClient", lambda cfg: FakeTwilioClient())
+    modal_config = RuntimeConfig(
+        **{**config.__dict__, "interactive_modal_endpoint": "wss://fake.modal.run/ws"}
+    )
+    app = create_app(modal_config)
+    client = TestClient(app)
+
+    async def _always_ready(_): return True
+    monkeypatch.setattr(telephony_module, "_modal_ready", _always_ready)
+
+    resp = client.post(
+        "/twilio/voice/wait",
+        data={"CallSid": "CA_test"},
+        params={"session_id": "any", "attempt": 5},
+    )
+    assert resp.status_code == 200
+    assert "<Stream" in resp.text
+    assert "<Hangup" not in resp.text

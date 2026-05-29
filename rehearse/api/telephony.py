@@ -190,7 +190,7 @@ def mount_twilio_routes(
             await orchestrator.attach_call(handle.session_id, CallSid)
         log.info("twilio.voice.inbound", session_id=handle.session_id, call_sid=CallSid)
         if config.interactive_modal_endpoint:
-            twiml = _hold_twiml(config, handle.session_id, first=True)
+            twiml = _hold_twiml(config, handle.session_id, first=True, attempt=0)
         else:
             twiml = _stream_twiml(config, handle.session_id)
         return PlainTextResponse(
@@ -199,18 +199,29 @@ def mount_twilio_routes(
         )
 
     @app.post("/twilio/voice/wait")
-    async def twilio_voice_wait(request: Request, session_id: str) -> Response:
+    async def twilio_voice_wait(request: Request, session_id: str, attempt: int = 0) -> Response:
         """Poll Modal until the inference container is ready, then connect the stream.
 
         Twilio calls this repeatedly via <Redirect> while the Modal GPU cold-starts.
-        Each iteration either connects the stream (Modal ready) or pauses 3s and loops.
+        Each iteration either connects the stream (Modal ready), pauses 3s and loops,
+        or hangs up after 90s (30 attempts × 3s).
         """
         await _validate(request)
+        if attempt >= 30:
+            log.warning("twilio.voice.wait.timeout", session_id=session_id)
+            return PlainTextResponse(
+                '<?xml version="1.0" encoding="UTF-8"?>'
+                "<Response>"
+                '<Say voice="alice">Sorry, I was unable to connect. Please try again in a moment.</Say>'
+                "<Hangup/>"
+                "</Response>",
+                media_type="application/xml",
+            )
         if await _modal_ready(config.interactive_modal_endpoint):
-            log.info("twilio.voice.wait.ready", session_id=session_id)
+            log.info("twilio.voice.wait.ready", session_id=session_id, attempt=attempt)
             return PlainTextResponse(_stream_twiml(config, session_id), media_type="application/xml")
-        log.debug("twilio.voice.wait.polling", session_id=session_id)
-        return PlainTextResponse(_hold_twiml(config, session_id, first=False), media_type="application/xml")
+        log.debug("twilio.voice.wait.polling", session_id=session_id, attempt=attempt)
+        return PlainTextResponse(_hold_twiml(config, session_id, first=False, attempt=attempt + 1), media_type="application/xml")
 
     @app.post("/twilio/status")
     async def twilio_status(
@@ -296,13 +307,13 @@ def mount_twilio_routes(
             log.info("media.disconnect", session_id=session_id)
 
 
-def _hold_twiml(config: RuntimeConfig, session_id: str, *, first: bool) -> str:
+def _hold_twiml(config: RuntimeConfig, session_id: str, *, first: bool, attempt: int) -> str:
     """TwiML that says a hold message (first call) or pauses silently, then redirects back."""
-    wait_url = f"{config.public_base_url}/twilio/voice/wait?session_id={session_id}"
+    wait_url = f"{config.public_base_url}/twilio/voice/wait?session_id={session_id}&attempt={attempt}"
     hold = (
         '<Say voice="alice">Just a moment while I connect you.</Say>'
         if first
-        else "<Pause length=\"3\"/>"
+        else '<Pause length="3"/>'
     )
     return (
         '<?xml version="1.0" encoding="UTF-8"?>'
