@@ -157,6 +157,8 @@ def _map_speaker_ids_to_roles(
         return {"SPEAKER_00": "coach", "SPEAKER_01": "user"}
 
     ts, te = coach_utt["ts_start"], coach_utt["ts_end"]
+    if te - ts < 0.1:  # zero-duration transcript timestamp — expand to find containing segment
+        te = ts + 0.1
     best_id, best_overlap = "SPEAKER_00", 0.0
     for seg in segments:
         overlap = max(0.0, min(te, seg["end"]) - max(ts, seg["start"]))
