@@ -108,9 +108,13 @@ else
   echo "Inference: litellm not installed — skipping proxy (run 'uv pip install litellm[proxy]' to enable)"
 fi
 
-# ── Sync Hume configs ─────────────────────────────────────────────────────────
-echo "Syncing Hume EVI configs..."
-uv run rehearse-hume sync 2>&1 | tail -2
+# ── Sync Hume configs (managed backend only) ──────────────────────────────────
+if [ "$BACKEND_TYPE" = "managed" ] || [ -z "$BACKEND_TYPE" ]; then
+  echo "Hume: syncing local persona configs to provider (BACKEND_TYPE=${BACKEND_TYPE:-managed})..."
+  uv run rehearse-hume sync 2>&1 | tail -2
+else
+  echo "Hume: skipping persona config sync — BACKEND_TYPE=$BACKEND_TYPE does not use Hume EVI"
+fi
 
 # ── ngrok ─────────────────────────────────────────────────────────────────────
 echo "Starting ngrok tunnel on port $PORT..."
