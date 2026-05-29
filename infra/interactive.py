@@ -128,7 +128,7 @@ class InteractiveServer:
         try:
             raw = await asyncio.wait_for(ws.receive_text(), timeout=10.0)
         except asyncio.TimeoutError:
-            await ws.close(code=1008, reason="handshake timeout")
+            await ws.close(code=1008)
             return
         handshake = json.loads(raw)
         session_id = handshake.get("session_id", str(uuid.uuid4()))
