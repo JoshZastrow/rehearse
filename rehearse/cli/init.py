@@ -149,6 +149,36 @@ def _modal_token() -> str:
     return ""
 
 
+def _modal_workspace() -> str:
+    """Return the active Modal workspace slug from `modal token info`, or empty string."""
+    try:
+        result = subprocess.run(
+            ["modal", "token", "info"],
+            capture_output=True, text=True,
+        )
+        if result.returncode == 0:
+            for line in result.stdout.splitlines():
+                if line.startswith("Workspace:"):
+                    # "Workspace: joshzastrow (ac-xxxxx)" → "joshzastrow"
+                    return line.split(":", 1)[1].strip().split()[0]
+    except FileNotFoundError:
+        pass
+    return ""
+
+
+def _modal_app_endpoint(app_name: str, method: str, path: str) -> str:
+    """Derive the Modal ASGI WebSocket endpoint URL from workspace + app name.
+
+    Pattern: wss://<workspace>--<app-name>-<method>.modal.run/<path>
+    Hyphens in app_name and method are preserved as-is.
+    """
+    workspace = _modal_workspace()
+    if not workspace:
+        return ""
+    slug = f"{workspace}--{app_name}-{method}".replace("_", "-")
+    return f"wss://{slug}.modal.run/{path.lstrip('/')}"
+
+
 def _repo_root() -> Path:
     """Find the project root (directory containing pyproject.toml)."""
     here = Path(__file__).resolve()
@@ -260,20 +290,9 @@ def _collect_interactive(existing: dict[str, str], force: bool, env_only: bool, 
                 print(_err("modal deploy failed. Set INTERACTIVE_MODAL_ENDPOINT manually in .env."))
                 updates["INTERACTIVE_MODAL_ENDPOINT"] = current_endpoint
             else:
-                # Try to resolve the endpoint automatically via `modal app url`
-                auto_url = ""
-                try:
-                    r = subprocess.run(
-                        ["modal", "app", "url", "rehearse-interactive"],
-                        capture_output=True, text=True,
-                    )
-                    if r.returncode == 0 and r.stdout.strip():
-                        raw = r.stdout.strip().rstrip("/")
-                        auto_url = raw.replace("https://", "wss://").replace("http://", "ws://") + "/ws"
-                        print(_ok(f"Endpoint resolved automatically: {auto_url}"))
-                except FileNotFoundError:
-                    pass
-
+                auto_url = _modal_app_endpoint("rehearse-interactive", "serve", "ws")
+                if auto_url:
+                    print(_ok(f"Endpoint derived from workspace: {auto_url}"))
                 endpoint = _ask(
                     "wss:// endpoint" if not auto_url else "Confirm or override endpoint",
                     default=auto_url or current_endpoint,
