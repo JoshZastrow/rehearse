@@ -53,7 +53,7 @@ interactive_image = (
         "sphn>=0.1.12",
     )
     .run_commands(
-        "apt-get install -y --no-install-recommends git",
+        "apt-get update && apt-get install -y --no-install-recommends git",
         "pip install 'moshi @ git+https://github.com/kyutai-labs/moshi.git#subdirectory=moshi'",
     )
     .env({"HF_XET_HIGH_PERFORMANCE": "1"})
