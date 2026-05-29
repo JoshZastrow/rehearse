@@ -1,7 +1,10 @@
-.PHONY: help serve serve-memory setup setup-honcho setup-judge deploy-judge smoke-judge eval-list eval-voice-replay eval-voice-replay-live eval-voice-replay-dogfood eval-voice-smoke eval-voice-smoke-live eval-voice-rollout eval-voice-rollout-live eval-voice-rollout-audio eval-persona-routing eval-watch nightly-stability test lint
+.PHONY: help init serve serve-memory setup setup-honcho setup-judge deploy-judge smoke-judge deploy-interactive smoke-interactive eval-list eval-voice-replay eval-voice-replay-live eval-voice-replay-dogfood eval-voice-smoke eval-voice-smoke-live eval-voice-rollout eval-voice-rollout-live eval-voice-rollout-audio eval-persona-routing eval-watch nightly-stability test lint
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk -F':.*?## ' '{printf "  %-28s %s\n", $$1, $$2}'
+
+init: ## interactive onboarding wizard — collect API keys + deploy infra (run once)
+	uv run rehearse-init
 
 serve: ## start ngrok + Honcho (auto-detected) + rehearse server
 	@bash scripts/serve.sh
@@ -56,6 +59,18 @@ deploy-judge: ## deploy LLM judge to inference backend (idempotent; safe to re-r
 
 smoke-judge: ## run the smoke test against the deployed judge
 	modal run infra/judge.py
+
+deploy-interactive: ## deploy Moshi interactive inference server to Modal GPU (A10G)
+	modal deploy infra/interactive.py
+	@echo ""
+	@echo "Deployed. Add to .env:"
+	@echo "  INTERACTIVE_MODAL_ENDPOINT=wss://<workspace>--rehearse-interactive-serve.modal.run/ws"
+	@echo ""
+	@echo "Or get the URL automatically:"
+	@echo "  modal app url rehearse-interactive"
+
+smoke-interactive: ## run the smoke test against the deployed interactive server
+	modal run infra/interactive.py
 
 eval-persona-routing: ## 3-scenario persona routing eval (requires Modal judge + Honcho)
 	uv run pytest tests/eval/test_persona_voice_routing_eval.py \

@@ -26,6 +26,7 @@ dependencies = [
     "faster-whisper>=1.1.0",
     "litellm[proxy]>=1.40",
     "httpx>=0.27",
+    "websockets>=13.0",
     "chz>=0.4",
     "pyyaml>=6.0",
     "fire>=0.6",
@@ -50,6 +51,7 @@ moshi = [
 rehearse-eval = "rehearse.eval.cli:main"
 rehearse-hume = "rehearse.services.hume_configs_cli:main"
 rehearse-train = "rehearse.train.cli:main"
+rehearse-init = "rehearse.cli.init:main"
 
 [dependency-groups]
 dev = [
