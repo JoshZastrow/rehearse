@@ -81,21 +81,20 @@ def _to_volume_path(local_path: str, session_id: str) -> str:
 def train_on_modal(config_dict: dict) -> None:
     rewritten = _rewrite_config_paths(config_dict)
 
-    wandb_key = os.environ.get("WANDB_API_KEY")
-    if wandb_key and "wandb" in rewritten:
-        rewritten.setdefault("wandb", {})["key"] = wandb_key
-
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
         yaml.dump(rewritten, f)
         temp_yaml = f.name
 
-    env = {**os.environ, "PYTHONPATH": "/moshi-finetune"}
-    subprocess.run(
-        ["torchrun", "--nproc-per-node", "1", "/moshi-finetune/train.py", temp_yaml],
-        check=True,
-        env=env,
-    )
-    volume.commit()
+    try:
+        env = {**os.environ, "PYTHONPATH": "/moshi-finetune"}
+        subprocess.run(
+            ["torchrun", "--nproc-per-node", "1", "/moshi-finetune/train.py", temp_yaml],
+            check=True,
+            env=env,
+        )
+        volume.commit()
+    finally:
+        Path(temp_yaml).unlink(missing_ok=True)
 
 
 @app.function(
