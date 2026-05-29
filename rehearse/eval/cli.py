@@ -146,8 +146,20 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _configure_logging(level: str = "INFO") -> None:
+    import logging
+    import os
+    logging.basicConfig(
+        level=os.environ.get("LOG_LEVEL", level).upper(),
+        stream=sys.stderr,
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+        datefmt="%H:%M:%S",
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
+    _configure_logging()
 
     if args.cmd in {"list-evals", "list-benchmarks"}:
         for name in sorted(list_evals() + list_benchmarks()):
