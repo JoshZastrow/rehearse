@@ -25,7 +25,6 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import structlog
 import torch
-import torchaudio.functional as F
 
 from rehearse.backends.base import PersonaSpec
 from rehearse.backends.interactive.asr import InteractiveASR
@@ -250,12 +249,16 @@ class InteractiveBackend:
 
     @staticmethod
     def _resample(audio: np.ndarray, orig_sr: int, target_sr: int) -> np.ndarray:
+        import torchaudio.functional as F  # noqa: PLC0415 — lazy import; torchaudio optional at module level
+
         t = torch.from_numpy(audio).float().unsqueeze(0)
         resampled = F.resample(t, orig_sr, target_sr)
         return resampled.squeeze(0).numpy()
 
     @staticmethod
     def _wav_to_pcm16_16k(wav: torch.Tensor) -> bytes:
+        import torchaudio.functional as F  # noqa: PLC0415 — lazy import; torchaudio optional at module level
+
         audio = wav.squeeze(0).squeeze(0)
         audio_16k = F.resample(audio.unsqueeze(0), _MOSHI_SAMPLE_RATE, _REHEARSE_SAMPLE_RATE)
         audio_16k = audio_16k.squeeze(0).clamp(-1.0, 1.0)
