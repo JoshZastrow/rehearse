@@ -218,11 +218,27 @@ def _minimal_config(overrides: dict[str, str]) -> RuntimeConfig:
     # Build a minimal config directly with only what create_backend() needs.
     cfg = MagicMock(spec=RuntimeConfig)
     cfg.backend_type = overrides.get("backend_type") or os.environ.get("BACKEND_TYPE", "managed")
-    cfg.hume_api_key = os.environ.get("HUME_API_KEY", "")
-    cfg.hume_config_id = overrides.get("hume_config_id") or os.environ.get("HUME_CONFIG_ID", "default")
+    hume_api_key = os.environ.get("HUME_API_KEY", "")
+    hume_config_id = overrides.get("hume_config_id") or os.environ.get("HUME_CONFIG_ID", "default")
+    cfg.hume_api_key = hume_api_key
+    cfg.hume_config_id = hume_config_id
+    # managed_api_key / managed_config_id are what create_backend() actually reads;
+    # RuntimeConfig normally backfills these from hume_* via a validator that
+    # doesn't run on MagicMock, so set them explicitly.
+    cfg.managed_api_key = hume_api_key
+    cfg.managed_config_id = hume_config_id
     cfg.anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY")
     cfg.anthropic_model = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6")
     cfg.pipeline_stt_model = overrides.get("stt_model") or os.environ.get("PIPELINE_STT_MODEL", "whisper-tiny")
     cfg.pipeline_tts_model = overrides.get("tts_model") or os.environ.get("PIPELINE_TTS_MODEL", "kokoro")
+    cfg.pipeline_speech_mode = os.environ.get("PIPELINE_SPEECH_MODE", "modular")
+    cfg.pipeline_clm_url = os.environ.get("PIPELINE_CLM_URL") or os.environ.get("LITELLM_BASE_URL", "http://localhost:4000") + "/chat/completions"
+    cfg.pipeline_clm_model = os.environ.get("PIPELINE_CLM_MODEL") or os.environ.get("LITELLM_MODEL", "coach")
     cfg.clm_url = os.environ.get("CLM_URL", "http://localhost:8000")
+    cfg.interactive_checkpoint_path = os.environ.get("INTERACTIVE_CHECKPOINT_PATH", "")
+    cfg.interactive_model_repo = os.environ.get("INTERACTIVE_MODEL_REPO", "kyutai/moshiko-pytorch-bf16")
+    cfg.interactive_device = os.environ.get("INTERACTIVE_DEVICE", "cuda")
+    cfg.interactive_asr_model = os.environ.get("INTERACTIVE_ASR_MODEL", "base")
+    cfg.interactive_model_type = os.environ.get("INTERACTIVE_MODEL_TYPE", "moshi")
+    cfg.interactive_modal_endpoint = os.environ.get("INTERACTIVE_MODAL_ENDPOINT", "")
     return cfg
