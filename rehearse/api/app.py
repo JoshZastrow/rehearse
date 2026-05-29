@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 
 from rehearse.agents import build_clm_responder, mount_clm_routes
 from rehearse.agents.clm import validate_anthropic_credentials
-from rehearse.api.telephony import TwilioRestClient, mount_twilio_routes
+from rehearse.api.telephony import TwilioRestClient, _prewarm_modal, mount_twilio_routes
 from rehearse.api.viewer import mount_viewer_routes
 from rehearse.config import RuntimeConfig
 from rehearse.session.finalize_sweeper import FinalizeSweeper
@@ -58,12 +58,18 @@ async def _load_interactive_models(config: RuntimeConfig) -> None:
     )
 
 
+async def _prewarm_interactive(config: RuntimeConfig) -> None:
+    if config.interactive_modal_endpoint:
+        await _prewarm_modal(config.interactive_modal_endpoint)
+
+
 # Each entry: (handler_name, set_of_applicable_backend_types, async_handler_fn)
 _STARTUP_HANDLERS: list[
     tuple[str, frozenset[str], Callable[[RuntimeConfig], Coroutine[Any, Any, None]]]
 ] = [
     ("anthropic_credentials", _CLM_BACKENDS, _validate_anthropic),
     ("interactive_models", frozenset({"interactive", "moshi"}), _load_interactive_models),
+    ("interactive_prewarm", frozenset({"interactive", "moshi"}), _prewarm_interactive),
 ]
 
 
