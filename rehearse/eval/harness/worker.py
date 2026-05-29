@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import os
 import sys
 import traceback
 from datetime import datetime
@@ -26,7 +28,18 @@ from rehearse.eval.environments import get_environment
 from rehearse.eval.protocols import BenchmarkExample, RolloutResult
 
 
+def _configure_logging() -> None:
+    level = os.environ.get("LOG_LEVEL", "INFO").upper()
+    logging.basicConfig(
+        level=level,
+        stream=sys.stderr,
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+        datefmt="%H:%M:%S",
+    )
+
+
 async def _run() -> int:
+    _configure_logging()
     raw = sys.stdin.read()
     req = json.loads(raw)
     example = BenchmarkExample.model_validate(req["example"])

@@ -126,10 +126,15 @@ async def execute_run(config: RunConfig, executor: Executor | None = None) -> Ru
 
     reps = config.repetitions
 
+    n_total = len(examples) * reps
+    completed_count = 0
+
     async def run_one(idx: int, rep: int, ex: BenchmarkExample) -> RolloutResult:
+        nonlocal completed_count
         async with semaphore:
             session_subdir = ex.id if reps == 1 else f"{ex.id}/rep-{rep}"
-            return await executor.submit(
+            print(f"  [{idx + 1}/{n_total}] starting {ex.id}", flush=True)
+            result = await executor.submit(
                 target_name=environment.name,
                 target_version=environment.version,
                 model_slots=model_slots,
@@ -138,10 +143,16 @@ async def execute_run(config: RunConfig, executor: Executor | None = None) -> Ru
                 timeout_s=timeout_s,
                 rng_seed=config.seed + idx * reps + rep,
             )
+            completed_count += 1
+            status = result.status
+            duration_s = result.duration_ms / 1000 if result.duration_ms else 0
+            print(f"  [{completed_count}/{n_total}] done    {ex.id}  status={status}  {duration_s:.0f}s", flush=True)
+            return result
 
     plan: list[tuple[int, int, BenchmarkExample]] = [
         (i, rep, ex) for i, ex in enumerate(examples) for rep in range(reps)
     ]
+    print(f"run {run_id}  eval={eval_spec.name}  env={environment_name}  n={n_total}  concurrency={config.concurrency}", flush=True)
     rollouts: list[RolloutResult] = await asyncio.gather(
         *(run_one(i, rep, ex) for i, rep, ex in plan)
     )
