@@ -2,7 +2,7 @@
 Training CLI for moshi fine-tuning.
 
 Wraps torchrun with a chz-based configuration layer. Accepts a base YAML
-and override flags; merges them and delegates to lib/moshi-finetune/train.py.
+and override flags; merges them and delegates to train/train.py.
 By default runs on Modal A10G GPU; set with_modal=false for local torchrun.
 
 ── Usage ──────────────────────────────────────────────────────────────────────
@@ -22,7 +22,7 @@ from pathlib import Path
 import chz
 import yaml
 
-_TRAIN_PY = Path(__file__).parents[2] / "lib" / "moshi-finetune" / "train.py"
+_TRAIN_PY = Path(__file__).parents[2] / "train" / "train.py"
 
 _OVERRIDES: dict[str, tuple[str, ...]] = {
     "run_dir":      ("run_dir",),

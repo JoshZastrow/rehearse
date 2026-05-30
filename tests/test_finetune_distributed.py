@@ -4,7 +4,7 @@ Modal (and some GPU environments) do not set CUDA_VISIBLE_DEVICES.
 These tests verify that visible_devices() and set_device() degrade gracefully
 when the env var is absent, rather than raising KeyError.
 
-The finetune package is added to sys.path from lib/moshi-finetune so these
+The finetune package is added to sys.path from train/ so these
 tests run without installing the heavy training deps into the rehearse venv.
 """
 from __future__ import annotations
@@ -15,7 +15,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 # Make `finetune` importable without installing its deps.
-_FINETUNE_ROOT = Path(__file__).parents[1] / "lib" / "moshi-finetune"
+_FINETUNE_ROOT = Path(__file__).parents[1] / "train"
 if str(_FINETUNE_ROOT) not in sys.path:
     sys.path.insert(0, str(_FINETUNE_ROOT))
 

@@ -106,7 +106,7 @@ def test_image_uses_pyproject_for_finetune_deps():
     source = _MODAL_PY.read_text()
     assert "pip_install_from_pyproject" in source, (
         "Modal image must call pip_install_from_pyproject pointing at "
-        "lib/moshi-finetune/pyproject.toml. Without it, the manually listed "
+        "train/pyproject.toml. Without it, the manually listed "
         "packages may diverge from the declared dependencies."
     )
 
@@ -147,7 +147,7 @@ def test_to_volume_path():
 
 # ── dep compatibility ─────────────────────────────────────────────────────────
 
-_FINETUNE_PYPROJECT = Path(__file__).parents[1] / "lib" / "moshi-finetune" / "pyproject.toml"
+_FINETUNE_PYPROJECT = Path(__file__).parents[1] / "train" / "pyproject.toml"
 
 
 def test_sphn_pin_compatible_with_moshi():

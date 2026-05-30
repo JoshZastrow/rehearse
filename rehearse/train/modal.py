@@ -24,15 +24,15 @@ import yaml
 app = modal.App("rehearse-train")
 volume = modal.Volume.from_name("rehearse-training", create_if_missing=True)
 
-_FINETUNE_DIR = Path(__file__).parents[2] / "lib" / "moshi-finetune"
+_TRAIN_DIR = Path(__file__).parents[2] / "train"
 
 image = (
     modal.Image.debian_slim(python_version="3.12")
     .apt_install("ffmpeg", "git")
     .pip_install("chz", "pyyaml")
-    .pip_install_from_pyproject(str(_FINETUNE_DIR / "pyproject.toml"))
+    .pip_install_from_pyproject(str(_TRAIN_DIR / "pyproject.toml"))
     .add_local_dir(
-        _FINETUNE_DIR,
+        _TRAIN_DIR,
         remote_path="/moshi-finetune",
     )
 )
