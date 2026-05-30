@@ -1,0 +1,42 @@
+# Smoke-test training run — 50 steps, LoRA rank 16, single GPU
+data:
+  train_data: /data/data/sessions.jsonl
+  shuffle: true
+  eval_data: ''
+
+moshi_paths:
+  hf_repo_id: "kyutai/moshiko-pytorch-bf16"
+
+full_finetuning: false
+lora:
+  enable: true
+  rank: 16
+  scaling: 2.0
+  ft_embed: false
+
+first_codebook_weight_multiplier: 100.
+text_padding_weight: 0.5
+
+duration_sec: 30
+batch_size: 1
+max_steps: 50
+gradient_checkpointing: true
+
+optim:
+  lr: 2e-6
+  weight_decay: 0.1
+  pct_start: 0.05
+
+seed: 0
+log_freq: 1
+do_eval: false
+do_ckpt: true
+ckpt_freq: 0
+save_adapters: true
+
+run_dir: "runs/smoke-test"
+
+# wandb:
+#   project: "rehearse"
+#   run_name: "smoke-test"
+#   key: ""

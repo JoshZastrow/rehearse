@@ -1,0 +1,23 @@
+[project]
+name = "finetune"
+requires-python = ">= 3.10"
+description = "moshi fine-tuning — training deps only"
+dynamic = ["version"]
+
+dependencies = [
+  "fire",
+  "simple-parsing",
+  "pyyaml",
+  "safetensors",
+  "tensorboard",
+  "tqdm",
+  "torch==2.6",
+  "triton>=3.2",
+  "torchaudio",
+  "moshi @ git+https://github.com/kyutai-labs/moshi.git#subdirectory=moshi",
+  "sphn>=0.2.0,<0.3.0",
+  "huggingface_hub",
+]
+
+[tool.setuptools]
+packages = ["finetune"]

@@ -127,7 +127,9 @@ Within `train/`:
 train/
 └── pipeline/
     ├── schemas.py    # Pydantic models for session input and annotation output
+    ├── diarize.py    # Speaker diarization (pyannote) on Modal GPU
     ├── annotate.py   # Whisper word-level annotation on Modal GPU
+    ├── prepare.py    # Stereo WAV preparation for moshi-finetune
     └── dataset.py    # Build training manifest (JSONL) from annotated sessions
 ```
 
@@ -261,6 +263,96 @@ make serve   # opens ngrok tunnel, starts server (+ Honcho if self-hosted)
 ```
 
 Text your Twilio number. Answer the call.
+
+## Fine-tuning Moshi
+
+Rehearse includes a pipeline to fine-tune [Moshi](https://github.com/kyutai-labs/moshi) on recorded session audio, producing a coach-voiced model adapted to the Rehearse conversation style.
+
+### Prerequisites
+
+- [Modal](https://modal.com) account with GPU access (A10G; free tier has enough credits for smoke tests)
+- HuggingFace account — accept the terms for [`pyannote/speaker-diarization-3.1`](https://huggingface.co/pyannote/speaker-diarization-3.1) and [`pyannote/segmentation-3.0`](https://huggingface.co/pyannote/segmentation-3.0)
+- A `HF_TOKEN` Modal secret: `modal secret create HF_TOKEN HF_TOKEN=<your-token>`
+- Session audio in `sessions/<id>/audio.wav` (mono PCM16, 16 kHz)
+
+### Pipeline
+
+The pipeline runs in four stages. Each stage writes artifacts consumed by the next and can be run independently.
+
+**1. Diarize** — assign speaker segments using pyannote on Modal GPU:
+
+```bash
+uv run python train/pipeline/diarize.py sessions_root=sessions/
+```
+
+Writes `audio_segments.json` to each session directory.
+
+**2. Annotate** — Whisper word-level transcription + speaker labelling on Modal GPU:
+
+```bash
+uv run python train/pipeline/annotate.py egs=data/sessions.jsonl
+```
+
+Writes `audio.json` (word alignments with `coach`/`user` speaker labels) and automatically chains into the prepare step.
+
+**3. Prepare** — split mono mixed recording into a stereo WAV (coach left, user right):
+
+```bash
+uv run python train/pipeline/prepare.py egs=data/sessions.jsonl
+```
+
+Writes `audio_stereo.wav` and `audio_stereo.json` to each session directory. This step also runs automatically as a post-annotation hook.
+
+**4. Build manifest** — index prepared sessions and push to the Modal Volume:
+
+```bash
+uv run python train/pipeline/dataset.py sessions_root=sessions/ out=data/sessions.jsonl
+```
+
+Writes `data/sessions.jsonl` (one line per session with `path` and `duration`) and syncs all audio and annotation files to the `rehearse-training` Modal Volume.
+
+### Training
+
+Run a short smoke test (50 steps, LoRA rank 16) to verify the pipeline end-to-end:
+
+```bash
+uv run rehearse-train \
+  run_dir=runs/smoke-test \
+  max_steps=50 \
+  batch_size=1 \
+  lora_rank=16 \
+  duration_sec=30
+```
+
+For a full training run, use the defaults in `rehearse/models/moshi_7B/config.yaml`:
+
+```bash
+uv run rehearse-train run_dir=runs/moshi-coach max_steps=2000
+```
+
+All training runs on a Modal A10G GPU. Checkpoints land at `/data/runs/<run_name>/checkpoints/` on the `rehearse-training` Volume. Loss and throughput are streamed to your terminal per step; add a `wandb:` block to the config for Weights & Biases logging.
+
+**Key config parameters** (pass as CLI args to override the YAML defaults):
+
+| Arg | Default | Description |
+|---|---|---|
+| `run_dir` | required | Output directory for checkpoints and logs |
+| `max_steps` | 2000 | Training steps |
+| `batch_size` | 16 | Examples per GPU per step — reduce if OOM |
+| `lora_rank` | 128 | LoRA adapter rank |
+| `duration_sec` | 100 | Max audio sequence length in seconds |
+| `with_modal` | true | Set `false` to run locally with `torchrun` (requires CUDA) |
+
+### How it works
+
+Session audio is mono mixed (coach + caller on one channel). The pipeline:
+
+1. **Diarizes** — pyannote identifies which time windows belong to each speaker
+2. **Annotates** — Whisper provides word-level transcripts; a majority-vote over diarization segments assigns `coach` / `user` labels
+3. **Prepares** — the mono recording is split into stereo: coach signal on left, user signal on right, with the opposite channel zeroed outside each speaker's diarization windows
+4. **Trains** — moshi-finetune receives the stereo WAV and reads `audio_stereo.json` for word alignments; `keep_main_only=True` trains on coach turns only
+
+The model is fine-tuned with LoRA on top of `kyutai/moshiko-pytorch-bf16`. The adapter weights (`save_adapters: true`) are saved separately so the base model is not modified.
 
 ## Contributing
 

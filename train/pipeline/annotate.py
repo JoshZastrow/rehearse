@@ -502,9 +502,8 @@ async def annotate_session_async(
         session_dir = audio_path.parent
         segments = _load_json_if_exists(session_dir / "audio_segments.json", "segments")
         transcript = _load_jsonl_if_exists(session_dir / "transcript.jsonl")
-        call = process_remote.spawn(audio_bytes, lang, whisper_model, keep_silence, segments, transcript)
-        loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(None, call.get)
+        call = await process_remote.spawn.aio(audio_bytes, lang, whisper_model, keep_silence, segments, transcript)
+        result = await call.get.aio()
         with _write_and_rename(out_path) as fh:
             json.dump(result, fh, ensure_ascii=False)
         logger.info(
@@ -512,6 +511,12 @@ async def annotate_session_async(
             len(result.get("alignments", [])),
             session_id,
         )
+        try:
+            from train.pipeline.prepare import prepare_session_async as _prepare_async
+        except ImportError:
+            pass
+        else:
+            asyncio.create_task(_prepare_async(session_id, audio_path))
     except Exception:
         logger.exception("annotate_session_async: failed for session %s", session_id)
 
