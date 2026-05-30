@@ -512,6 +512,12 @@ async def annotate_session_async(
             len(result.get("alignments", [])),
             session_id,
         )
+        try:
+            from train.pipeline.prepare import prepare_session_async as _prepare_async
+        except ImportError:
+            pass
+        else:
+            asyncio.create_task(_prepare_async(session_id, audio_path))
     except Exception:
         logger.exception("annotate_session_async: failed for session %s", session_id)
 

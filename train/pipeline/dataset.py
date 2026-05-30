@@ -81,6 +81,10 @@ def _run(config: ManifestConfig) -> None:
     entries = []
     skipped = 0
     for wav in wavs:
+        # Prefer stereo-split file when available (required by moshi-finetune).
+        stereo = wav.parent / "audio_stereo.wav"
+        target = stereo if stereo.exists() else wav
+
         annotation = wav.with_suffix(".json")
         if config.require_annotation and not annotation.exists():
             logger.debug("Skipping (no annotation): %s", wav)
@@ -88,19 +92,19 @@ def _run(config: ManifestConfig) -> None:
             continue
 
         try:
-            x, sr = sphn.read(str(wav))
+            x, sr = sphn.read(str(target))
             duration = x.shape[-1] / sr
         except Exception as exc:
-            logger.warning("Failed to read %s: %s", wav, exc)
+            logger.warning("Failed to read %s: %s", target, exc)
             skipped += 1
             continue
 
         if duration < config.min_duration:
-            logger.debug("Skipping short file (%.2fs): %s", duration, wav)
+            logger.debug("Skipping short file (%.2fs): %s", duration, target)
             skipped += 1
             continue
 
-        entries.append({"path": str(wav), "duration": duration})
+        entries.append({"path": str(target), "duration": duration})
         logger.debug("%.2fs  %s", duration, wav)
 
     logger.info("%d entries, %d skipped", len(entries), skipped)
@@ -118,11 +122,11 @@ def _run(config: ManifestConfig) -> None:
         for entry in entries:
             wav = Path(entry["path"])
             session_id = wav.parent.name
-            remote_wav = f"/data/data/sessions/{session_id}/audio.wav"
+            remote_wav = f"/data/data/sessions/{session_id}/{wav.name}"
             files.append((remote_wav, wav.read_bytes()))
             ann = wav.with_suffix(".json")
             if ann.exists():
-                remote_ann = f"/data/data/sessions/{session_id}/audio.json"
+                remote_ann = f"/data/data/sessions/{session_id}/{ann.name}"
                 files.append((remote_ann, ann.read_bytes()))
             rewritten_entries.append({"path": remote_wav, "duration": entry["duration"]})
         manifest_content = (

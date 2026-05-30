@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -28,21 +29,8 @@ _FINETUNE_DIR = Path(__file__).parents[2] / "lib" / "moshi-finetune"
 image = (
     modal.Image.debian_slim(python_version="3.12")
     .apt_install("ffmpeg", "git")
-    .pip_install(
-        "torch",
-        "torchaudio",
-        "sentencepiece",
-        "simple-parsing",
-        "fire",
-        "safetensors",
-        "tensorboard",
-        "sphn==0.1.12",
-        "pyyaml",
-        "chz",
-    )
-    .pip_install(
-        "moshi @ git+https://github.com/kyutai-labs/moshi.git#subdirectory=moshi"
-    )
+    .pip_install("chz", "pyyaml")
+    .pip_install_from_pyproject(str(_FINETUNE_DIR / "pyproject.toml"))
     .add_local_dir(
         _FINETUNE_DIR,
         remote_path="/moshi-finetune",
@@ -87,11 +75,20 @@ def train_on_modal(config_dict: dict) -> None:
 
     try:
         env = {**os.environ, "PYTHONPATH": "/moshi-finetune"}
-        subprocess.run(
-            ["torchrun", "--nproc-per-node", "1", "/moshi-finetune/train.py", temp_yaml],
-            check=True,
-            env=env,
-        )
+        cmd = ["torchrun", "--nproc-per-node", "1", "/moshi-finetune/train.py", temp_yaml]
+        proc = subprocess.Popen(cmd, env=env, stderr=subprocess.PIPE, text=True)
+        stderr_buf: list[str] = []
+        assert proc.stderr is not None
+        for line in proc.stderr:
+            sys.stderr.write(line)
+            sys.stderr.flush()
+            stderr_buf.append(line)
+        proc.wait()
+        if proc.returncode != 0:
+            tail = "".join(stderr_buf[-100:])
+            raise RuntimeError(
+                f"torchrun failed (exit {proc.returncode}):\n{tail}"
+            )
         volume.commit()
     finally:
         Path(temp_yaml).unlink(missing_ok=True)
@@ -116,10 +113,12 @@ def push_to_volume(files: list[tuple[str, bytes]], manifest_content: bytes) -> N
 
 
 def run_training(config_dict: dict) -> None:
-    with app.run():
-        train_on_modal.remote(config_dict)
+    with modal.enable_output():
+        with app.run():
+            train_on_modal.remote(config_dict)
 
 
 def push_data(files: list[tuple[str, bytes]], manifest_content: bytes) -> None:
-    with app.run():
-        push_to_volume.remote(files, manifest_content)
+    with modal.enable_output():
+        with app.run():
+            push_to_volume.remote(files, manifest_content)
