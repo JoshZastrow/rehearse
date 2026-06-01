@@ -1,9 +1,9 @@
-# Caller model training config.
-# Train on the right channel (caller speech) only.
+# Provider model training config.
+# Train on the left channel (provider/coach speech) only.
 # Usage:
-#   rehearse-train config_path=rehearse/models/moshi_7B/config_caller.yaml \
+#   rehearse-train config=rehearse/models/moshi_7B/config_provider.yaml \
 #       data.train_data=runs/sessions.jsonl \
-#       run_dir=runs/caller-v1
+#       run_dir=runs/provider-v1
 data:
   train_data: ''
   eval_data: ''
@@ -25,8 +25,8 @@ text_padding_weight: 0.5
 
 # optimizer
 duration_sec: 100
-channel: 1
-main_speaker_label: caller
+channel: 0
+main_speaker_label: provider
 batch_size: 16
 max_steps: 2000
 gradient_checkpointing: true

@@ -162,13 +162,13 @@ def test_default_config_has_caller_channel_and_label():
     assert cfg.get("main_speaker_label") == "caller"
 
 
-def test_caller_config_has_channel_and_label():
-    """Caller config must set channel=1 and main_speaker_label=caller."""
+def test_provider_config_has_channel_and_label():
+    """Provider config must set channel=0 and main_speaker_label=provider."""
     import yaml
     from pathlib import Path
     repo_root = Path(__file__).parents[2]
     cfg = yaml.safe_load(
-        (repo_root / "rehearse/models/moshi_7B/config_caller.yaml").read_text()
+        (repo_root / "rehearse/models/moshi_7B/config_provider.yaml").read_text()
     )
-    assert cfg.get("channel") == 1, "caller config must have channel: 1"
-    assert cfg.get("main_speaker_label") == "caller"
+    assert cfg.get("channel") == 0, "provider config must have channel: 0"
+    assert cfg.get("main_speaker_label") == "provider"
