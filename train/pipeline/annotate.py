@@ -437,23 +437,19 @@ def _run(config: AnnotateConfig) -> None:
         except Exception as exc:
             logger.warning("session.json failed schema validation (continuing): %s", exc)
 
-    for idx, path in enumerate(pending):
-        logger.info("[%d/%d] %s", idx + 1, len(pending), path)
-        out_path = path.with_suffix(".json")
-        err_path = path.with_suffix(".json.err")
-        try:
-            audio_bytes = path.read_bytes()
+    def _iter_inputs():
+        for path in pending:
             session_dir = path.parent
             segments = _load_json_if_exists(session_dir / "audio_segments.json", "segments")
             transcript = _load_jsonl_if_exists(session_dir / "transcript.jsonl")
             if segments:
-                logger.info("  → using diarization segments (%d)", len(segments))
+                logger.debug("  %s: using diarization segments (%d)", path.parent.name, len(segments))
             elif transcript:
-                logger.info("  → using transcript fallback (%d utterances)", len(transcript))
+                logger.debug("  %s: using transcript fallback (%d utterances)", path.parent.name, len(transcript))
             else:
-                logger.warning("  → no speaker data found, defaulting to 'caller'")
-            result = process_remote.remote(
-                audio_bytes,
+                logger.warning("  %s: no speaker data found, defaulting to 'caller'", path.parent.name)
+            yield (
+                path.read_bytes(),
                 config.lang,
                 config.whisper_model,
                 config.keep_silence_in_segments,
@@ -461,19 +457,28 @@ def _run(config: AnnotateConfig) -> None:
                 transcript,
             )
 
-            logger.info("  → remote returned %d alignments", len(result.get("alignments", [])))
+    logger.info("Dispatching %d sessions to Modal...", len(pending))
+    for path, result in zip(
+        pending,
+        process_remote.starmap(_iter_inputs(), return_exceptions=True),
+    ):
+        out_path = path.with_suffix(".json")
+        err_path = path.with_suffix(".json.err")
+        if isinstance(result, Exception):
+            if "cuda" in repr(result).lower():
+                raise result
+            logger.exception("Error processing %s", path, exc_info=result)
+            err_path.touch()
+            continue
+        try:
+            logger.info("  → %s: %d alignments", path.parent.name, len(result.get("alignments", [])))
             annotation = _validate_output(result)
             logger.info("  → schema OK: %d words", len(annotation.alignments))
-
             with _write_and_rename(out_path) as fh:
                 json.dump(result, fh, ensure_ascii=False)
-
             logger.info("  → wrote %s", out_path)
-
-        except Exception as exc:
-            if "cuda" in repr(exc).lower():
-                raise
-            logger.exception("Error processing %s", path)
+        except Exception:
+            logger.exception("Error writing output for %s", path)
             err_path.touch()
 
 

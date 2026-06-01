@@ -227,28 +227,30 @@ def _run(config: DiarizeConfig) -> None:
         logger.info("Nothing to do.")
         return
 
-    for idx, path in enumerate(pending):
-        logger.info("[%d/%d] %s", idx + 1, len(pending), path)
+    inputs = ((p.read_bytes(), config.num_speakers) for p in pending)
+
+    logger.info("Dispatching %d sessions to Modal...", len(pending))
+    for path, result in zip(
+        pending,
+        diarize_remote.starmap(inputs, return_exceptions=True),
+    ):
         out_path = path.parent / "audio_segments.json"
         err_path = path.parent / "audio_segments.json.err"
+        if isinstance(result, Exception):
+            if "cuda" in repr(result).lower():
+                raise result
+            logger.exception("Error processing %s", path, exc_info=result)
+            err_path.touch()
+            continue
         try:
-            audio_bytes = path.read_bytes()
-            result = diarize_remote.remote(audio_bytes, config.num_speakers)
-
-            logger.info("  → remote returned %d segments", len(result))
+            logger.info("  → %s: %d segments", path.parent.name, len(result))
             output = _validate_output(result)
-            logger.info("  → schema OK: %d segments", len(output.segments))
-
             payload = {"segments": [s.model_dump() for s in output.segments]}
             with _write_and_rename(out_path) as fh:
                 json.dump(payload, fh, ensure_ascii=False)
-
             logger.info("  → wrote %s", out_path)
-
-        except Exception as exc:
-            if "cuda" in repr(exc).lower():
-                raise
-            logger.exception("Error processing %s", path)
+        except Exception:
+            logger.exception("Error writing output for %s", path)
             err_path.touch()
 
 
