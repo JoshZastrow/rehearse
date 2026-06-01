@@ -145,21 +145,21 @@ def test_train_args_has_channel_field():
     import dataclasses
     fields = {f.name: f for f in dataclasses.fields(TrainArgs)}
     assert "channel" in fields, "TrainArgs missing 'channel' field"
-    assert fields["channel"].default == 0, "channel must default to 0 (provider)"
+    assert fields["channel"].default == 1, "channel must default to 1 (caller)"
     assert "main_speaker_label" in fields, "TrainArgs missing 'main_speaker_label' field"
-    assert fields["main_speaker_label"].default == "provider"
+    assert fields["main_speaker_label"].default == "caller"
 
 
-def test_provider_config_has_channel_and_label():
-    """Provider config must set channel=0 and main_speaker_label=provider."""
+def test_default_config_has_caller_channel_and_label():
+    """Default config must set channel=1 and main_speaker_label=caller."""
     import yaml
     from pathlib import Path
     repo_root = Path(__file__).parents[2]
     cfg = yaml.safe_load(
         (repo_root / "rehearse/models/moshi_7B/config.yaml").read_text()
     )
-    assert cfg.get("channel") == 0, "provider config must have channel: 0"
-    assert cfg.get("main_speaker_label") == "provider"
+    assert cfg.get("channel") == 1, "default config must have channel: 1 (caller)"
+    assert cfg.get("main_speaker_label") == "caller"
 
 
 def test_caller_config_has_channel_and_label():
