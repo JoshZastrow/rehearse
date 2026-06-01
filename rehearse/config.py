@@ -27,9 +27,6 @@ class RuntimeConfig:
     session_root: Path
     anthropic_api_key: str | None = None
     anthropic_model: str = "claude-sonnet-4-6"
-    litellm_base_url: str | None = None   # LITELLM_BASE_URL — proxy URL (overrides direct Anthropic)
-    litellm_api_key: str | None = None    # LITELLM_API_KEY — proxy bearer token
-    litellm_model: str = "coach"          # LITELLM_MODEL — model alias on the proxy
     hume_clm_secret: str | None = None
     log_level: str = "info"
     validate_twilio_signature: bool = True
@@ -47,33 +44,8 @@ class RuntimeConfig:
     honcho_workspace_id: str = "rehearse"
     honcho_base_url: str | None = None  # set to http://localhost:8001 for self-hosted
     memory_mcp_url: str | None = None  # MEMORY_MCP_URL — MCP memory server endpoint
-    backend_type: str = "managed"
-    managed_api_key: str = ""
-    managed_config_id: str = ""
-    pipeline_speech_mode: str = "modular"
-    pipeline_stt_model: str = "whisper-tiny"
-    pipeline_tts_model: str = "kokoro"
-    pipeline_clm_url: str = "http://localhost:4000/chat/completions"
-    pipeline_clm_model: str = "coach"
-    pipeline_e2e_model: str = ""
-    pipeline_e2e_checkpoint: str = ""
-    interactive_checkpoint_path: str = ""     # INTERACTIVE_CHECKPOINT_PATH — local dir; empty = HF Hub
-    interactive_model_repo: str = "kyutai/moshiko-pytorch-bf16"  # INTERACTIVE_MODEL_REPO
-    interactive_device: str = "cuda"         # INTERACTIVE_DEVICE — "cuda" or "cpu"
-    interactive_asr_model: str = "base"      # INTERACTIVE_ASR_MODEL — whisper model size for user ASR
-    interactive_model_type: str = "moshi"    # INTERACTIVE_MODEL_TYPE — "moshi" or "personaplex"
-    interactive_modal_endpoint: str = ""     # INTERACTIVE_MODAL_ENDPOINT — wss://... for interactive-modal
-    enable_consent: bool = False
-    enable_meeting_phase_processor: bool = False
-    phase_classifier_model: str = "claude-haiku-4-5-20251001"
-    phase_classifier_context_turns: int = 10
-
-    def __post_init__(self) -> None:
-        """Backfill managed_api_key / managed_config_id from hume_* if absent."""
-        if not self.managed_api_key and self.hume_api_key:
-            object.__setattr__(self, "managed_api_key", self.hume_api_key)
-        if not self.managed_config_id and self.hume_config_id:
-            object.__setattr__(self, "managed_config_id", self.hume_config_id)
+    interactive_endpoint: str = ""  # INTERACTIVE_MODAL_ENDPOINT — wss:// URL of deployed Modal server
+    backend_type: str = "interactive"  # BACKEND_TYPE — which ConversationBackend to use
 
     @classmethod
     def from_env(cls, *, load_dotenv_file: bool = True) -> RuntimeConfig:
@@ -110,9 +82,6 @@ class RuntimeConfig:
             session_root=session_root,
             anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY"),
             anthropic_model=os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6"),
-            litellm_base_url=os.environ.get("LITELLM_BASE_URL") or None,
-            litellm_api_key=os.environ.get("LITELLM_API_KEY") or None,
-            litellm_model=os.environ.get("LITELLM_MODEL", "coach"),
             hume_clm_secret=os.environ.get("HUME_CLM_SECRET"),
             log_level=os.environ.get("LOG_LEVEL", "info"),
             validate_twilio_signature=os.environ.get("VALIDATE_TWILIO_SIGNATURE", "1") != "0",
@@ -142,38 +111,6 @@ class RuntimeConfig:
             honcho_workspace_id=os.environ.get("HONCHO_WORKSPACE_ID", "rehearse"),
             honcho_base_url=os.environ.get("HONCHO_BASE_URL") or None,
             memory_mcp_url=os.environ.get("MEMORY_MCP_URL") or None,
-            backend_type=os.environ.get("BACKEND_TYPE", "managed"),
-            managed_api_key=(
-                os.environ.get("MANAGED_API_KEY")
-                or os.environ.get("HUME_API_KEY")
-                or ""
-            ),
-            managed_config_id=(
-                os.environ.get("MANAGED_CONFIG_ID")
-                or os.environ.get("HUME_CONFIG_ID")
-                or os.environ.get("HUME_CONFIG_ID_COACH")
-                or ""
-            ),
-            pipeline_speech_mode=os.environ.get("PIPELINE_SPEECH_MODE", "modular"),
-            pipeline_stt_model=os.environ.get("PIPELINE_STT_MODEL", "whisper-tiny"),
-            pipeline_tts_model=os.environ.get("PIPELINE_TTS_MODEL", "kokoro"),
-            pipeline_clm_url=os.environ.get("PIPELINE_CLM_URL") or (
-                f"{os.environ['LITELLM_BASE_URL'].rstrip('/')}/chat/completions"
-                if os.environ.get("LITELLM_BASE_URL")
-                else "http://localhost:4000/chat/completions"
-            ),
-            pipeline_clm_model=os.environ.get("PIPELINE_CLM_MODEL")
-                or os.environ.get("LITELLM_MODEL", "coach"),
-            pipeline_e2e_model=os.environ.get("PIPELINE_E2E_MODEL", ""),
-            pipeline_e2e_checkpoint=os.environ.get("PIPELINE_E2E_CHECKPOINT", ""),
-            interactive_checkpoint_path=os.environ.get("INTERACTIVE_CHECKPOINT_PATH", ""),
-            interactive_model_repo=os.environ.get("INTERACTIVE_MODEL_REPO", "kyutai/moshiko-pytorch-bf16"),
-            interactive_device=os.environ.get("INTERACTIVE_DEVICE", "cuda"),
-            interactive_asr_model=os.environ.get("INTERACTIVE_ASR_MODEL", "base"),
-            interactive_model_type=os.environ.get("INTERACTIVE_MODEL_TYPE", "moshi"),
-            interactive_modal_endpoint=os.environ.get("INTERACTIVE_MODAL_ENDPOINT", ""),
-            enable_consent=os.environ.get("ENABLE_CONSENT", "0") == "1",
-            enable_meeting_phase_processor=os.environ.get("ENABLE_MEETING_PHASE_PROCESSOR", "0") == "1",
-            phase_classifier_model=os.environ.get("PHASE_CLASSIFIER_MODEL", "claude-haiku-4-5-20251001"),
-            phase_classifier_context_turns=int(os.environ.get("PHASE_CLASSIFIER_CONTEXT_TURNS", "10")),
+            interactive_endpoint=os.environ.get("INTERACTIVE_MODAL_ENDPOINT", ""),
+            backend_type=os.environ.get("BACKEND_TYPE", "interactive"),
         )
