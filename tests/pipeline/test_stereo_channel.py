@@ -137,3 +137,16 @@ def test_channel_out_of_bounds_raises(tmp_path):
     (tmp_path / "audio_stereo.json").write_text(json.dumps(info))
     with pytest.raises(ValueError, match="channel=5 out of range"):
         tok(wav, 0.0, str(p))
+
+
+def test_train_args_has_channel_field():
+    """TrainArgs must have channel and main_speaker_label with correct defaults."""
+    import sys
+    sys.path.insert(0, "lib/moshi-finetune")
+    from finetune.args import TrainArgs
+    import dataclasses
+    fields = {f.name: f for f in dataclasses.fields(TrainArgs)}
+    assert "channel" in fields, "TrainArgs missing 'channel' field"
+    assert fields["channel"].default == 0, "channel must default to 0 (provider)"
+    assert "main_speaker_label" in fields, "TrainArgs missing 'main_speaker_label' field"
+    assert fields["main_speaker_label"].default == "provider"
