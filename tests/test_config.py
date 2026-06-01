@@ -111,65 +111,23 @@ def test_runtime_config_consent_outcome_defaults(
     assert config.outcome_reprompt_limit == 1
 
 
-def test_config_has_backend_type_field():
-    import dataclasses
+def test_interactive_endpoint_config_default(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     from rehearse.config import RuntimeConfig
-    fields = {f.name for f in dataclasses.fields(RuntimeConfig)}
-    assert "backend_type" in fields
-    assert "managed_api_key" in fields
-    assert "managed_config_id" in fields
 
-
-def test_config_backend_type_defaults_to_managed():
-    from pathlib import Path
-    from rehearse.config import RuntimeConfig
-    cfg = RuntimeConfig(
-        twilio_account_sid="x",
-        twilio_auth_token="x",
-        twilio_from_number="+10000000000",
-        public_base_url="https://example.com",
-        hume_api_key="k",
-        hume_config_id="c",
-        session_root=Path("/tmp"),
-    )
-    assert cfg.backend_type == "managed"
-    assert cfg.managed_api_key == "k"
-    assert cfg.managed_config_id == "c"
-
-
-def test_interactive_config_defaults():
-    from pathlib import Path
-    from rehearse.config import RuntimeConfig
-    cfg = RuntimeConfig(
-        twilio_account_sid="x", twilio_auth_token="x",
-        twilio_from_number="x", public_base_url="x",
-        hume_api_key="x", hume_config_id="x",
-        session_root=Path("/tmp"),
-    )
-    assert cfg.interactive_checkpoint_path == ""
-    assert cfg.interactive_model_repo == "kyutai/moshiko-pytorch-bf16"
-    assert cfg.interactive_device == "cuda"
-    assert cfg.interactive_asr_model == "base"
-    assert cfg.interactive_model_type == "moshi"
+    _set_required_env(monkeypatch, tmp_path)
+    monkeypatch.delenv("INTERACTIVE_MODAL_ENDPOINT", raising=False)
+    cfg = RuntimeConfig.from_env(load_dotenv_file=False)
     assert cfg.interactive_modal_endpoint == ""
 
 
-def test_interactive_config_from_env(monkeypatch, tmp_path):
-    monkeypatch.setenv("INTERACTIVE_CHECKPOINT_PATH", "/models/moshi.safetensors")
-    monkeypatch.setenv("INTERACTIVE_MODEL_REPO", "kyutai/moshiko-pytorch-bf16")
-    monkeypatch.setenv("INTERACTIVE_DEVICE", "cpu")
-    monkeypatch.setenv("INTERACTIVE_ASR_MODEL", "tiny")
-    monkeypatch.setenv("INTERACTIVE_MODEL_TYPE", "personaplex")
-    monkeypatch.setenv("TWILIO_ACCOUNT_SID", "x")
-    monkeypatch.setenv("TWILIO_AUTH_TOKEN", "x")
-    monkeypatch.setenv("TWILIO_PHONE_NUMBER", "+1")
-    monkeypatch.setenv("BASE_URL", "http://x")
-    monkeypatch.setenv("HUME_API_KEY", "x")
-    monkeypatch.setenv("HUME_CONFIG_ID", "x")
-    monkeypatch.setenv("SESSIONS_DIR", str(tmp_path))
+def test_interactive_endpoint_config_from_env(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _set_required_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("INTERACTIVE_MODAL_ENDPOINT", "wss://example.modal.run/ws")
     from rehearse.config import RuntimeConfig
+
     cfg = RuntimeConfig.from_env(load_dotenv_file=False)
-    assert cfg.interactive_checkpoint_path == "/models/moshi.safetensors"
-    assert cfg.interactive_device == "cpu"
-    assert cfg.interactive_asr_model == "tiny"
-    assert cfg.interactive_model_type == "personaplex"
+    assert cfg.interactive_modal_endpoint == "wss://example.modal.run/ws"

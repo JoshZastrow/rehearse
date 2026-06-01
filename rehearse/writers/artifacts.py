@@ -14,7 +14,7 @@ from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import BinaryIO
 
-from rehearse.frames import AudioChunk, Frame, ProsodyEvent, TranscriptDelta
+from rehearse.frames import AudioChunk, Frame, ProsodyEvent, SessionStoredEvent, TranscriptDelta
 from rehearse.session.session import utcnow
 from rehearse.storage import LocalFilesystemStore
 from rehearse.types import (
@@ -311,6 +311,25 @@ class TelemetryLogger:
                 self._session_id,
                 "telemetry.jsonl",
                 record.model_dump_json(),
+            )
+
+
+class SessionStoreWriter:
+    """Record Modal Volume path into the session manifest on SessionStoredEvent."""
+
+    def __init__(self, session_id: str, store: LocalFilesystemStore) -> None:
+        self._session_id = session_id
+        self._store = store
+
+    async def run(self, frames: AsyncIterator[Frame]) -> None:
+        async for frame in frames:
+            if not isinstance(frame, SessionStoredEvent):
+                continue
+            await self._store.update_session(
+                self._session_id,
+                lambda s, vp=frame.volume_path: _add_artifact_path(
+                    s, key="modal_volume", file_name=vp
+                ),
             )
 
 

@@ -21,36 +21,14 @@ dependencies = [
     "honcho-ai>=2.1",
     "pg0-embedded>=0.14.1",
     "psycopg[binary]>=3.3.4",
+    "hindsight-all>=0.6.1",
     "modal>=0.73",
-    "pocket-tts>=2.1.0",
-    "faster-whisper>=1.1.0",
-    "litellm[proxy]>=1.40",
-    "httpx>=0.27",
     "websockets>=13.0",
-    "chz>=0.4",
-    "pyyaml>=6.0",
-    "fire>=0.6",
-    "simple-parsing>=0.1",
-    "safetensors>=0.4",
-    "tensorboard>=2.0",
-    "sphn>=0.1.12",
-    "submitit>=1.5",
-    "moshi",
-]
-
-[project.optional-dependencies]
-pipeline = [
-    "pocket-tts>=2.1.0",
-    "faster-whisper>=1.1.0",
-]
-moshi = [
-    "sentencepiece>=0.2.0",
 ]
 
 [project.scripts]
 rehearse-eval = "rehearse.eval.cli:main"
 rehearse-hume = "rehearse.services.hume_configs_cli:main"
-rehearse-train = "rehearse.train.cli:main"
 rehearse-init = "rehearse.cli.init:main"
 
 [dependency-groups]
@@ -59,6 +37,7 @@ dev = [
     "pytest-asyncio>=0.24",
     "ruff>=0.7",
     "pyright>=1.1",
+    "httpx>=0.27",
     "deepeval>=3.9.9",
 ]
 
@@ -69,13 +48,9 @@ build-backend = "hatchling.build"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-pythonpath = [".", "train"]
-addopts = "-m 'not live_api and not live_modal'"
+addopts = "-m 'not live_api'"
 markers = [
     "live_api: hits real provider APIs; requires sourced .env. Deselected by default. Run with `pytest -m live_api`.",
-    "live_modal: hits a deployed Modal endpoint; requires VLLM_BASE_URL. Deselected by default. Run with `pytest -m live_modal`.",
-    "slow: loads ML models, takes >10s",
-    "pipeline: requires faster-whisper + pocket-tts installed",
 ]
 
 [tool.ruff]
@@ -88,20 +63,3 @@ select = ["E", "F", "I", "W", "UP", "B"]
 [tool.pyright]
 pythonVersion = "3.11"
 typeCheckingMode = "standard"
-
-[tool.uv]
-# litellm[proxy] has no wheels for Python 3.14+ / emscripten.
-# Constrain resolution to the platforms this project actually targets.
-environments = [
-    "sys_platform == 'darwin'",
-    "sys_platform == 'linux'",
-    "sys_platform == 'win32'",
-]
-
-[tool.uv.workspace]
-members = [
-    "dev/lab",
-]
-
-[tool.uv.sources]
-moshi = { git = "https://github.com/kyutai-labs/moshi.git", subdirectory = "moshi" }
