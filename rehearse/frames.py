@@ -82,6 +82,20 @@ class IntakeComplete(Strict):
     error: str | None = None
 
 
+class SessionStoredEvent(Strict):
+    """Signal that a full-duplex session was persisted to the Modal Volume.
+
+    Published by the interactive server's WebSocket client when the server
+    emits a ``session_stored`` event. Subscribers annotate the session
+    manifest with the Volume path for downstream training data access.
+    """
+
+    session_id: str
+    volume_path: str  # absolute path inside the Modal Volume mount
+    artifacts: list[str]  # filenames present under volume_path
+    ts: float
+
+
 Frame: TypeAlias = (
     AudioChunk
     | TranscriptDelta
@@ -90,4 +104,5 @@ Frame: TypeAlias = (
     | EndOfCall
     | ConsentResolved
     | IntakeComplete
+    | SessionStoredEvent
 )
