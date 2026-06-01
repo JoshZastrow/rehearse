@@ -12,7 +12,7 @@ Annotate audio files with word-level transcripts using Whisper on Modal GPU.
 
 ── Output ───────────────────────────────────────────────────────────────────
     Each audio.wav gets a sibling audio.json:
-    {"alignments": [["word", [start_sec, end_sec], "SPEAKER_MAIN"], ...]}
+    {"alignments": [["word", [start_sec, end_sec], "caller|provider"], ...]}
 
     Already-annotated files are skipped (audio.json exists).
     Failed files write a audio.json.err sentinel; use rerun_errors=true to retry.
@@ -99,8 +99,8 @@ def _assign_speakers_from_segments(
     """Map each word to a role using pyannote segment overlap.
 
     For each word, finds the diarization segment with the most overlap
-    and maps its speaker ID to 'user' or 'coach' via id_to_role.
-    Falls back to 'user' if no segment overlaps.
+    and maps its speaker ID to 'caller' or 'provider' via id_to_role.
+    Falls back to 'caller' if no segment overlaps.
     """
     labels = []
     for word in words:
@@ -111,7 +111,7 @@ def _assign_speakers_from_segments(
             if overlap > best_overlap:
                 best_overlap = overlap
                 best_speaker = seg["speaker"]
-        role = id_to_role.get(best_speaker, "user") if best_speaker else "user"
+        role = id_to_role.get(best_speaker, "caller") if best_speaker else "caller"
         labels.append(role)
     return labels
 
@@ -124,16 +124,21 @@ def _assign_speakers_from_transcript(
 
     For each word, finds the transcript utterance whose [ts_start, ts_end]
     window contains the word midpoint and inherits its speaker label.
-    Falls back to 'user' if no utterance matches.
+    Falls back to 'caller' if no utterance matches.
     """
+    # Accept both old labels ("user"/"coach") and new labels ("caller"/"provider").
+    _TRANSCRIPT_LABEL_MAP = {
+        "user": "caller", "coach": "provider",
+        "caller": "caller", "provider": "provider",
+    }
     labels = []
     for word in words:
         mid = (word["start"] + word["end"]) / 2
-        role = "user"
+        role = "caller"
         for utt in transcript:
             if utt["ts_start"] <= mid <= utt["ts_end"]:
-                raw = utt.get("speaker", "user")
-                role = raw if raw in ("user", "coach") else "user"
+                raw = utt.get("speaker", "caller")
+                role = _TRANSCRIPT_LABEL_MAP.get(raw, "caller")
                 break
         labels.append(role)
     return labels
@@ -145,18 +150,22 @@ def _map_speaker_ids_to_roles(
 ) -> dict[str, str]:
     """Determine which pyannote speaker ID is 'coach' vs 'user'.
 
-    Uses the first non-interim coach utterance in the transcript as an anchor:
-    whichever diarization segment overlaps it most is labeled 'coach',
-    the other 'user'. Falls back to SPEAKER_00=coach if no anchor found.
+    Uses the first non-interim provider utterance in the transcript as an anchor:
+    whichever diarization segment overlaps it most is labeled 'provider',
+    the other 'caller'. Falls back to SPEAKER_00=provider if no anchor found.
+    Accepts both old ("coach"/"user") and new ("provider"/"caller") transcript labels.
     """
-    coach_utt = next(
-        (u for u in transcript if u.get("speaker") == "coach" and not u.get("is_interim")),
+    provider_utt = next(
+        (
+            u for u in transcript
+            if u.get("speaker") in ("coach", "provider") and not u.get("is_interim")
+        ),
         None,
     )
-    if coach_utt is None:
-        return {"SPEAKER_00": "coach", "SPEAKER_01": "user"}
+    if provider_utt is None:
+        return {"SPEAKER_00": "provider", "SPEAKER_01": "caller"}
 
-    ts, te = coach_utt["ts_start"], coach_utt["ts_end"]
+    ts, te = provider_utt["ts_start"], provider_utt["ts_end"]
     if te - ts < 0.1:  # zero-duration transcript timestamp — expand to find containing segment
         te = ts + 0.1
     best_id, best_overlap = "SPEAKER_00", 0.0
@@ -167,7 +176,7 @@ def _map_speaker_ids_to_roles(
             best_id = seg["speaker"]
 
     speaker_ids = sorted({seg["speaker"] for seg in segments})
-    return {sid: ("coach" if sid == best_id else "user") for sid in speaker_ids}
+    return {sid: ("provider" if sid == best_id else "caller") for sid in speaker_ids}
 
 
 @app.function(image=image, gpu=_GPU_TYPE, timeout=1800)
@@ -262,7 +271,7 @@ def process_remote(
     elif transcript:
         speaker_labels = _assign_speakers_from_transcript(all_words, transcript)
     else:
-        speaker_labels = ["user"] * len(all_words)
+        speaker_labels = ["caller"] * len(all_words)
 
     alignments = [
         [w["text"], [w["start"], w["end"]], label]
@@ -442,7 +451,7 @@ def _run(config: AnnotateConfig) -> None:
             elif transcript:
                 logger.info("  → using transcript fallback (%d utterances)", len(transcript))
             else:
-                logger.warning("  → no speaker data found, defaulting to 'user'")
+                logger.warning("  → no speaker data found, defaulting to 'caller'")
             result = process_remote.remote(
                 audio_bytes,
                 config.lang,

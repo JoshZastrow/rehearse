@@ -8,7 +8,7 @@ Input schemas (session directory):
 
 Output schemas (annotation result):
     AnnotationOutput — audio.json produced by annotate.py
-                       {"alignments": [["word", [start_sec, end_sec], "SPEAKER_MAIN"], ...]}
+                       {"alignments": [["word", [start_sec, end_sec], "caller|provider"], ...]}
 """
 
 from __future__ import annotations
@@ -18,7 +18,15 @@ from typing import Annotated, Any, Literal, Optional
 
 from pydantic import BaseModel, BeforeValidator
 
-Speaker = Literal["user", "coach"]
+Speaker = Literal["caller", "provider"]
+
+# Backward-compat map: existing audio.json files written with old labels still validate.
+_LABEL_COMPAT: dict[str, Speaker] = {
+    "user": "caller",
+    "coach": "provider",
+    "caller": "caller",
+    "provider": "provider",
+}
 
 
 # ─── Session input schemas ────────────────────────────────────────────────────
@@ -172,9 +180,10 @@ def _parse_alignment_item(v: Any) -> tuple[str, tuple[float, float], Speaker]:
     text, ts, speaker = v
     if not isinstance(ts, (list, tuple)) or len(ts) != 2:
         raise ValueError(f"timestamp must be [start, end], got {ts!r}")
-    if speaker not in ("user", "coach"):
-        raise ValueError(f"speaker must be 'user' or 'coach', got {speaker!r}")
-    return (str(text), (float(ts[0]), float(ts[1])), speaker)
+    normalized = _LABEL_COMPAT.get(speaker)
+    if normalized is None:
+        raise ValueError(f"speaker must be 'caller' or 'provider', got {speaker!r}")
+    return (str(text), (float(ts[0]), float(ts[1])), normalized)
 
 
 AlignmentItem = Annotated[
@@ -193,3 +202,5 @@ class AnnotationOutput(BaseModel):
     """
 
     alignments: list[AlignmentItem]
+
+    # speaker labels: "caller" = person being coached, "provider" = coach/AI agent

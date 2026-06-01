@@ -87,14 +87,17 @@ def _derive_speaker_map(segments: list[dict], alignments: list) -> dict[str, str
 
     mapping: dict[str, str] = {}
     for sid, labels in speaker_labels.items():
-        mapping[sid] = Counter(labels).most_common(1)[0][0]
+        # Normalize any legacy "user"/"coach" labels from existing audio.json files.
+        _compat = {"user": "caller", "coach": "provider", "caller": "caller", "provider": "provider"}
+        raw = Counter(labels).most_common(1)[0][0]
+        mapping[sid] = _compat.get(raw, raw)
 
     # Guarantee every segment speaker has an entry
     all_ids = sorted({seg["speaker"] for seg in segments})
     assigned_roles = set(mapping.values())
     for sid in all_ids:
         if sid not in mapping:
-            mapping[sid] = "user" if "coach" in assigned_roles else "coach"
+            mapping[sid] = "caller" if "provider" in assigned_roles else "provider"
 
     return mapping
 
@@ -126,14 +129,14 @@ def prepare_session(session_dir: Path) -> Path:
     speaker_map = _derive_speaker_map(segments, alignments)
     logger.debug("Speaker map: %s", speaker_map)
 
-    left = np.zeros_like(mono)   # coach
-    right = np.zeros_like(mono)  # user
+    left = np.zeros_like(mono)   # provider
+    right = np.zeros_like(mono)  # caller
 
     for seg in segments:
-        role = speaker_map.get(seg["speaker"], "user")
+        role = speaker_map.get(seg["speaker"], "caller")
         s = int(seg["start"] * sr)
         e = min(int(seg["end"] * sr), len(mono))
-        if role == "coach":
+        if role == "provider":
             left[s:e] = mono[s:e]
         else:
             right[s:e] = mono[s:e]
