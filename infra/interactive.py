@@ -380,6 +380,42 @@ class InteractiveServer:
         pass  # server started in load()
 
 
+@app.function(
+    image=interactive_image,
+    volumes={_SESSIONS_MOUNT: sessions_vol},
+    timeout=10 * MINUTES,
+)
+def transcribe_caller_audio(session_id: str) -> None:
+    """Run faster-whisper on caller_stream.pcm and write caller_transcript.jsonl."""
+    import json as _json
+    import numpy as _np
+    from faster_whisper import WhisperModel
+
+    session_dir = Path(_SESSIONS_MOUNT) / session_id
+    pcm_path = session_dir / "caller_stream.pcm"
+    if not pcm_path.exists():
+        print(f"[transcribe] caller_stream.pcm missing for {session_id}", flush=True)
+        return
+
+    raw = pcm_path.read_bytes()
+    audio = _np.frombuffer(raw, dtype=_np.int16).astype(_np.float32) / 32768.0
+
+    model = WhisperModel("base", device="cpu", compute_type="int8")
+    segments, _info = model.transcribe(audio, language="en", vad_filter=True)
+
+    rows = []
+    for seg in segments:
+        rows.append(_json.dumps({
+            "start": round(seg.start, 3),
+            "end": round(seg.end, 3),
+            "text": seg.text.strip(),
+        }))
+
+    (session_dir / "caller_transcript.jsonl").write_text("\n".join(rows))
+    sessions_vol.commit()
+    print(f"[transcribe] wrote {len(rows)} segments for {session_id}", flush=True)
+
+
 def _write_mask(path: Path, token_rows: list[str]) -> None:
     """Write mask.jsonl — one row per lm_gen.step() with speaker label.
 
