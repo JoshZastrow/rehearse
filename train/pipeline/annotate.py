@@ -179,105 +179,97 @@ def _map_speaker_ids_to_roles(
     return {sid: ("provider" if sid == best_id else "caller") for sid in speaker_ids}
 
 
-@app.function(image=image, gpu=_GPU_TYPE, timeout=1800)
-def process_remote(
-    audio_bytes: bytes,
-    lang: str,
-    whisper_model: str,
-    keep_silence: float,
-    segments: list[dict] | None = None,
-    transcript: list[dict] | None = None,
-) -> dict:
-    """Transcribe audio on a Modal GPU worker using Whisper with forced alignment.
+@app.cls(image=image, gpu=_GPU_TYPE, timeout=1800, max_inputs=20)
+class Annotator:
+    whisper_model: str = modal.parameter(default="medium")
 
-    Args:
-        audio_bytes: Raw WAV file bytes.
-        lang: Whisper language code (e.g. "en", "fr").
-        whisper_model: Whisper model size (e.g. "medium", "large-v2").
-        keep_silence: Seconds of silence to pad around VAD segment boundaries.
-        segments: Diarization segments from audio_segments.json (optional).
-            If provided, used to assign speaker labels to each word.
-        transcript: Transcript utterances from transcript.jsonl (optional).
-            Used to map diarization speaker IDs to roles, or as fallback
-            speaker assignment when segments is None.
+    @modal.enter()
+    def load(self):
+        import torch
+        import whisper_timestamped as whisper
 
-    Returns:
-        {"alignments": [["word", [start_sec, end_sec], "user|coach"], ...]}
-    """
-    import torch
-    import torchaudio.functional as F
-    import whisper_timestamped as whisper
-    import sphn
+        self.whisper = whisper
+        self.model = whisper.load_model(self.whisper_model, device=torch.device("cuda:0"))
 
-    transcribe_mod = importlib.import_module("whisper_timestamped.transcribe")
-    old_get_vad = transcribe_mod.get_vad_segments
+    @modal.method()
+    def run(
+        self,
+        audio_bytes: bytes,
+        lang: str,
+        keep_silence: float,
+        segments: list[dict] | None = None,
+        transcript: list[dict] | None = None,
+    ) -> dict:
+        import torch
+        import torchaudio.functional as F
+        import sphn
 
-    device = torch.device("cuda:0")
-    model = whisper.load_model(whisper_model, device=device)
+        transcribe_mod = importlib.import_module("whisper_timestamped.transcribe")
+        old_get_vad = transcribe_mod.get_vad_segments
 
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-        f.write(audio_bytes)
-        tmp = f.name
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+            f.write(audio_bytes)
+            tmp = f.name
 
-    try:
-        if keep_silence > 0:
-            d = int(SAMPLE_RATE * keep_silence)
+        try:
+            if keep_silence > 0:
+                d = int(SAMPLE_RATE * keep_silence)
 
-            def _patched_get_vad(*args, **kwargs):
-                segs = old_get_vad(*args, **kwargs)
-                out, last = [], 0
-                for seg in segs:
-                    out.append({"start": max(last, seg["start"] - d), "end": seg["end"] + d})
-                    last = out[-1]["end"]
-                return out
+                def _patched_get_vad(*args, **kwargs):
+                    segs = old_get_vad(*args, **kwargs)
+                    out, last = [], 0
+                    for seg in segs:
+                        out.append({"start": max(last, seg["start"] - d), "end": seg["end"] + d})
+                        last = out[-1]["end"]
+                    return out
 
-            transcribe_mod.get_vad_segments = _patched_get_vad
+                transcribe_mod.get_vad_segments = _patched_get_vad
 
-        gc.collect()
-        torch.cuda.empty_cache()
+            gc.collect()
+            torch.cuda.empty_cache()
 
-        x, sr = sphn.read(tmp)
-        x = torch.from_numpy(x).cuda()
-        vocals = x[0][None]
-        vocals = F.resample(vocals, sr, SAMPLE_RATE)
-        vocals = vocals.cpu().numpy()[0]
-        dur = vocals.shape[-1] / SAMPLE_RATE
+            x, sr = sphn.read(tmp)
+            x = torch.from_numpy(x).cuda()
+            vocals = x[0][None]
+            vocals = F.resample(vocals, sr, SAMPLE_RATE)
+            vocals = vocals.cpu().numpy()[0]
+            dur = vocals.shape[-1] / SAMPLE_RATE
 
-        result = whisper.transcribe(
-            model,
-            vocals,
-            language=lang,
-            vad="auditok" if dur > 10 else None,
-            best_of=5,
-            beam_size=5,
-            temperature=(0.0, 0.2, 0.4, 0.6, 0.8, 1.0),
-            verbose=None,
-        )
-    finally:
-        os.unlink(tmp)
-        if keep_silence > 0:
-            transcribe_mod.get_vad_segments = old_get_vad
+            result = self.whisper.transcribe(
+                self.model,
+                vocals,
+                language=lang,
+                vad="auditok" if dur > 10 else None,
+                best_of=5,
+                beam_size=5,
+                temperature=(0.0, 0.2, 0.4, 0.6, 0.8, 1.0),
+                verbose=None,
+            )
+        finally:
+            os.unlink(tmp)
+            if keep_silence > 0:
+                transcribe_mod.get_vad_segments = old_get_vad
 
-    all_words = []
-    for segment in result["segments"]:
-        if "words" not in segment:
-            logger.warning("No word-level timestamps in segment: %r", segment)
-            continue
-        all_words.extend(segment["words"])
+        all_words = []
+        for segment in result["segments"]:
+            if "words" not in segment:
+                logger.warning("No word-level timestamps in segment: %r", segment)
+                continue
+            all_words.extend(segment["words"])
 
-    if segments:
-        id_to_role = _map_speaker_ids_to_roles(segments, transcript or [])
-        speaker_labels = _assign_speakers_from_segments(all_words, segments, id_to_role)
-    elif transcript:
-        speaker_labels = _assign_speakers_from_transcript(all_words, transcript)
-    else:
-        speaker_labels = ["caller"] * len(all_words)
+        if segments:
+            id_to_role = _map_speaker_ids_to_roles(segments, transcript or [])
+            speaker_labels = _assign_speakers_from_segments(all_words, segments, id_to_role)
+        elif transcript:
+            speaker_labels = _assign_speakers_from_transcript(all_words, transcript)
+        else:
+            speaker_labels = ["caller"] * len(all_words)
 
-    alignments = [
-        [w["text"], [w["start"], w["end"]], label]
-        for w, label in zip(all_words, speaker_labels)
-    ]
-    return {"alignments": alignments}
+        alignments = [
+            [w["text"], [w["start"], w["end"]], label]
+            for w, label in zip(all_words, speaker_labels)
+        ]
+        return {"alignments": alignments}
 
 
 # ─── Config ───────────────────────────────────────────────────────────────────
@@ -451,16 +443,16 @@ def _run(config: AnnotateConfig) -> None:
             yield (
                 path.read_bytes(),
                 config.lang,
-                config.whisper_model,
                 config.keep_silence_in_segments,
                 segments,
                 transcript,
             )
 
     logger.info("Dispatching %d sessions to Modal...", len(pending))
+    annotator = Annotator(whisper_model=config.whisper_model)
     for path, result in zip(
         pending,
-        process_remote.starmap(_iter_inputs(), return_exceptions=True),
+        annotator.run.starmap(_iter_inputs(), return_exceptions=True),
     ):
         out_path = path.with_suffix(".json")
         err_path = path.with_suffix(".json.err")
@@ -516,7 +508,8 @@ async def annotate_session_async(
         session_dir = audio_path.parent
         segments = _load_json_if_exists(session_dir / "audio_segments.json", "segments")
         transcript = _load_jsonl_if_exists(session_dir / "transcript.jsonl")
-        call = await process_remote.spawn.aio(audio_bytes, lang, whisper_model, keep_silence, segments, transcript)
+        annotator = Annotator(whisper_model=whisper_model)
+        call = await annotator.run.spawn.aio(audio_bytes, lang, keep_silence, segments, transcript)
         result = await call.get.aio()
         with _write_and_rename(out_path) as fh:
             json.dump(result, fh, ensure_ascii=False)

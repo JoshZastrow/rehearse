@@ -80,49 +80,41 @@ image = (
 )
 
 
-# ─── Modal GPU function ───────────────────────────────────────────────────────
+# ─── Modal GPU class ──────────────────────────────────────────────────────────
 
 
-@app.function(
+@app.cls(
     image=image,
     gpu=_GPU_TYPE,
     timeout=1800,
     secrets=[modal.Secret.from_name("HF_TOKEN")],
+    max_inputs=50,
 )
-def diarize_remote(audio_bytes: bytes, num_speakers: int = 2) -> list[dict]:
-    """Run speaker diarization on a Modal GPU worker using pyannote.
+class Diarizer:
+    @modal.enter()
+    def load(self):
+        import torch
+        from pyannote.audio import Pipeline
 
-    Args:
-        audio_bytes: Raw WAV file bytes.
-        num_speakers: Expected number of distinct speakers in the audio.
+        self.pipeline = Pipeline.from_pretrained(
+            "pyannote/speaker-diarization-3.1",
+            use_auth_token=os.environ["HF_TOKEN"],
+        )
+        self.pipeline.to(torch.device("cuda:0"))
 
-    Returns:
-        List of segments: [{"speaker": "SPEAKER_00", "start": 0.0, "end": 2.3}, ...]
-    """
-    import torch
-    from pyannote.audio import Pipeline
-
-    device = torch.device("cuda:0")
-    pipeline = Pipeline.from_pretrained(
-        "pyannote/speaker-diarization-3.1",
-        use_auth_token=os.environ["HF_TOKEN"],
-    )
-    pipeline.to(device)
-
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-        f.write(audio_bytes)
-        tmp = f.name
-
-    try:
-        diarization = pipeline(tmp, num_speakers=num_speakers)
-    finally:
-        os.unlink(tmp)
-
-    segments = []
-    for turn, _, speaker in diarization.itertracks(yield_label=True):
-        segments.append({"speaker": speaker, "start": turn.start, "end": turn.end})
-
-    return segments
+    @modal.method()
+    def run(self, audio_bytes: bytes, num_speakers: int = 2) -> list[dict]:
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+            f.write(audio_bytes)
+            tmp = f.name
+        try:
+            diarization = self.pipeline(tmp, num_speakers=num_speakers)
+        finally:
+            os.unlink(tmp)
+        return [
+            {"speaker": speaker, "start": turn.start, "end": turn.end}
+            for turn, _, speaker in diarization.itertracks(yield_label=True)
+        ]
 
 
 # ─── Config ───────────────────────────────────────────────────────────────────
@@ -230,9 +222,10 @@ def _run(config: DiarizeConfig) -> None:
     inputs = ((p.read_bytes(), config.num_speakers) for p in pending)
 
     logger.info("Dispatching %d sessions to Modal...", len(pending))
+    diarizer = Diarizer()
     for path, result in zip(
         pending,
-        diarize_remote.starmap(inputs, return_exceptions=True),
+        diarizer.run.starmap(inputs, return_exceptions=True),
     ):
         out_path = path.parent / "audio_segments.json"
         err_path = path.parent / "audio_segments.json.err"
