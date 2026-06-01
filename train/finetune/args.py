@@ -79,6 +79,12 @@ class TrainArgs(Serializable):
     num_microbatches: int = 1
 
     duration_sec: float = 10
+    channel: int = 0
+    """Audio channel to encode with Mimi. 0 = provider (left), 1 = caller (right).
+    Only meaningful when training from audio_stereo.wav (stereo input)."""
+    main_speaker_label: str = "provider"
+    """Speaker label to supervise text loss on. Must match labels in audio.json
+    alignments. Options: 'provider' (coach/AI agent) or 'caller' (person being coached)."""
     batch_size: int = 1
     max_norm: float = 1.0  # Gradient clipping.
     max_steps: int = 100  # Number of training steps.

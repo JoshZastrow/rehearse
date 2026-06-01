@@ -141,8 +141,6 @@ def test_channel_out_of_bounds_raises(tmp_path):
 
 def test_train_args_has_channel_field():
     """TrainArgs must have channel and main_speaker_label with correct defaults."""
-    import sys
-    sys.path.insert(0, "lib/moshi-finetune")
     from finetune.args import TrainArgs
     import dataclasses
     fields = {f.name: f for f in dataclasses.fields(TrainArgs)}
