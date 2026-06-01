@@ -70,10 +70,7 @@ interactive_image = (
 # ---------------------------------------------------------------------------
 
 hf_cache_vol = modal.Volume.from_name("huggingface-cache", create_if_missing=True)
-sessions_vol = modal.Volume.from_name("rehearse-sessions", create_if_missing=True)
 app = modal.App("rehearse-interactive")
-
-_SESSIONS_MOUNT = "/mnt/sessions"
 
 MINUTES = 60
 _AIOHTTP_PORT = 8998
@@ -88,7 +85,7 @@ _AIOHTTP_PORT = 8998
     gpu="A10G",
     scaledown_window=3 * MINUTES,
     timeout=30 * MINUTES,
-    volumes={"/root/.cache/huggingface": hf_cache_vol, _SESSIONS_MOUNT: sessions_vol},
+    volumes={"/root/.cache/huggingface": hf_cache_vol},
 )
 class InteractiveServer:
 
@@ -211,19 +208,19 @@ class InteractiveServer:
             self._mimi.reset_streaming()
             self._lm_gen.reset_streaming()
 
+            from rehearse.backends.interactive.asr import InteractiveASR  # type: ignore[import]
+
             frame_size = self._mimi.frame_size
             pcm_buf = np.array([], dtype=np.float32)
             coach_utt_id = str(uuid.uuid4())
             coach_pieces: list[str] = []
             silence_streak = 0
             skip_frames = 1
+            asr = InteractiveASR(model_size=os.environ.get("INTERACTIVE_ASR_MODEL", "base"))
             frames_rx = 0
             frames_tx = 0
             mimi_frames = 0
             t_start = _time.monotonic()
-            caller_buf = bytearray()
-            provider_buf = bytearray()
-            token_rows: list[str] = []
 
             async for msg in ws:
                 if msg.type in (aiohttp.WSMsgType.ERROR, aiohttp.WSMsgType.CLOSED):
@@ -242,7 +239,7 @@ class InteractiveServer:
                     )
 
                 raw: bytes = msg.data
-                caller_buf += raw
+                asr.push_audio(raw)
                 pcm16 = np.frombuffer(raw, dtype=np.int16).astype(np.float32)
                 t_in = torch.from_numpy(pcm16 / 32768.0).float().unsqueeze(0)
                 pcm_24k = F.resample(t_in, _REHEARSE_SR, _MOSHI_SR).squeeze(0).numpy()
@@ -279,15 +276,6 @@ class InteractiveServer:
                             else:
                                 silence_streak += 1
 
-                            t_ms = (_time.monotonic() - t_start) * 1000.0
-                            token_rows.append(json.dumps({
-                                "frame_idx": mimi_frames,
-                                "t_ms": round(t_ms, 1),
-                                "text_token_id": text_id,
-                                "text_piece": token_piece or "",
-                                "is_padding": text_id == pad_id,
-                            }))
-
                             wav = self._mimi.decode(tokens[:, 1:, :])
                             audio_16k = F.resample(
                                 wav.squeeze(0).squeeze(0).unsqueeze(0),
@@ -295,7 +283,6 @@ class InteractiveServer:
                                 _REHEARSE_SR,
                             ).squeeze(0).clamp(-1.0, 1.0)
                             pcm16_out = (audio_16k * 32767).to(torch.int16).cpu().numpy().tobytes()
-                            provider_buf += pcm16_out
                             try:
                                 await ws.send_bytes(pcm16_out)
                                 if token_piece is not None:
@@ -327,6 +314,27 @@ class InteractiveServer:
                                 coach_pieces = []
                                 coach_utt_id = str(uuid.uuid4())
                                 silence_streak = 0
+                                user_text = asr.transcribe_and_reset()
+                                if user_text:
+                                    user_utt_id = str(uuid.uuid4())
+                                    try:
+                                        await ws.send_str(json.dumps({
+                                            "type": "transcript",
+                                            "utterance_id": user_utt_id,
+                                            "speaker": "user",
+                                            "text": user_text,
+                                            "is_final": True,
+                                        }))
+                                        await ws.send_str(json.dumps({
+                                            "type": "prosody",
+                                            "utterance_id": user_utt_id,
+                                            "speaker": "user",
+                                            "arousal": 0.0,
+                                            "valence": 0.0,
+                                        }))
+                                    except Exception:
+                                        return
+                                    self._log(f"ws: session={session_id} user_transcript={user_text!r}")
 
             elapsed = _time.monotonic() - t_start
             self._log(
@@ -345,29 +353,20 @@ class InteractiveServer:
                 }))
                 self._log(f"ws: session={session_id} transcript[final]={text!r}")
 
-            # Persist session artifacts to Modal Volume
-            session_dir = Path(_SESSIONS_MOUNT) / session_id
-            try:
-                session_dir.mkdir(parents=True, exist_ok=True)
-                (session_dir / "caller_stream.pcm").write_bytes(bytes(caller_buf))
-                (session_dir / "provider_stream.pcm").write_bytes(bytes(provider_buf))
-                (session_dir / "tokens.jsonl").write_text("\n".join(token_rows))
-                _write_mask(session_dir / "mask.jsonl", token_rows)
-                sessions_vol.commit()
-                transcribe_caller_audio.spawn(session_id)
-                artifacts = ["caller_stream.pcm", "provider_stream.pcm", "tokens.jsonl", "mask.jsonl"]
-                self._log(
-                    f"ws: session={session_id} stored "
-                    f"{len(caller_buf)} caller bytes, {len(provider_buf)} provider bytes"
-                )
-                await ws.send_str(json.dumps({
-                    "type": "session_stored",
-                    "session_id": session_id,
-                    "volume_path": str(session_dir),
-                    "artifacts": artifacts,
-                }))
-            except Exception as _store_err:
-                self._log(f"ws: session={session_id} storage failed: {_store_err}")
+            user_text = asr.transcribe_and_reset()
+            if user_text:
+                user_utt_id = str(uuid.uuid4())
+                try:
+                    await ws.send_str(json.dumps({
+                        "type": "transcript",
+                        "utterance_id": user_utt_id,
+                        "speaker": "user",
+                        "text": user_text,
+                        "is_final": True,
+                    }))
+                except Exception:
+                    pass
+                self._log(f"ws: session={session_id} user_transcript[final]={user_text!r}")
 
             try:
                 await ws.send_str(json.dumps({"type": "end_of_call", "reason": "hangup"}))
@@ -378,62 +377,6 @@ class InteractiveServer:
     @modal.web_server(_AIOHTTP_PORT)
     def serve(self):
         pass  # server started in load()
-
-
-@app.function(
-    image=interactive_image,
-    volumes={_SESSIONS_MOUNT: sessions_vol},
-    timeout=10 * MINUTES,
-)
-def transcribe_caller_audio(session_id: str) -> None:
-    """Run faster-whisper on caller_stream.pcm and write caller_transcript.jsonl."""
-    import json as _json
-    import numpy as _np
-    from faster_whisper import WhisperModel
-
-    session_dir = Path(_SESSIONS_MOUNT) / session_id
-    pcm_path = session_dir / "caller_stream.pcm"
-    if not pcm_path.exists():
-        print(f"[transcribe] caller_stream.pcm missing for {session_id}", flush=True)
-        return
-
-    raw = pcm_path.read_bytes()
-    audio = _np.frombuffer(raw, dtype=_np.int16).astype(_np.float32) / 32768.0
-
-    model = WhisperModel("base", device="cpu", compute_type="int8")
-    segments, _info = model.transcribe(audio, language="en", vad_filter=True)
-
-    rows = []
-    for seg in segments:
-        rows.append(_json.dumps({
-            "start": round(seg.start, 3),
-            "end": round(seg.end, 3),
-            "text": seg.text.strip(),
-        }))
-
-    (session_dir / "caller_transcript.jsonl").write_text("\n".join(rows))
-    sessions_vol.commit()
-    print(f"[transcribe] wrote {len(rows)} segments for {session_id}", flush=True)
-
-
-def _write_mask(path: Path, token_rows: list[str]) -> None:
-    """Write mask.jsonl — one row per lm_gen.step() with speaker label.
-
-    Frames with a non-padding text token are labelled 'provider' (the coach
-    model is actively generating). All other frames are labelled 'caller'.
-    Training code zeros loss on 'caller' frames so gradients flow only
-    through provider outputs.
-    """
-    lines = []
-    for row_str in token_rows:
-        row = json.loads(row_str)
-        speaker = "caller" if row["is_padding"] else "provider"
-        lines.append(json.dumps({
-            "frame_idx": row["frame_idx"],
-            "t_ms": row["t_ms"],
-            "speaker": speaker,
-        }))
-    path.write_text("\n".join(lines))
 
 
 # ---------------------------------------------------------------------------
