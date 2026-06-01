@@ -279,37 +279,49 @@ Rehearse includes a pipeline to fine-tune [Moshi](https://github.com/kyutai-labs
 
 The pipeline runs in four stages. Each stage writes artifacts consumed by the next and can be run independently.
 
+**0. Build initial manifest** — index all session directories into a JSONL manifest that the GPU stages consume:
+
+```bash
+uv run python train/pipeline/dataset.py \
+  sessions_root=sessions/ \
+  out=data/sessions.jsonl \
+  push_to_volume=false \
+  require_annotation=false
+```
+
 **1. Diarize** — assign speaker segments using pyannote on Modal GPU:
 
 ```bash
-uv run python train/pipeline/diarize.py sessions_root=sessions/
+modal run train/pipeline/diarize.py --egs data/sessions.jsonl
 ```
 
-Writes `audio_segments.json` to each session directory.
+Writes `audio_segments.json` to each session directory. Override the GPU type with `REHEARSE_GPU=A10G modal run ...`.
 
 **2. Annotate** — Whisper word-level transcription + speaker labelling on Modal GPU:
 
 ```bash
-uv run python train/pipeline/annotate.py egs=data/sessions.jsonl
+modal run train/pipeline/annotate.py --egs data/sessions.jsonl
 ```
 
-Writes `audio.json` (word alignments with `coach`/`user` speaker labels) and automatically chains into the prepare step.
+Writes `audio.json` (word alignments with `caller`/`provider` speaker labels) and automatically chains into the prepare step.
 
-**3. Prepare** — split mono mixed recording into a stereo WAV (coach left, user right):
+**3. Prepare** — split mono mixed recording into a stereo WAV (provider left, caller right):
 
 ```bash
 uv run python train/pipeline/prepare.py egs=data/sessions.jsonl
 ```
 
-Writes `audio_stereo.wav` and `audio_stereo.json` to each session directory. This step also runs automatically as a post-annotation hook.
+Writes `audio_stereo.wav` and `audio_stereo.json` to each session directory. This step runs automatically as a post-annotation hook, so it only needs to be run manually if you skipped step 2 or need to reprocess.
 
-**4. Build manifest** — index prepared sessions and push to the Modal Volume:
+**4. Rebuild manifest** — reindex sessions (now resolves to `audio_stereo.wav`) and push to the Modal Volume:
 
 ```bash
-uv run python train/pipeline/dataset.py sessions_root=sessions/ out=data/sessions.jsonl
+uv run python train/pipeline/dataset.py \
+  sessions_root=sessions/ \
+  out=data/sessions.jsonl
 ```
 
-Writes `data/sessions.jsonl` (one line per session with `path` and `duration`) and syncs all audio and annotation files to the `rehearse-training` Modal Volume.
+Writes `data/sessions.jsonl` (one line per session with `path` and `duration`) and syncs all audio and annotation files to the `rehearse-training` Modal Volume. Sessions without `audio_stereo.wav` fall back to `audio.wav` automatically.
 
 ### Training
 
