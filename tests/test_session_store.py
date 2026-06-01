@@ -10,9 +10,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "infra"))
 
-
-import pytest
-from rehearse.frames import SessionStoredEvent
+from rehearse.frames import SessionStoredEvent  # noqa: E402
 
 
 @pytest.mark.asyncio
@@ -73,8 +71,6 @@ async def test_session_store_writer_ignores_other_frames(tmp_path):
 
 
 def test_session_stored_event_fields():
-    from rehearse.frames import SessionStoredEvent
-
     ev = SessionStoredEvent(
         session_id="sess-1",
         volume_path="/sessions/sess-1",
@@ -84,3 +80,48 @@ def test_session_stored_event_fields():
     assert ev.session_id == "sess-1"
     assert ev.volume_path == "/sessions/sess-1"
     assert "mask.jsonl" in ev.artifacts
+
+
+def test_write_mask_labels_padding_as_caller(tmp_path):
+    from interactive import _write_mask
+
+    token_rows = [
+        '{"frame_idx": 0, "t_ms": 0.0, "text_token_id": 3, "text_piece": "", "is_padding": true}',
+        '{"frame_idx": 1, "t_ms": 80.0, "text_token_id": 42, "text_piece": "▁hello", "is_padding": false}',
+        '{"frame_idx": 2, "t_ms": 160.0, "text_token_id": 3, "text_piece": "", "is_padding": true}',
+    ]
+    path = tmp_path / "mask.jsonl"
+    _write_mask(path, token_rows)
+
+    rows = [json.loads(line) for line in path.read_text().splitlines()]
+    assert rows[0]["speaker"] == "caller"    # padding → caller frame
+    assert rows[1]["speaker"] == "provider"  # text token → provider frame
+    assert rows[2]["speaker"] == "caller"    # padding → caller frame
+
+
+def test_write_mask_preserves_frame_idx_and_t_ms(tmp_path):
+    from interactive import _write_mask
+
+    token_rows = [
+        '{"frame_idx": 5, "t_ms": 400.0, "text_token_id": 7, "text_piece": "▁hi", "is_padding": false}',
+    ]
+    path = tmp_path / "mask.jsonl"
+    _write_mask(path, token_rows)
+
+    row = json.loads(path.read_text())
+    assert row["frame_idx"] == 5
+    assert row["t_ms"] == 400.0
+    assert row["speaker"] == "provider"
+
+
+def test_token_row_required_fields():
+    row = json.dumps({
+        "frame_idx": 10,
+        "t_ms": 800.0,
+        "text_token_id": 3,
+        "text_piece": "",
+        "is_padding": True,
+    })
+    parsed = json.loads(row)
+    for field in ("frame_idx", "t_ms", "text_token_id", "text_piece", "is_padding"):
+        assert field in parsed
