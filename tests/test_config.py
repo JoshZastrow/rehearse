@@ -119,7 +119,7 @@ def test_interactive_endpoint_config_default(
     _set_required_env(monkeypatch, tmp_path)
     monkeypatch.delenv("INTERACTIVE_MODAL_ENDPOINT", raising=False)
     cfg = RuntimeConfig.from_env(load_dotenv_file=False)
-    assert cfg.interactive_endpoint == ""
+    assert cfg.interactive_modal_endpoint == ""
 
 
 def test_interactive_endpoint_config_from_env(
@@ -130,4 +130,4 @@ def test_interactive_endpoint_config_from_env(
     from rehearse.config import RuntimeConfig
 
     cfg = RuntimeConfig.from_env(load_dotenv_file=False)
-    assert cfg.interactive_endpoint == "wss://example.modal.run/ws"
+    assert cfg.interactive_modal_endpoint == "wss://example.modal.run/ws"
