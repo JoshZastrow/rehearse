@@ -33,6 +33,8 @@ if TYPE_CHECKING:
 
 log = structlog.get_logger(__name__)
 
+# Maps wire labels to Speaker. Both legacy ("coach"/"user") and parameterized
+# ("provider"/"caller") labels are handled. Unknown labels default to COACH.
 _SPEAKER_MAP: dict[str, Speaker] = {
     "coach": Speaker.COACH,
     "provider": Speaker.COACH,

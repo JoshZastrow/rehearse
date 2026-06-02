@@ -95,8 +95,6 @@ async def test_modal_backend_start_publishes_end_of_call_on_connect_failure():
 async def test_modal_backend_maps_provider_label_to_coach():
     """'provider' wire label from the refactored server must map to Speaker.COACH."""
     import asyncio
-    import json
-    from unittest.mock import AsyncMock, patch, MagicMock
 
     backend = ModalInteractiveBackend(endpoint="ws://fake")
     bus = FrameBus(session_id="test-provider-label")
