@@ -33,7 +33,9 @@ class ConversationBridge:
         self._tasks: list[asyncio.Task] = []
 
     async def start(self) -> None:
-        """Start routing tasks and yield so subscribers register before returning."""
+        """Start routing tasks. Returns after subscribers are registered."""
+        if self._tasks:
+            raise RuntimeError("ConversationBridge.start() called twice")
         self._tasks = [
             asyncio.create_task(
                 self._route(self._provider_bus, self._caller_backend),
@@ -44,7 +46,10 @@ class ConversationBridge:
                 name="bridge-caller-to-provider",
             ),
         ]
-        # Yield twice: once to enter _route, once to reach queue.get() inside subscribe().
+        # Two yields needed on CPython's cooperative scheduler: one to enter
+        # _route(), a second to advance past the lock acquire inside subscribe()
+        # and park at queue.get(). Without this, a caller that publishes
+        # immediately after start() may publish before the subscriber is registered.
         await asyncio.sleep(0)
         await asyncio.sleep(0)
 
