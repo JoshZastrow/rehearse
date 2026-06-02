@@ -6,11 +6,13 @@ streams back coach audio + transcript/prosody events in real time.
 Deploy:
     modal deploy infra/interactive.py
 
-The deployed WebSocket URL is:
-    wss://<workspace>--rehearse-interactive-interactiveserver-serve.modal.run/ws
+The deployed WebSocket URLs are:
+    wss://<workspace>--rehearse-interactive-providerserver-serve.modal.run/ws
+    wss://<workspace>--rehearse-interactive-callerserver-serve.modal.run/ws
 
 Set in .env:
-    INTERACTIVE_MODAL_ENDPOINT=wss://<workspace>--rehearse-interactive-interactiveserver-serve.modal.run/ws
+    INTERACTIVE_PROVIDER_ENDPOINT=wss://<workspace>--rehearse-interactive-providerserver-serve.modal.run/ws
+    INTERACTIVE_CALLER_ENDPOINT=wss://<workspace>--rehearse-interactive-callerserver-serve.modal.run/ws
 
 Wire protocol:
   Client → server: {"type": "start", "session_id": "..."} (text) then raw PCM16 16kHz bytes
@@ -79,18 +81,32 @@ MINUTES = 60
 _AIOHTTP_PORT = 8998
 
 # ---------------------------------------------------------------------------
-# Inference server class
+# Inference server base class
 # ---------------------------------------------------------------------------
 
 
-@app.cls(
-    image=interactive_image,
-    gpu="A10G",
-    scaledown_window=3 * MINUTES,
-    timeout=30 * MINUTES,
-    volumes={"/root/.cache/huggingface": hf_cache_vol, _SESSIONS_MOUNT: sessions_vol},
-)
-class InteractiveServer:
+class _InteractiveServerBase:
+    """Shared inference logic for provider and caller Modal servers."""
+
+    checkpoint_path: str = ""
+    """Empty = load from HuggingFace. Non-empty = load from Modal Volume path."""
+
+    speaker_role: str = "provider"
+    """'provider' or 'caller'. Controls transcript labels and ASR target."""
+
+    @property
+    def _other_role(self) -> str:
+        return "caller" if self.speaker_role == "provider" else "provider"
+
+    def _asr_push_received(self, asr, raw: bytes) -> None:
+        """Run ASR on received audio only when we are the provider."""
+        if self.speaker_role == "provider":
+            asr.push_audio(raw)
+
+    def _asr_push_generated(self, asr, pcm16_out: bytes) -> None:
+        """Run ASR on generated audio only when we are the caller."""
+        if self.speaker_role == "caller":
+            asr.push_audio(pcm16_out)
 
     @modal.enter()
     def load(self) -> None:
@@ -99,7 +115,7 @@ class InteractiveServer:
 
         repo = os.environ.get("INTERACTIVE_MODEL_REPO", "kyutai/moshiko-pytorch-bf16")
         self._mimi, self._lm_gen, self._tokenizer = load_models(
-            checkpoint_path="",
+            checkpoint_path=self.checkpoint_path,
             hf_repo=repo,
             device="cuda",
         )
@@ -246,7 +262,7 @@ class InteractiveServer:
 
                 raw: bytes = msg.data
                 caller_buf += raw
-                asr.push_audio(raw)
+                self._asr_push_received(asr, raw)
                 pcm16 = np.frombuffer(raw, dtype=np.int16).astype(np.float32)
                 t_in = torch.from_numpy(pcm16 / 32768.0).float().unsqueeze(0)
                 pcm_24k = F.resample(t_in, _REHEARSE_SR, _MOSHI_SR).squeeze(0).numpy()
@@ -290,6 +306,7 @@ class InteractiveServer:
                                 _REHEARSE_SR,
                             ).squeeze(0).clamp(-1.0, 1.0)
                             pcm16_out = (audio_16k * 32767).to(torch.int16).cpu().numpy().tobytes()
+                            self._asr_push_generated(asr, pcm16_out)
                             provider_buf += pcm16_out
                             t_ms = (_time.monotonic() - t_start) * 1000.0
                             token_rows.append(json.dumps({
@@ -305,7 +322,7 @@ class InteractiveServer:
                                     await ws.send_str(json.dumps({
                                         "type": "transcript",
                                         "utterance_id": coach_utt_id,
-                                        "speaker": "coach",
+                                        "speaker": self.speaker_role,
                                         "text": token_piece,
                                         "is_final": False,
                                     }))
@@ -320,7 +337,7 @@ class InteractiveServer:
                                     await ws.send_str(json.dumps({
                                         "type": "transcript",
                                         "utterance_id": coach_utt_id,
-                                        "speaker": "coach",
+                                        "speaker": self.speaker_role,
                                         "text": text,
                                         "is_final": True,
                                     }))
@@ -337,14 +354,14 @@ class InteractiveServer:
                                         await ws.send_str(json.dumps({
                                             "type": "transcript",
                                             "utterance_id": user_utt_id,
-                                            "speaker": "user",
+                                            "speaker": self._other_role,
                                             "text": user_text,
                                             "is_final": True,
                                         }))
                                         await ws.send_str(json.dumps({
                                             "type": "prosody",
                                             "utterance_id": user_utt_id,
-                                            "speaker": "user",
+                                            "speaker": self._other_role,
                                             "arousal": 0.0,
                                             "valence": 0.0,
                                         }))
@@ -363,7 +380,7 @@ class InteractiveServer:
                 await ws.send_str(json.dumps({
                     "type": "transcript",
                     "utterance_id": coach_utt_id,
-                    "speaker": "coach",
+                    "speaker": self.speaker_role,
                     "text": text,
                     "is_final": True,
                 }))
@@ -376,7 +393,7 @@ class InteractiveServer:
                     await ws.send_str(json.dumps({
                         "type": "transcript",
                         "utterance_id": user_utt_id,
-                        "speaker": "user",
+                        "speaker": self._other_role,
                         "text": user_text,
                         "is_final": True,
                     }))
@@ -412,6 +429,36 @@ class InteractiveServer:
             except Exception:
                 pass
             self._log(f"ws: session={session_id} done")
+
+
+@app.cls(
+    image=interactive_image,
+    gpu="A10G",
+    scaledown_window=3 * MINUTES,
+    timeout=30 * MINUTES,
+    volumes={"/root/.cache/huggingface": hf_cache_vol, _SESSIONS_MOUNT: sessions_vol},
+)
+class ProviderServer(_InteractiveServerBase):
+    """Provider (coach) model endpoint. Loads from HuggingFace by default."""
+    checkpoint_path = ""
+    speaker_role = "provider"
+
+    @modal.web_server(_AIOHTTP_PORT)
+    def serve(self):
+        pass  # server started in load()
+
+
+@app.cls(
+    image=interactive_image,
+    gpu="A10G",
+    scaledown_window=3 * MINUTES,
+    timeout=30 * MINUTES,
+    volumes={"/root/.cache/huggingface": hf_cache_vol, _SESSIONS_MOUNT: sessions_vol},
+)
+class CallerServer(_InteractiveServerBase):
+    """Caller model endpoint. Set checkpoint_path to a Volume path for fine-tuned weights."""
+    checkpoint_path = ""      # e.g. "/mnt/training/runs/caller-v1"
+    speaker_role = "caller"
 
     @modal.web_server(_AIOHTTP_PORT)
     def serve(self):
@@ -450,7 +497,7 @@ async def smoke_test() -> None:
 
     import websockets as _ws
 
-    server = InteractiveServer()
+    server = ProviderServer()
     url = await server.serve.get_url.aio()
     ws_url = url.replace("https://", "wss://").replace("http://", "ws://").rstrip("/") + "/ws"
     print(f"Connecting to {ws_url}")
