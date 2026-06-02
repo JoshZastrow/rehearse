@@ -22,8 +22,8 @@ from rehearse.types import ConsentState, Session
 
 try:
     from train.pipeline.annotate import annotate_session_async as _annotate_session_async
-except ImportError:
-    _annotate_session_async = None  # train package not installed
+except Exception:
+    _annotate_session_async = None  # train package not installed or Modal registration failed
 
 log = structlog.get_logger(__name__)
 

@@ -116,7 +116,7 @@ class EvalCallerParticipant(VoiceParticipant):
         try:
             while True:
                 try:
-                    chunk = await asyncio.wait_for(chunk_queue.get(), timeout=120)
+                    chunk = await asyncio.wait_for(chunk_queue.get(), timeout=300)
                 except asyncio.TimeoutError:
                     log.warning("eval_caller.response_timeout")
                     break

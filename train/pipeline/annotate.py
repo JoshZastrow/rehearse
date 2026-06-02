@@ -179,16 +179,16 @@ def _map_speaker_ids_to_roles(
     return {sid: ("provider" if sid == best_id else "caller") for sid in speaker_ids}
 
 
-@app.cls(image=image, gpu=_GPU_TYPE, timeout=1800, max_inputs=20)
+@app.cls(image=image, gpu=_GPU_TYPE, timeout=1800, single_use_containers=True)
 class Annotator:
-    whisper_model: str = modal.parameter(default="medium")
-
     @modal.enter()
     def load(self):
+        import os
         import torch
         import whisper_timestamped as whisper
 
         self.whisper = whisper
+        self.whisper_model = os.environ.get("WHISPER_MODEL", "medium")
         self.model = whisper.load_model(self.whisper_model, device=torch.device("cuda:0"))
 
     @modal.method()
@@ -449,7 +449,8 @@ def _run(config: AnnotateConfig) -> None:
             )
 
     logger.info("Dispatching %d sessions to Modal...", len(pending))
-    annotator = Annotator(whisper_model=config.whisper_model)
+    os.environ["WHISPER_MODEL"] = config.whisper_model
+    annotator = Annotator()
     for path, result in zip(
         pending,
         annotator.run.starmap(_iter_inputs(), return_exceptions=True),
@@ -508,7 +509,8 @@ async def annotate_session_async(
         session_dir = audio_path.parent
         segments = _load_json_if_exists(session_dir / "audio_segments.json", "segments")
         transcript = _load_jsonl_if_exists(session_dir / "transcript.jsonl")
-        annotator = Annotator(whisper_model=whisper_model)
+        os.environ["WHISPER_MODEL"] = whisper_model
+        annotator = Annotator()
         call = await annotator.run.spawn.aio(audio_bytes, lang, keep_silence, segments, transcript)
         result = await call.get.aio()
         with _write_and_rename(out_path) as fh:

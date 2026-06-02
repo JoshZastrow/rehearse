@@ -190,6 +190,7 @@ class _InteractiveServerBase:
         _MOSHI_SR = 24_000
         _REHEARSE_SR = 16_000
         _SILENCE_FLUSH = 10
+        _IDLE_TIMEOUT = 3.0  # seconds without an audio frame → end session
 
         self._log("ws: connection received, awaiting handshake")
 
@@ -244,7 +245,12 @@ class _InteractiveServerBase:
             provider_buf = bytearray()
             token_rows: list[str] = []
 
-            async for msg in ws:
+            while True:
+                try:
+                    msg = await asyncio.wait_for(ws.receive(), timeout=_IDLE_TIMEOUT)
+                except asyncio.TimeoutError:
+                    self._log(f"ws: session={session_id} idle timeout ({_IDLE_TIMEOUT}s) — ending session")
+                    break
                 if msg.type in (aiohttp.WSMsgType.ERROR, aiohttp.WSMsgType.CLOSED):
                     self._log(f"ws: session={session_id} connection closed (type={msg.type})")
                     break
@@ -494,12 +500,17 @@ async def smoke_test() -> None:
     """Send 5s of silence to the deployed server and verify audio frames come back."""
     import struct
     import time
+    from pathlib import Path as _Path
 
+    from dotenv import load_dotenv as _load_dotenv
     import websockets as _ws
 
-    server = ProviderServer()
-    url = await server.serve.get_url.aio()
-    ws_url = url.replace("https://", "wss://").replace("http://", "ws://").rstrip("/") + "/ws"
+    _load_dotenv(_Path(__file__).parent.parent / ".env", override=True)
+
+    endpoint = os.environ.get("INTERACTIVE_PROVIDER_ENDPOINT") or os.environ.get("INTERACTIVE_MODAL_ENDPOINT", "")
+    if not endpoint:
+        raise RuntimeError("INTERACTIVE_PROVIDER_ENDPOINT not set — run `make deploy-interactive` and set the env var")
+    ws_url = endpoint.replace("https://", "wss://").replace("http://", "ws://").rstrip("/")
     print(f"Connecting to {ws_url}")
 
     async with _ws.connect(ws_url, open_timeout=60.0) as ws:
