@@ -4,8 +4,6 @@ Uses mock backends — no Modal or GPU required.
 """
 from __future__ import annotations
 
-import asyncio
-
 import pytest
 
 from rehearse.bus import FrameBus
@@ -14,19 +12,18 @@ from rehearse.types import Speaker
 
 
 class _FakeBackend:
-    """Backend that publishes one AudioChunk then EndOfCall when send_caller_audio is called."""
+    """Backend that publishes AudioChunk then EndOfCall when send_caller_audio is called."""
 
-    def __init__(self, bus: FrameBus, session_id: str) -> None:
-        self._bus = bus
-        self._session_id = session_id
-        self._started = False
+    def __init__(self) -> None:
+        self._bus: FrameBus | None = None
+        self._session_id: str = ""
 
     async def start(self, session_id: str, bus: FrameBus) -> None:
         self._bus = bus
         self._session_id = session_id
-        self._started = True
 
     async def send_caller_audio(self, pcm: bytes) -> None:
+        assert self._bus is not None
         await self._bus.publish(
             AudioChunk(session_id=self._session_id, speaker=Speaker.COACH, pcm16_16k=pcm, ts=0.0)
         )
@@ -45,24 +42,10 @@ async def test_run_interactive_session_returns_session_result(monkeypatch):
         SessionResult,
         run_interactive_session,
     )
-    from rehearse.backends.interactive import modal_backend as mb
-
-    provider_bus_holder: list[FrameBus] = []
-    caller_bus_holder: list[FrameBus] = []
-
-    def _make_backend(endpoint: str):
-        if "provider" in endpoint:
-            b = _FakeBackend(None, "")  # type: ignore[arg-type]
-            provider_bus_holder.append(b)
-            return b
-        else:
-            b = _FakeBackend(None, "")  # type: ignore[arg-type]
-            caller_bus_holder.append(b)
-            return b
 
     monkeypatch.setattr(
         "rehearse.eval.environments.interactive_sandbox.ModalInteractiveBackend",
-        _make_backend,
+        lambda endpoint: _FakeBackend(),
     )
 
     result = await run_interactive_session(
@@ -103,7 +86,7 @@ async def test_run_interactive_session_times_out(monkeypatch):
         session_id="timeout-session",
         provider_endpoint="ws://provider",
         caller_endpoint="ws://caller",
-        max_duration_sec=0.1,
+        max_duration_sec=0.1,  # real wall time; keep small but non-zero
     )
 
     assert result.end_reason == "timeout"
