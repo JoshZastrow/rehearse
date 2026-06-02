@@ -89,3 +89,79 @@ async def test_modal_backend_start_publishes_end_of_call_on_connect_failure():
     assert mock_connect.call_count == backend._CONNECT_ATTEMPTS
     assert any(isinstance(f, EndOfCall) for f in frames)
     assert frames[-1].reason == "error"
+
+
+@pytest.mark.asyncio
+async def test_modal_backend_maps_provider_label_to_coach():
+    """'provider' wire label from the refactored server must map to Speaker.COACH."""
+    import asyncio
+    import json
+    from unittest.mock import AsyncMock, patch, MagicMock
+
+    backend = ModalInteractiveBackend(endpoint="ws://fake")
+    bus = FrameBus(session_id="test-provider-label")
+    frames: list = []
+
+    async def collect():
+        async for frame in bus.subscribe():
+            frames.append(frame)
+
+    collect_task = asyncio.create_task(collect())
+    await asyncio.sleep(0)
+
+    backend._session_id = "test-provider-label"
+    backend._bus = bus
+
+    await backend._handle_event({
+        "type": "transcript",
+        "utterance_id": "u1",
+        "speaker": "provider",
+        "text": "Hello",
+        "is_final": True,
+    })
+    await bus.aclose()
+    await collect_task
+
+    from rehearse.frames import TranscriptDelta
+    from rehearse.types import Speaker
+    assert any(
+        isinstance(f, TranscriptDelta) and f.speaker == Speaker.COACH
+        for f in frames
+    ), f"Expected Speaker.COACH for 'provider' label, got {frames}"
+
+
+@pytest.mark.asyncio
+async def test_modal_backend_maps_caller_label_to_user():
+    """'caller' wire label from the refactored server must map to Speaker.USER."""
+    import asyncio
+
+    backend = ModalInteractiveBackend(endpoint="ws://fake")
+    bus = FrameBus(session_id="test-caller-label")
+    frames: list = []
+
+    async def collect():
+        async for frame in bus.subscribe():
+            frames.append(frame)
+
+    collect_task = asyncio.create_task(collect())
+    await asyncio.sleep(0)
+
+    backend._session_id = "test-caller-label"
+    backend._bus = bus
+
+    await backend._handle_event({
+        "type": "transcript",
+        "utterance_id": "u2",
+        "speaker": "caller",
+        "text": "Hi",
+        "is_final": True,
+    })
+    await bus.aclose()
+    await collect_task
+
+    from rehearse.frames import TranscriptDelta
+    from rehearse.types import Speaker
+    assert any(
+        isinstance(f, TranscriptDelta) and f.speaker == Speaker.USER
+        for f in frames
+    ), f"Expected Speaker.USER for 'caller' label, got {frames}"

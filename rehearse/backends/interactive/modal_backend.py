@@ -33,6 +33,13 @@ if TYPE_CHECKING:
 
 log = structlog.get_logger(__name__)
 
+_SPEAKER_MAP: dict[str, Speaker] = {
+    "coach": Speaker.COACH,
+    "provider": Speaker.COACH,
+    "user": Speaker.USER,
+    "caller": Speaker.USER,
+}
+
 
 class ModalInteractiveBackend:
     """ConversationBackend that proxies audio to a Modal-hosted WebSocket inference server."""
@@ -138,7 +145,7 @@ class ModalInteractiveBackend:
         assert self._bus is not None
         match data.get("type"):
             case "transcript":
-                speaker = Speaker.COACH if data["speaker"] == "coach" else Speaker.USER
+                speaker = _SPEAKER_MAP.get(data.get("speaker", ""), Speaker.COACH)
                 await self._bus.publish(TranscriptDelta(
                     session_id=self._session_id,
                     utterance_id=data.get("utterance_id", str(uuid.uuid4())),
@@ -148,7 +155,7 @@ class ModalInteractiveBackend:
                     ts_start=time.time(),
                 ))
             case "prosody":
-                speaker = Speaker.COACH if data["speaker"] == "coach" else Speaker.USER
+                speaker = _SPEAKER_MAP.get(data.get("speaker", ""), Speaker.COACH)
                 await self._bus.publish(ProsodyEvent(
                     session_id=self._session_id,
                     utterance_id=data.get("utterance_id", str(uuid.uuid4())),
