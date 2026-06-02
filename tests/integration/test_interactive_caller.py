@@ -78,14 +78,16 @@ async def test_bridge_audio_flows_both_ways():
 
     await asyncio.sleep(10.0)
 
+    # Cancel collectors first so they are not blocked on bus.subscribe() during teardown
+    collect_p.cancel()
+    collect_c.cancel()
+    await asyncio.gather(collect_p, collect_c, return_exceptions=True)
+
     await bridge.close()
     await caller_backend.close()
     await provider_backend.close()
     await provider_bus.aclose()
     await caller_bus.aclose()
-    collect_p.cancel()
-    collect_c.cancel()
-    await asyncio.gather(collect_p, collect_c, return_exceptions=True)
 
     assert len(provider_chunks) > 0, "Provider endpoint generated no audio in 10s"
     assert len(caller_chunks) > 0, "Caller endpoint generated no audio in 10s"
@@ -132,6 +134,10 @@ async def test_bridge_transcript_appears_within_30s():
         await asyncio.wait_for(collect_task, timeout=30.0)
     except asyncio.TimeoutError:
         collect_task.cancel()
+        try:
+            await collect_task
+        except asyncio.CancelledError:
+            pass
 
     await bridge.close()
     await caller_backend.close()
