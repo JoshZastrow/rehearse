@@ -44,27 +44,30 @@ echo "pg0 ready: $PG0_RAW_URI"
 echo "Running Honcho migrations..."
 (cd "$HONCHO_DIR" && DB_CONNECTION_URI="$DB_URI" uv run alembic upgrade head 2>&1 | tail -3)
 
-# Start Honcho API server.
-echo "Starting Honcho API on port $HONCHO_PORT..."
+HONCHO_LOG="/tmp/rehearse-honcho.log"
+HONCHO_DERIVER_LOG="/tmp/rehearse-honcho-deriver.log"
+
+# Start Honcho API server (output to log file — avoids CancelledError noise on shutdown).
+echo "Starting Honcho API on port $HONCHO_PORT... (logs: $HONCHO_LOG)"
 (
   cd "$HONCHO_DIR"
   DB_CONNECTION_URI="$DB_URI" \
   AUTH_USE_AUTH=false \
   SENTRY_ENABLED=false \
   LLM_ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}" \
-  uv run uvicorn src.main:app --host 0.0.0.0 --port "$HONCHO_PORT" 2>&1
-) &
+  uv run uvicorn src.main:app --host 0.0.0.0 --port "$HONCHO_PORT"
+) >> "$HONCHO_LOG" 2>&1 &
 HONCHO_API_PID=$!
 
 # Start Honcho deriver (background worker for representations/summaries).
-echo "Starting Honcho deriver..."
+echo "Starting Honcho deriver... (logs: $HONCHO_DERIVER_LOG)"
 (
   cd "$HONCHO_DIR"
   DB_CONNECTION_URI="$DB_URI" \
   AUTH_USE_AUTH=false \
   LLM_ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}" \
-  uv run python -m src.deriver 2>&1
-) &
+  uv run python -m src.deriver
+) >> "$HONCHO_DERIVER_LOG" 2>&1 &
 HONCHO_DERIVER_PID=$!
 
 # Wait for the API to be ready.

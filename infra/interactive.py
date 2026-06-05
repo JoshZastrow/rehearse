@@ -190,7 +190,8 @@ class _InteractiveServerBase:
         _MOSHI_SR = 24_000
         _REHEARSE_SR = 16_000
         _SILENCE_FLUSH = 10
-        _IDLE_TIMEOUT = 3.0  # seconds without an audio frame → end session
+        _FIRST_FRAME_TIMEOUT = 30.0  # seconds to wait for first audio frame
+        _IDLE_TIMEOUT = 10.0         # seconds without audio after stream starts → end session
 
         self._log("ws: connection received, awaiting handshake")
 
@@ -246,8 +247,11 @@ class _InteractiveServerBase:
             token_rows: list[str] = []
 
             while True:
+                # Before first audio: give the client time to set up the bridge.
+                # After audio starts: a 3s gap means the session is over.
+                timeout = _IDLE_TIMEOUT if frames_rx > 0 else _FIRST_FRAME_TIMEOUT
                 try:
-                    msg = await asyncio.wait_for(ws.receive(), timeout=_IDLE_TIMEOUT)
+                    msg = await asyncio.wait_for(ws.receive(), timeout=timeout)
                 except asyncio.TimeoutError:
                     self._log(f"ws: session={session_id} idle timeout ({_IDLE_TIMEOUT}s) — ending session")
                     break

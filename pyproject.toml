@@ -51,6 +51,7 @@ testpaths = ["tests"]
 addopts = "-m 'not live_api'"
 markers = [
     "live_api: hits real provider APIs; requires sourced .env. Deselected by default. Run with `pytest -m live_api`.",
+    "live_modal: hits live Modal GPU endpoints; requires INTERACTIVE_PROVIDER_ENDPOINT and INTERACTIVE_CALLER_ENDPOINT. Run with `pytest -m live_modal`.",
 ]
 
 [tool.ruff]

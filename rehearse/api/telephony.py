@@ -276,7 +276,13 @@ def mount_twilio_routes(
                 _memory = NullCallerMemory()
 
             _llm_client = None
-            if config.anthropic_api_key:
+            if config.litellm_base_url:
+                from rehearse.transports.openai_compat import OpenAICompatLLMClient
+                _llm_client = OpenAICompatLLMClient(
+                    base_url=config.litellm_base_url,
+                    api_key=config.litellm_api_key or "local",
+                )
+            elif config.anthropic_api_key:
                 from anthropic import AsyncAnthropic
                 _llm_client = AsyncAnthropic(api_key=config.anthropic_api_key)
 

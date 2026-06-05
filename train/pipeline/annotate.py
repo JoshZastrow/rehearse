@@ -510,7 +510,8 @@ async def annotate_session_async(
         segments = _load_json_if_exists(session_dir / "audio_segments.json", "segments")
         transcript = _load_jsonl_if_exists(session_dir / "transcript.jsonl")
         os.environ["WHISPER_MODEL"] = whisper_model
-        annotator = Annotator()
+        RemoteAnnotator = modal.Cls.from_name("rehearse-annotate", "Annotator")
+        annotator = RemoteAnnotator()
         call = await annotator.run.spawn.aio(audio_bytes, lang, keep_silence, segments, transcript)
         result = await call.get.aio()
         with _write_and_rename(out_path) as fh:

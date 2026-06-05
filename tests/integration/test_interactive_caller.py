@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 import uuid
 
 import pytest
@@ -18,6 +19,8 @@ from rehearse.backends.interactive.bridge import ConversationBridge
 from rehearse.backends.interactive.modal_backend import ModalInteractiveBackend
 from rehearse.bus import FrameBus
 from rehearse.frames import AudioChunk, EndOfCall, TranscriptDelta
+
+_SILENCE_CHUNK = b"\x00" * 640  # 40ms of silence at 16 kHz PCM16
 
 
 def _endpoints() -> tuple[str, str]:
@@ -30,10 +33,18 @@ def _endpoints() -> tuple[str, str]:
     return provider, caller
 
 
+async def _send_silence(backend: ModalInteractiveBackend, duration_sec: float) -> None:
+    """Send 40 ms silence chunks for duration_sec to prime the Moshi model."""
+    deadline = time.monotonic() + duration_sec
+    while time.monotonic() < deadline:
+        await backend.send_caller_audio(_SILENCE_CHUNK)
+        await asyncio.sleep(0.04)
+
+
 @pytest.mark.live_modal
 @pytest.mark.asyncio
 async def test_bridge_audio_flows_both_ways():
-    """Both endpoints must generate audio within 10 seconds of seeding."""
+    """Both endpoints must generate audio within 15 seconds of continuous seeding."""
     provider_url, caller_url = _endpoints()
 
     session_id = str(uuid.uuid4())
@@ -73,12 +84,14 @@ async def test_bridge_audio_flows_both_ways():
     await caller_backend.start(session_id + "-caller", caller_bus)
     await bridge.start()
 
-    # Seed caller to start the loop
-    await caller_backend.send_caller_audio(b"\x00" * 3200)
+    # Send silence continuously for 30s to prime the Moshi model (~30 frames needed per hop).
+    # Two-hop bridge (caller → provider) means both Moshi models must prime sequentially.
+    sender = asyncio.create_task(_send_silence(caller_backend, duration_sec=30.0))
 
-    await asyncio.sleep(10.0)
+    await asyncio.sleep(30.0)
+    sender.cancel()
+    await asyncio.gather(sender, return_exceptions=True)
 
-    # Cancel collectors first so they are not blocked on bus.subscribe() during teardown
     collect_p.cancel()
     collect_c.cancel()
     await asyncio.gather(collect_p, collect_c, return_exceptions=True)
@@ -89,8 +102,8 @@ async def test_bridge_audio_flows_both_ways():
     await provider_bus.aclose()
     await caller_bus.aclose()
 
-    assert len(provider_chunks) > 0, "Provider endpoint generated no audio in 10s"
-    assert len(caller_chunks) > 0, "Caller endpoint generated no audio in 10s"
+    assert len(provider_chunks) > 0, "Provider endpoint generated no audio in 30s"
+    assert len(caller_chunks) > 0, "Caller endpoint generated no audio in 30s"
 
 
 @pytest.mark.live_modal
@@ -128,7 +141,8 @@ async def test_bridge_transcript_appears_within_30s():
     await caller_backend.start(session_id + "-caller", caller_bus)
     await bridge.start()
 
-    await caller_backend.send_caller_audio(b"\x00" * 3200)
+    # Send silence continuously to prime the Moshi model
+    sender = asyncio.create_task(_send_silence(caller_backend, duration_sec=30.0))
 
     try:
         await asyncio.wait_for(collect_task, timeout=30.0)
@@ -138,6 +152,9 @@ async def test_bridge_transcript_appears_within_30s():
             await collect_task
         except asyncio.CancelledError:
             pass
+    finally:
+        sender.cancel()
+        await asyncio.gather(sender, return_exceptions=True)
 
     await bridge.close()
     await caller_backend.close()
