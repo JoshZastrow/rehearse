@@ -100,41 +100,50 @@ Is the task a large domain shift (code, math, hard CPT)?
 
 ---
 
-## Core Area 3: Runtime Feedback Loop (Online Learning & Data Flywheel)
+## Core Area 3: Runtime Feedback Loop (SIA-Based Self-Improvement)
 
-**The problem:** A model trained on a static dataset degrades relative to the live distribution as the policy improves and users explore new behaviors. The offline/online gap in RLHF is measurable: online iterative RLHF with rejection sampling + DPO achieves LC AlpacaEval-2 win rate of 31.3 versus 22.5 for offline DPO on the same base model — a ~40% relative improvement (ICLR 2025, LLaMA-3-8B). The mechanism: online data collection prevents the policy from straying into out-of-distribution regions that a fixed dataset cannot cover.
+**The problem:** A model trained on a static dataset degrades relative to the live distribution as the policy improves. The deeper problem is that two improvement levers — scaffold iteration (prompt engineering, phase logic, tool dispatch) and weight updates (LoRA fine-tuning) — have historically been applied in isolation. SIA (arXiv:2605.27276) demonstrates that combining both levers in a single closed loop outperforms either alone on every tested benchmark: +25.1% on LawBench, +12.4% GPU kernel speedup, +20.4% on scRNA-seq denoising.
 
 **The architecture of the feedback loop:**
 
 ```
-[Serving Stack] → log(completions, context, metadata)
+[RuntimeHost] → session artifacts (transcript.jsonl, prosody.jsonl, telemetry.jsonl)
       ↓
-[Preference Collection] → human labels OR automated reward model scoring
+[Rubric Scorers] → per-session RubricScore (7 dimensions: rwrd, cont, afct, dlvr, nint, slnc, spch)
       ↓
-[Rejection Sampling] → filter online data before DPO steps (noise reduction without PPO)
-      ↓
-[Online DPO Training] → update policy on fresh preference pairs
-      ↓
-[Replay Buffer] → feed back to Core Area 1 (forgetting mitigation)
-      ↑
-[Runtime Experiences] → compound the data flywheel
+[Feedback-Agent] → reads full trajectory + scores + prior improvement history
+      │
+      ├─→ Plateau NOT detected → HARNESS UPDATE
+      │     Rewrite: system prompts, phase transitions, persona compiler, answer extraction
+      │     Output: new prompt config + improvement.md
+      │     Loop back to RuntimeHost
+      │
+      └─→ Plateau detected → WEIGHT UPDATE
+            Select RL algorithm based on reward structure (see below)
+            Dispatch: LoRA training job on Modal
+            Output: LoRA adapter checkpoint
+            Loop back to RuntimeHost with adapted model
 ```
 
-**Approach tradeoffs:**
+**Algorithm selection (when weight update is triggered):**
 
-| Method | Complexity | Static Dataset Risk | Notes |
-|---|---|---|---|
-| Online iterative RLHF (RS + DPO) | Medium | Eliminated | Best benchmark result; requires live inference during training |
-| Offline DPO | Low | High (stales as policy improves) | Cheapest; loses ground over time |
-| PPO | High | Eliminated | Most expressive; highest infra cost |
+| Reward Structure | Algorithm | When to use in Rehearse |
+|---|---|---|
+| Dense, clean scalar | PPO + GAE (value head) | Content scoring (rwrd, cont) — binary correct/incorrect per turn |
+| Sparse, outcome-heavy | Entropic advantage weighting | Delivery/affect scoring — most sessions near-zero signal, few are exceptional |
+| Coupled hyperparameters | GRPO | Persona parameters that interact (warmth × directness × pacing) |
+
+**The sequencing rule (from SIA empirics):** Always start with harness iteration. On LawBench, harness iteration alone drove +36.5pp gain before weight updates were needed. Weight updates delivered +20.1pp *on top of* a converged scaffold. Switching to weight updates before the scaffold has converged wastes compute and trains on a noisy signal from a suboptimal execution policy.
+
+**Plateau detection heuristic:** Switch to weight updates when improvement across the last K eval runs is within measurement noise on all rubric dimensions where the scaffold had been showing gains. K=3 is sufficient for Rehearse's eval cadence.
 
 **3 Operational Heuristics:**
 
-1. **Instrument the serving stack to log completions and preference signals from day one — not when the model is "good enough."** The data flywheel only starts when feedback collection is live. Every day without logging is lost training signal that cannot be reconstructed. Build the logging pipeline before the first model deployment.
+1. **The Feedback-Agent reads trajectories, not metrics.** Aggregate rubric scores tell you *that* something broke. The full session transcript + prosody log tells you *where*: which turn the persona broke character, which question caused the intake to stall, which response had prosodic mismatch despite correct words. Wire the Feedback-Agent to `transcript.jsonl` + `prosody.jsonl` as primary inputs, not just `results.jsonl`. This is what makes SIA's harness updates more targeted than prompt engineering from aggregate evals.
 
-2. **Use rejection sampling at inference time to filter online data before DPO training steps.** This reduces reward model noise without requiring full PPO infrastructure. The practical order: generate N completions per prompt, score with reward model, keep top-k, train DPO on the resulting pairs. This captures most of online RLHF's benefit at a fraction of the complexity.
+2. **Instrument session artifacts from day one — the same schema in prod and eval.** The improvement loop only starts when the Feedback-Agent can read a trajectory that looks identical whether it came from a live session or a sandbox rollout. Rehearse's `evals/runs/{run_id}/sessions/{id}/` and `sessions/{id}/` already share the same artifact schema. Do not diverge these. Every schema divergence between prod and eval artifacts is a dead week when the Feedback-Agent produces wrong improvements.
 
-3. **Run internal A/B tests on your actual task distribution before committing to an online training regime.** AlpacaEval-2 and similar leaderboards reward style and length alongside quality and are sensitive to evaluation configuration. The ~40% relative improvement number is directional — validate it on your own task distribution with your own reward model before allocating compute to a full online RLHF pipeline.
+3. **Run internal eval on Rehearse's actual rubric before committing to an online training regime.** AlpacaEval-2-style benchmarks reward style and length, not coaching quality. Rehearse's 7-dimension rubric is the ground truth. Validate that each harness update moves the rubric in the expected direction before triggering weight updates — a rubric-validated scaffold is a stable foundation; an unvalidated one makes LoRA training noisier, not better.
 
 ---
 
@@ -177,12 +186,14 @@ Agents should be dispatched in parallel across three independent tracks. Each tr
 - Expose: `regime = select_regime(task_type, compute_budget, forgetting_risk)`
 - Metric gate: track HumanEval / GSM8K / task-specific eval per checkpoint
 
-**Track C — Runtime Feedback Loop**
-- Implement completion logger middleware for the serving stack
-- Implement rejection sampling filter: generate N, score, keep top-k
-- Implement online DPO training loop that consumes logged preference pairs
-- Expose: `logger = FeedbackLogger(serving_endpoint)` and `trainer = OnlineDPOTrainer(policy, reward_model)`
-- Metric gate: preference data freshness (staleness in hours), win rate vs offline baseline
+**Track C — Feedback-Agent (SIA Pattern)**
+- Implement `FeedbackAgent` that reads: session transcript, prosody log, rubric scores, and prior improvement.md files from `evals/runs/`
+- Implement plateau detection: K=3 consecutive runs below improvement threshold across all improving rubric dimensions → trigger weight update
+- Harness update path: Feedback-Agent emits updated system prompts + phase config + improvement.md; no Modal dispatch
+- Weight update path: Feedback-Agent selects RL algorithm (PPO/GRPO/entropic) based on reward structure of the stalled dimension, dispatches LoRA training job to Modal
+- Expose: `agent = FeedbackAgent(trajectory_dir, rubric_scores, improvement_history)`
+         `action = agent.select_action()  # returns HarnessUpdate | WeightUpdate`
+- Metric gate: track rubric delta per harness iteration; confirm plateau detection fires correctly before first Modal dispatch; track LoRA training wall-clock vs rubric gain
 
 ### Integration Contract
 
