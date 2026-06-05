@@ -72,6 +72,11 @@ deploy-interactive: ## deploy Moshi interactive inference server to Modal GPU (A
 smoke-interactive: ## run the smoke test against the deployed interactive server
 	modal run infra/interactive.py
 
+deploy-annotate: ## deploy session annotator (Whisper alignment) to Modal GPU (A10G)
+	modal deploy train/pipeline/annotate.py
+	@echo ""
+	@echo "Deployed. No env vars required — called internally after each call."
+
 eval-persona-routing: ## 3-scenario persona routing eval (requires Modal judge + Honcho)
 	uv run pytest tests/eval/test_persona_voice_routing_eval.py \
 	  -v -m "live_api and live_honcho" --timeout=180

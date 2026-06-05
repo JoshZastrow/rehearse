@@ -303,10 +303,13 @@ class _InteractiveServerBase:
                             token_piece: str | None = None
                             if text_id != pad_id:
                                 token_piece = self._tokenizer.id_to_piece(text_id)
-                                coach_pieces.append(token_piece)
-                                self._log(f"ws: session={session_id} token={token_piece!r}")
-                                silence_streak = 0
-                            else:
+                                if token_piece == "<unk>":
+                                    token_piece = None
+                                else:
+                                    coach_pieces.append(token_piece)
+                                    self._log(f"ws: session={session_id} token={token_piece!r}")
+                                    silence_streak = 0
+                            if token_piece is None:
                                 silence_streak += 1
 
                             wav = self._mimi.decode(tokens[:, 1:, :])

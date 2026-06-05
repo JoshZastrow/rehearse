@@ -147,6 +147,7 @@ def mount_twilio_routes(
         await _validate(request)
         trigger = TriggerEvent(from_number=From, body=Body, received_at=utcnow())
         handle = await orchestrator.start(trigger)
+        log.info("twilio.sms", session_id=handle.session_id, from_number=From)
 
         voice_url = f"{config.public_base_url}/twilio/voice?session_id={handle.session_id}"
         status_url = f"{config.public_base_url}/twilio/status?session_id={handle.session_id}"
