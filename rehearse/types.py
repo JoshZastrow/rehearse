@@ -14,7 +14,7 @@ Grouped by concern:
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import StrEnum
 from pathlib import Path
 from typing import Literal
@@ -140,8 +140,9 @@ class Strict(BaseModel):
 
 
 def _new_id() -> str:
-    """Return a new opaque identifier for a stored object."""
-    return uuid4().hex
+    """Return a sortable ID: YYYYMMDD-HHMMSS-<8-char UUID suffix>."""
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    return f"{ts}-{uuid4().hex[:8]}"
 
 
 class IntakeRecord(Strict):
