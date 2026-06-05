@@ -28,6 +28,7 @@ lib/
 .gstack/
 .worktrees/
 .env
+.understand-anything/
 /outputs/
 /prime-rl/
 /environments/*/outputs/
