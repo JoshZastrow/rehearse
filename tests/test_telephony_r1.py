@@ -364,7 +364,7 @@ def test_media_websocket_bridges_twilio_to_fake_hume(
             pass
 
     from rehearse.api import telephony as telephony_module
-    monkeypatch.setattr(telephony_module, "create_backend", lambda cfg: FakeBackend())
+    monkeypatch.setattr(telephony_module, "create_backend", lambda cfg, store=None: FakeBackend())
 
     pcm8k = struct.pack("<4h", 0, 1000, -1000, 0)
     payload = base64.b64encode(encode_pcm16(pcm8k)).decode("ascii")
@@ -461,7 +461,7 @@ def test_media_websocket_handles_hume_normal_close(
 
     from rehearse.api import telephony as telephony_module
 
-    monkeypatch.setattr(telephony_module, "create_backend", lambda cfg: FakeBackendClosesNormally())
+    monkeypatch.setattr(telephony_module, "create_backend", lambda cfg, store=None: FakeBackendClosesNormally())
 
     pcm8k = struct.pack("<4h", 0, 1000, -1000, 0)
     payload = base64.b64encode(encode_pcm16(pcm8k)).decode("ascii")
