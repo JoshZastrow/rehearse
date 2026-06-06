@@ -22,7 +22,7 @@ Architecture: aiohttp web server on port 8998, proxied by @modal.web_server.
 This avoids Modal's ASGI/protobuf serialization layer entirely, matching
 Moshi's own server.py architecture.
 
-Cost: ~$0 when idle (scaledown_window=3min). Spins up in ~60s from HF cache.
+Cost: ~$0 when idle (scaledown_window=60min). Spins up in ~60s from HF cache.
 """
 from __future__ import annotations
 
@@ -236,12 +236,18 @@ class _InteractiveServerBase:
             coach_utt_id = str(uuid.uuid4())
             coach_pieces: list[str] = []
             silence_streak = 0
+            leading_silence = 0      # silence tokens before first speech token this turn
+            turn_has_speech = False  # whether current turn has emitted any text tokens
             skip_frames = 1
             asr = InteractiveASR(model_size=os.environ.get("INTERACTIVE_ASR_MODEL", "base"))
             frames_rx = 0
             frames_tx = 0
             mimi_frames = 0
             t_start = _time.monotonic()
+            turn_num = 0
+            t_turn_start = t_start
+            t_first_audio_sent: float | None = None
+            t_first_speech_token: float | None = None
             caller_buf = bytearray()
             provider_buf = bytearray()
             token_rows: list[str] = []
@@ -308,9 +314,14 @@ class _InteractiveServerBase:
                                 else:
                                     coach_pieces.append(token_piece)
                                     self._log(f"ws: session={session_id} token={token_piece!r}")
+                                    if not turn_has_speech:
+                                        t_first_speech_token = _time.monotonic()
+                                        turn_has_speech = True
                                     silence_streak = 0
                             if token_piece is None:
                                 silence_streak += 1
+                                if not turn_has_speech:
+                                    leading_silence += 1
 
                             wav = self._mimi.decode(tokens[:, 1:, :])
                             audio_16k = F.resample(
@@ -331,6 +342,8 @@ class _InteractiveServerBase:
                             }))
                             try:
                                 await ws.send_bytes(pcm16_out)
+                                if t_first_audio_sent is None:
+                                    t_first_audio_sent = _time.monotonic()
                                 if token_piece is not None:
                                     await ws.send_str(json.dumps({
                                         "type": "transcript",
@@ -356,10 +369,31 @@ class _InteractiveServerBase:
                                     }))
                                 except Exception:
                                     return
-                                self._log(f"ws: session={session_id} transcript[final]={text!r}")
+                                now = _time.monotonic()
+                                profile = {
+                                    "type": "profile",
+                                    "turn": turn_num,
+                                    "turn_total_ms": round((now - t_turn_start) * 1000),
+                                    "leading_silence_ms": leading_silence * 80,
+                                    "time_to_first_audio_ms": round((t_first_audio_sent - t_turn_start) * 1000) if t_first_audio_sent else None,
+                                    "time_to_first_speech_ms": round((t_first_speech_token - t_turn_start) * 1000) if t_first_speech_token else None,
+                                    "speech_tokens": len(coach_pieces),
+                                    "text": text,
+                                }
+                                self._log(json.dumps(profile))
+                                try:
+                                    await ws.send_str(json.dumps(profile))
+                                except Exception:
+                                    return
                                 coach_pieces = []
                                 coach_utt_id = str(uuid.uuid4())
                                 silence_streak = 0
+                                leading_silence = 0
+                                turn_has_speech = False
+                                turn_num += 1
+                                t_turn_start = now
+                                t_first_audio_sent = None
+                                t_first_speech_token = None
                                 user_text = asr.transcribe_and_reset()
                                 if user_text:
                                     user_utt_id = str(uuid.uuid4())
@@ -447,7 +481,7 @@ class _InteractiveServerBase:
 @app.cls(
     image=interactive_image,
     gpu="A10G",
-    scaledown_window=3 * MINUTES,
+    scaledown_window=60 * MINUTES,
     timeout=30 * MINUTES,
     volumes={"/root/.cache/huggingface": hf_cache_vol, _SESSIONS_MOUNT: sessions_vol},
 )
@@ -464,7 +498,7 @@ class ProviderServer(_InteractiveServerBase):
 @app.cls(
     image=interactive_image,
     gpu="A10G",
-    scaledown_window=3 * MINUTES,
+    scaledown_window=60 * MINUTES,
     timeout=30 * MINUTES,
     volumes={"/root/.cache/huggingface": hf_cache_vol, _SESSIONS_MOUNT: sessions_vol},
 )

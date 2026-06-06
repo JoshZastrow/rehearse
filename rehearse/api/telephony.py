@@ -287,7 +287,7 @@ def mount_twilio_routes(
                 from anthropic import AsyncAnthropic
                 _llm_client = AsyncAnthropic(api_key=config.anthropic_api_key)
 
-            async with TwilioStream(ws) as twilio, create_backend(config) as backend:
+            async with TwilioStream(ws) as twilio, create_backend(config, store=orchestrator.store) as backend:
                 caller = TwilioCallerParticipant(twilio, session_id)
                 await orchestrator.store.update_session(
                     session_id,

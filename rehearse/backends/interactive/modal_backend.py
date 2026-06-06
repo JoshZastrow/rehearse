@@ -30,6 +30,7 @@ from rehearse.types import ProsodyScores, Speaker
 
 if TYPE_CHECKING:
     from websockets.asyncio.client import ClientConnection
+    from rehearse.storage import ArtifactStore
 
 log = structlog.get_logger(__name__)
 
@@ -46,8 +47,9 @@ _SPEAKER_MAP: dict[str, Speaker] = {
 class ModalInteractiveBackend:
     """ConversationBackend that proxies audio to a Modal-hosted WebSocket inference server."""
 
-    def __init__(self, endpoint: str) -> None:
+    def __init__(self, endpoint: str, store: ArtifactStore | None = None) -> None:
         self._endpoint = endpoint
+        self._store = store
         self._ws: ClientConnection | None = None
         self._recv_task: asyncio.Task | None = None
         self._session_id = ""
@@ -175,5 +177,9 @@ class ModalInteractiveBackend:
                     reason=data.get("reason", "hangup"),
                     ts=time.time(),
                 ))
+            case "profile":
+                if self._store and self._session_id:
+                    await self._store.append(self._session_id, "profile.jsonl", json.dumps(data))
+                log.info("modal_interactive_backend.profile", **{k: v for k, v in data.items() if k != "type"})
             case unknown:
                 log.warning("modal_interactive_backend.unknown_event", type=unknown)
