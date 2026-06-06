@@ -118,6 +118,7 @@ def test_interactive_endpoint_config_default(
 
     _set_required_env(monkeypatch, tmp_path)
     monkeypatch.delenv("INTERACTIVE_MODAL_ENDPOINT", raising=False)
+    monkeypatch.delenv("INTERACTIVE_PROVIDER_ENDPOINT", raising=False)
     cfg = RuntimeConfig.from_env(load_dotenv_file=False)
     assert cfg.interactive_modal_endpoint == ""
 
@@ -126,6 +127,9 @@ def test_interactive_endpoint_config_from_env(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     _set_required_env(monkeypatch, tmp_path)
+    # INTERACTIVE_PROVIDER_ENDPOINT takes precedence over INTERACTIVE_MODAL_ENDPOINT;
+    # clear it so this test exercises the MODAL fallback deterministically.
+    monkeypatch.delenv("INTERACTIVE_PROVIDER_ENDPOINT", raising=False)
     monkeypatch.setenv("INTERACTIVE_MODAL_ENDPOINT", "wss://example.modal.run/ws")
     from rehearse.config import RuntimeConfig
 
