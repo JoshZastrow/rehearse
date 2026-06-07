@@ -11,6 +11,7 @@ uv.lock
 .DS_Store
 sessions/
 data/
+!train/finetune/data/
 evals/runs/
 evals/datasets/mme-emotion/v0-10clip/clips/*
 !evals/datasets/mme-emotion/v0-10clip/clips/.gitkeep

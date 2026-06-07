@@ -255,14 +255,22 @@ class InterleavedTokenizer:
     def __call__(self, wav: np.ndarray, start_sec: float, path: str) -> Sample:
         with torch.no_grad():
             audio_tensor = torch.Tensor(wav).cuda()  # [C, T]
-            if audio_tensor.shape[0] > 1:
-                # Stereo input: select the configured channel only.
-                if self.channel >= audio_tensor.shape[0]:
-                    raise ValueError(
-                        f"channel={self.channel} out of range for audio with {audio_tensor.shape[0]} channels"
-                    )
-                audio_tensor = audio_tensor[self.channel : self.channel + 1]  # [1, T]
-            audio_tokens = self.mimi.encode(audio_tensor[:, None])  # [1, 1, T]
+            C = audio_tensor.shape[0]
+            if C == 2:
+                # Stereo input: encode both channels as a batch so mimi runs once.
+                # Order: main speaker (self.channel) first so codes[:, 1:9] is the
+                # training target; other speaker second as conditioning.
+                other_ch = 1 - self.channel
+                main_audio = audio_tensor[self.channel : self.channel + 1]   # [1, T]
+                other_audio = audio_tensor[other_ch : other_ch + 1]          # [1, T]
+                # Stack as [2, 1, T] (batch of two mono clips)
+                both_audio = torch.stack([main_audio, other_audio])           # [2, 1, T]
+                audio_tokens = self.mimi.encode(both_audio)                   # [2, 8, T]
+            else:
+                # Mono input: encode once; zero-pad other stream.
+                audio_tokens = self.mimi.encode(audio_tensor[:, None])        # [1, 8, T]
+                zeros = torch.zeros_like(audio_tokens)
+                audio_tokens = torch.cat([audio_tokens, zeros], dim=0)        # [2, 8, T]
             audio_tokens = audio_tokens[..., : self.num_audio_frames]
             this_num_audio_frames = audio_tokens.shape[-1]
             audio_tokens = torch.nn.functional.pad(
@@ -270,7 +278,7 @@ class InterleavedTokenizer:
                 (0, self.num_audio_frames - this_num_audio_frames),
                 value=self.interleaver.zero_padding,
             )
-            audio_tokens = audio_tokens.view(1, -1, self.num_audio_frames)
+            audio_tokens = audio_tokens.view(1, -1, self.num_audio_frames)   # [1, 16, T]
 
             info_file = os.path.splitext(path)[0] + ".json"
             with open(info_file) as f:

@@ -75,19 +75,29 @@ def _init_logging(verbose: bool) -> None:
 def _run(config: ManifestConfig) -> None:
     _init_logging(config.verbose)
 
-    wavs = sorted(config.sessions_root.rglob("audio.wav"))
-    logger.info("Found %d audio.wav files under %s", len(wavs), config.sessions_root)
+    # Collect candidate directories: prefer audio_stereo.wav, fall back to audio.wav.
+    # This handles both:
+    #   - Modal pipeline: prepare_stereo.py → audio_stereo.wav (no audio.wav)
+    #   - Legacy pipeline: audio.wav + optional audio_stereo.wav
+    dirs_stereo = {w.parent for w in config.sessions_root.rglob("audio_stereo.wav")}
+    dirs_mono = {w.parent for w in config.sessions_root.rglob("audio.wav")}
+    all_dirs = dirs_stereo | dirs_mono
+
+    targets: list[Path] = []
+    for d in sorted(all_dirs):
+        stereo = d / "audio_stereo.wav"
+        mono = d / "audio.wav"
+        targets.append(stereo if stereo.exists() else mono)
+
+    logger.info("Found %d session audio files under %s", len(targets), config.sessions_root)
 
     entries = []
     skipped = 0
-    for wav in wavs:
-        # Prefer stereo-split file when available (required by moshi-finetune).
-        stereo = wav.parent / "audio_stereo.wav"
-        target = stereo if stereo.exists() else wav
-
-        annotation = wav.with_suffix(".json")
+    for target in targets:
+        # Annotation sibling: audio_stereo.json for audio_stereo.wav, audio.json for audio.wav
+        annotation = target.with_suffix(".json")
         if config.require_annotation and not annotation.exists():
-            logger.debug("Skipping (no annotation): %s", wav)
+            logger.debug("Skipping (no annotation): %s", target)
             skipped += 1
             continue
 
@@ -105,7 +115,7 @@ def _run(config: ManifestConfig) -> None:
             continue
 
         entries.append({"path": str(target), "duration": duration})
-        logger.debug("%.2fs  %s", duration, wav)
+        logger.debug("%.2fs  %s", duration, target)
 
     logger.info("%d entries, %d skipped", len(entries), skipped)
 

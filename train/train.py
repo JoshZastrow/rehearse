@@ -159,10 +159,10 @@ def _train(args: TrainArgs, exit_stack: ExitStack):
         model.end_of_text_padding_id,
         model.zero_token_id,
         keep_main_only=True,
-        main_speaker_label="coach",
+        main_speaker_label=args.main_speaker_label,
     )
     interleaved_tokenizer = InterleavedTokenizer(
-        mimi, interleaver, duration_sec=args.duration_sec
+        mimi, interleaver, duration_sec=args.duration_sec, channel=args.channel
     )
 
     # 5. Load data loaders
