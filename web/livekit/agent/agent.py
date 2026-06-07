@@ -1,70 +1,72 @@
-"""LiveKit voice agent for Rehearse — prototype backend.
+"""LiveKit voice agent for Rehearse — bridges a WebRTC room to the Moshi backend.
 
-Connects to a LiveKit room as an agent, using:
-  STT: Deepgram
-  VAD: Silero
-  LLM: OpenAI gpt-4o-mini
-  TTS: Cartesia
-  Turn detection: multilingual model
+Thin entrypoint: builds a LiveKitRoomStream from the real rtc.Room, mints a
+session, then delegates to run_livekit_session() (importable in tests).
 
-Environment variables required:
-  LIVEKIT_URL          wss://your-project.livekit.cloud
-  LIVEKIT_API_KEY      your api key
-  LIVEKIT_API_SECRET   your api secret
-  OPENAI_API_KEY       openai key
-  DEEPGRAM_API_KEY     deepgram key
-  CARTESIA_API_KEY     cartesia key
+Environment variables:
+  LIVEKIT_URL                    ws://localhost:7880 (or wss:// for cloud)
+  LIVEKIT_API_KEY                devkey
+  LIVEKIT_API_SECRET             secret
+  INTERACTIVE_PROVIDER_ENDPOINT  wss://...modal.run/ws
+  SESSION_ROOT                   sessions (optional; default: ./sessions)
 """
 
 from __future__ import annotations
 
 import logging
+import os
+import sys
+import uuid
+from pathlib import Path
 
 from dotenv import load_dotenv
-from livekit import agents
-from livekit.agents import Agent, AgentSession, RoomInputOptions
-from livekit.plugins import cartesia, deepgram, openai, silero
+from livekit import agents, rtc
+from livekit.agents import JobContext, WorkerOptions
 
-load_dotenv()
+# Make the repo root importable when run from web/livekit/agent/
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
+
+load_dotenv(Path(__file__).parent / ".env", override=False)
 logging.basicConfig(level=logging.INFO)
+log = logging.getLogger(__name__)
 
 
-SYSTEM_PROMPT = """You are a supportive AI coach for Rehearse, a platform that helps people
-practice difficult conversations. Your role is to:
-- Play the role of the person the user wants to practice talking to
-- Give realistic, empathetic responses
-- After each exchange, briefly note what went well
-
-Keep responses concise and natural — this is a voice conversation."""
-
-
-class RehearsalAgent(Agent):
-    def __init__(self) -> None:
-        super().__init__(instructions=SYSTEM_PROMPT)
-
-
-async def entrypoint(ctx: agents.JobContext) -> None:
+async def entrypoint(ctx: JobContext) -> None:
     await ctx.connect()
+    await ctx.wait_for_participant()
 
-    session = AgentSession(
-        stt=deepgram.STT(model="nova-2"),
-        llm=openai.LLM(model="gpt-4o-mini"),
-        tts=cartesia.TTS(),
-        vad=silero.VAD.load(),
+    endpoint = (
+        os.environ.get("INTERACTIVE_PROVIDER_ENDPOINT")
+        or os.environ.get("INTERACTIVE_MODAL_ENDPOINT", "")
+    )
+    if not endpoint:
+        log.error("INTERACTIVE_PROVIDER_ENDPOINT not set — agent cannot start")
+        return
+
+    from rehearse.audio.livekit_stream import LiveKitRoomStream
+    from rehearse.backends.interactive.modal_backend import ModalInteractiveBackend
+    from rehearse.session.livekit_session import run_livekit_session, write_session_manifest
+    from rehearse.storage import LocalFilesystemStore
+
+    session_id = str(uuid.uuid4())
+    session_root = Path(os.environ.get("SESSION_ROOT", "sessions"))
+    store = LocalFilesystemStore(session_root, "http://localhost:8000")
+    write_session_manifest(store, session_id)
+
+    # Build and publish the agent's outbound audio track.
+    audio_source = rtc.AudioSource(sample_rate=16000, num_channels=1)
+    track = rtc.LocalAudioTrack.create_audio_track("agent-audio", audio_source)
+    await ctx.room.local_participant.publish_track(
+        track,
+        rtc.TrackPublishOptions(source=rtc.TrackSource.SOURCE_MICROPHONE),
     )
 
-    await session.start(
-        ctx.room,
-        agent=RehearsalAgent(),
-        room_input_options=RoomInputOptions(
-            noise_cancellation=agents.noise_cancellation.BVC(),
-        ),
-    )
+    stream = LiveKitRoomStream()
+    await stream.setup(ctx.room, audio_source)
 
-    await session.generate_reply(
-        instructions="Greet the user warmly and ask what kind of conversation they'd like to practice today."
-    )
+    backend = ModalInteractiveBackend(endpoint)
+    await run_livekit_session(stream, session_id, backend, store=store, skip_consent=True)
 
 
 if __name__ == "__main__":
-    agents.cli.run_app(agents.WorkerOptions(entrypoint_fnc=entrypoint))
+    agents.cli.run_app(WorkerOptions(entrypoint_fnc=entrypoint))
