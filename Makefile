@@ -64,7 +64,8 @@ deploy-interactive: ## deploy Moshi interactive inference server to Modal GPU (A
 	modal deploy infra/interactive.py
 	@echo ""
 	@echo "Deployed. Add to .env:"
-	@echo "  INTERACTIVE_MODAL_ENDPOINT=wss://<workspace>--rehearse-interactive-serve.modal.run/ws"
+	@echo "  INTERACTIVE_PROVIDER_ENDPOINT=wss://<workspace>--rehearse-interactive-providerserver-serve.modal.run/ws"
+	@echo "  INTERACTIVE_CALLER_ENDPOINT=wss://<workspace>--rehearse-interactive-callerserver-serve.modal.run/ws"
 	@echo ""
 	@echo "Or get the URL automatically:"
 	@echo "  modal app url rehearse-interactive"

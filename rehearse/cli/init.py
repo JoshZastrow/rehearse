@@ -254,18 +254,22 @@ def _collect_backend(existing: dict[str, str], force: bool, env_only: bool, root
 def _collect_interactive(existing: dict[str, str], force: bool, env_only: bool, root: Path) -> dict[str, str]:
     """Ask local-vs-Modal for the interactive backend."""
     print()
-    current_endpoint = existing.get("INTERACTIVE_MODAL_ENDPOINT", "")
+    current_provider = existing.get("INTERACTIVE_PROVIDER_ENDPOINT", "")
+    current_caller = existing.get("INTERACTIVE_CALLER_ENDPOINT", "")
 
-    if current_endpoint:
-        print(_ok(f"Modal endpoint already set: {current_endpoint}"))
-        if not force and not _confirm("Re-deploy interactive server?", default=False):
-            return {"INTERACTIVE_MODAL_ENDPOINT": current_endpoint}
+    if current_provider:
+        print(_ok(f"Modal provider endpoint already set: {current_provider}"))
+        if not force and not _confirm("Re-deploy interactive servers?", default=False):
+            return {
+                "INTERACTIVE_PROVIDER_ENDPOINT": current_provider,
+                "INTERACTIVE_CALLER_ENDPOINT": current_caller,
+            }
 
     print("  How should the interactive backend run?")
     print("    1) Local GPU   — loads Moshi weights on this machine")
-    print("    2) Modal cloud — deploys to an A10G GPU via `modal deploy`")
+    print("    2) Modal cloud — deploys provider + caller to A10G GPUs via `modal deploy`")
     print()
-    mode = _ask("Mode (1/2)", default="2" if current_endpoint else "1")
+    mode = _ask("Mode (1/2)", default="2" if current_provider else "1")
 
     updates: dict[str, str] = {}
 
@@ -275,28 +279,45 @@ def _collect_interactive(existing: dict[str, str], force: bool, env_only: bool, 
             default=existing.get("INTERACTIVE_CHECKPOINT_PATH", ""),
         )
         updates["INTERACTIVE_CHECKPOINT_PATH"] = ckpt
-        updates["INTERACTIVE_MODAL_ENDPOINT"] = ""
+        updates["INTERACTIVE_PROVIDER_ENDPOINT"] = ""
+        updates["INTERACTIVE_CALLER_ENDPOINT"] = ""
         updates["INTERACTIVE_DEVICE"] = _ask("Device", default=existing.get("INTERACTIVE_DEVICE", "cuda"))
     else:
         if env_only:
-            print(_warn("Skipping Modal deploy (--env-only). Set INTERACTIVE_MODAL_ENDPOINT manually."))
-            updates["INTERACTIVE_MODAL_ENDPOINT"] = current_endpoint
+            print(_warn(
+                "Skipping Modal deploy (--env-only). Set INTERACTIVE_PROVIDER_ENDPOINT "
+                "and INTERACTIVE_CALLER_ENDPOINT manually."
+            ))
+            updates["INTERACTIVE_PROVIDER_ENDPOINT"] = current_provider
+            updates["INTERACTIVE_CALLER_ENDPOINT"] = current_caller
         else:
             print()
-            print(_dim("  Deploying interactive inference server to Modal (A10G)..."))
+            print(_dim("  Deploying interactive inference servers to Modal (A10G)..."))
             rc = _run(["modal", "deploy", "infra/interactive.py"], cwd=root)
             if rc != 0:
-                print(_err("modal deploy failed. Set INTERACTIVE_MODAL_ENDPOINT manually in .env."))
-                updates["INTERACTIVE_MODAL_ENDPOINT"] = current_endpoint
+                print(_err(
+                    "modal deploy failed. Set INTERACTIVE_PROVIDER_ENDPOINT and "
+                    "INTERACTIVE_CALLER_ENDPOINT manually in .env."
+                ))
+                updates["INTERACTIVE_PROVIDER_ENDPOINT"] = current_provider
+                updates["INTERACTIVE_CALLER_ENDPOINT"] = current_caller
             else:
-                auto_url = _modal_app_endpoint("rehearse-interactive", "interactiveserver", "serve", "ws")
-                if auto_url:
-                    print(_ok(f"Endpoint derived from workspace: {auto_url}"))
-                endpoint = _ask(
-                    "wss:// endpoint" if not auto_url else "Confirm or override endpoint",
-                    default=auto_url or current_endpoint,
+                provider_url = _modal_app_endpoint("rehearse-interactive", "providerserver", "serve", "ws")
+                caller_url = _modal_app_endpoint("rehearse-interactive", "callerserver", "serve", "ws")
+                if provider_url:
+                    print(_ok(f"Provider endpoint derived from workspace: {provider_url}"))
+                if caller_url:
+                    print(_ok(f"Caller endpoint derived from workspace: {caller_url}"))
+                provider = _ask(
+                    "Provider wss:// endpoint" if not provider_url else "Confirm or override provider endpoint",
+                    default=provider_url or current_provider,
                 )
-                updates["INTERACTIVE_MODAL_ENDPOINT"] = endpoint
+                caller = _ask(
+                    "Caller wss:// endpoint" if not caller_url else "Confirm or override caller endpoint",
+                    default=caller_url or current_caller,
+                )
+                updates["INTERACTIVE_PROVIDER_ENDPOINT"] = provider
+                updates["INTERACTIVE_CALLER_ENDPOINT"] = caller
 
     return updates
 
@@ -453,11 +474,11 @@ def _wizard(force: bool = False, env_only: bool = False) -> None:
     print(f"\n{_BOLD}Setup complete.{_RESET} Next steps:\n")
     backend = updates.get("BACKEND_TYPE", existing.get("BACKEND_TYPE", "managed"))
     if backend == "interactive":
-        endpoint = updates.get("INTERACTIVE_MODAL_ENDPOINT", "")
+        endpoint = updates.get("INTERACTIVE_PROVIDER_ENDPOINT", "")
         if endpoint:
-            print(f"  • INTERACTIVE_MODAL_ENDPOINT is set → calls route to Modal")
+            print("  • INTERACTIVE_PROVIDER_ENDPOINT is set → calls route to Modal")
         else:
-            print(f"  • INTERACTIVE_MODAL_ENDPOINT is empty → inference runs locally (needs GPU)")
+            print("  • INTERACTIVE_PROVIDER_ENDPOINT is empty → inference runs locally (needs GPU)")
     print("  • Run `make serve` to start the server")
     print("  • Run `make test` to verify the setup")
     print()

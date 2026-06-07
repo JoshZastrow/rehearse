@@ -548,7 +548,7 @@ async def smoke_test() -> None:
 
     _load_dotenv(_Path(__file__).parent.parent / ".env", override=True)
 
-    endpoint = os.environ.get("INTERACTIVE_PROVIDER_ENDPOINT") or os.environ.get("INTERACTIVE_MODAL_ENDPOINT", "")
+    endpoint = os.environ.get("INTERACTIVE_PROVIDER_ENDPOINT", "")
     if not endpoint:
         raise RuntimeError("INTERACTIVE_PROVIDER_ENDPOINT not set — run `make deploy-interactive` and set the env var")
     ws_url = endpoint.replace("https://", "wss://").replace("http://", "ws://").rstrip("/")
