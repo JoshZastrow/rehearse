@@ -37,11 +37,30 @@ class Phase(StrEnum):
 
 
 class Speaker(StrEnum):
-    """Name the speaker attached to one runtime utterance or audio chunk."""
+    """Name the speaker attached to one runtime utterance or audio chunk.
+
+    The canonical serialized values stay ``"user"``/``"coach"`` so existing
+    artifacts, audio role directories, and scorers keep working unchanged.
+    ``PROVIDER`` (the coach model) and ``CALLER`` (the user) are the current
+    vocabulary; they are aliases of ``COACH``/``USER`` — ``Speaker.PROVIDER is
+    Speaker.COACH`` — and the strings ``"provider"``/``"caller"`` parse via
+    ``_missing_`` so data written with either label round-trips.
+    """
 
     USER = "user"
     COACH = "coach"
     CHARACTER = "character"
+    # Aliases (same values as USER/COACH) — excluded from iteration, so
+    # `list(Speaker)` stays [USER, COACH, CHARACTER].
+    CALLER = "user"
+    PROVIDER = "coach"
+
+    @classmethod
+    def _missing_(cls, value: object) -> "Speaker | None":
+        """Accept the current 'caller'/'provider' label strings on input."""
+        if isinstance(value, str):
+            return {"caller": cls.USER, "provider": cls.COACH}.get(value.lower())
+        return None
 
 
 class ConsentState(StrEnum):

@@ -31,3 +31,43 @@ def test_session_has_backend_fields():
     assert s.backend_type is None
     assert s.speech_services is None
     assert s.prosody_source == "none"
+
+
+def test_speaker_provider_caller_are_aliases_of_coach_user():
+    from rehearse.types import Speaker
+
+    assert Speaker.PROVIDER is Speaker.COACH
+    assert Speaker.CALLER is Speaker.USER
+    # canonical serialized values are unchanged (backward compatible on disk)
+    assert Speaker.PROVIDER.value == "coach"
+    assert Speaker.CALLER.value == "user"
+    # aliases are excluded from iteration
+    assert list(Speaker) == [Speaker.USER, Speaker.COACH, Speaker.CHARACTER]
+
+
+def test_speaker_parses_both_legacy_and_current_labels():
+    from rehearse.types import Speaker
+
+    assert Speaker("user") is Speaker.USER
+    assert Speaker("coach") is Speaker.COACH
+    assert Speaker("caller") is Speaker.USER
+    assert Speaker("provider") is Speaker.COACH
+    assert Speaker("PROVIDER") is Speaker.COACH  # current labels are case-insensitive
+
+
+def test_speaker_round_trips_through_pydantic_for_current_labels():
+    from rehearse.types import Phase, Speaker, TranscriptFrame
+
+    frame = TranscriptFrame(
+        session_id="s",
+        utterance_id="u",
+        ts_start=0.0,
+        ts_end=0.1,
+        speaker="provider",  # current label accepted via _missing_
+        phase=Phase.INTAKE,
+        text="hi",
+        is_interim=False,
+    )
+    assert frame.speaker is Speaker.COACH
+    # serializes back to the canonical "coach"
+    assert '"speaker":"coach"' in frame.model_dump_json()
