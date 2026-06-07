@@ -7,7 +7,7 @@
  ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚══════╝
 ```
 
-<p align="center"><b>A research prototype for training and evaluating long-horizon conversational agents.</b></p>
+<p align="center"><b>A research prototype for training and evaluating long-horizon conversational voice agents.</b></p>
 
 ---
 
