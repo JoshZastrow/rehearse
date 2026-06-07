@@ -48,3 +48,5 @@ rehearse/models/kyutai/**/*.safetensors
 rehearse/models/kyutai/**/*.model
 rehearse/models/kyutai/**/config.json
 rehearse/models/kyutai/**/tokenizer*.model
+web/livekit/app/node_modules/
+web/livekit/app/dist/

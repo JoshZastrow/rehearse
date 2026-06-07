@@ -1,0 +1,2 @@
+livekit-agents[openai,silero,deepgram,cartesia,turn-detector]>=0.12
+python-dotenv
