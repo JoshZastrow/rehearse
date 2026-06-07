@@ -36,15 +36,22 @@ from rehearse.config import RuntimeConfig
 from rehearse.types import Session
 
 
-def _modal_endpoint() -> str:
-    """Read INTERACTIVE_MODAL_ENDPOINT from .env or environment."""
+def _endpoint(var: str) -> str:
+    """Read a Modal endpoint URL from the environment, falling back to .env."""
+    val = os.getenv(var, "")
+    if val:
+        return val
     env_path = Path(__file__).parents[1] / ".env"
     if env_path.exists():
         for line in env_path.read_text().splitlines():
             line = line.strip()
-            if line.startswith("INTERACTIVE_MODAL_ENDPOINT="):
+            if line.startswith(f"{var}="):
                 return line.split("=", 1)[1].strip().strip('"').strip("'")
-    return os.getenv("INTERACTIVE_MODAL_ENDPOINT", "")
+    return ""
+
+
+_PROVIDER_ENDPOINT = _endpoint("INTERACTIVE_PROVIDER_ENDPOINT")
+_CALLER_ENDPOINT = _endpoint("INTERACTIVE_CALLER_ENDPOINT")
 
 
 def _free_port() -> int:
@@ -88,7 +95,7 @@ def _run_fake_modal_server(
         while not stop.is_set():
             try:
                 await asyncio.wait_for(ws.recv(), timeout=0.05)
-            except (asyncio.TimeoutError, Exception):
+            except (TimeoutError, Exception):
                 break
 
     async def _serve() -> None:
@@ -292,22 +299,36 @@ def test_full_twilio_webhook_flow(tmp_path, monkeypatch):
 
 
 @pytest.mark.live_modal
-@pytest.mark.skipif(
-    not _modal_endpoint(),
-    reason="INTERACTIVE_MODAL_ENDPOINT not set — skipping live Modal test",
+@pytest.mark.parametrize(
+    "endpoint",
+    [
+        pytest.param(
+            _PROVIDER_ENDPOINT,
+            id="provider",
+            marks=pytest.mark.skipif(
+                not _PROVIDER_ENDPOINT, reason="INTERACTIVE_PROVIDER_ENDPOINT not set"
+            ),
+        ),
+        pytest.param(
+            _CALLER_ENDPOINT,
+            id="caller",
+            marks=pytest.mark.skipif(
+                not _CALLER_ENDPOINT, reason="INTERACTIVE_CALLER_ENDPOINT not set"
+            ),
+        ),
+    ],
 )
-def test_live_modal_server_audio_roundtrip():
-    """Connect to the real deployed Modal inference server and verify audio comes back.
+def test_live_modal_server_audio_roundtrip(endpoint: str):
+    """Connect to a deployed Modal inference server and verify audio comes back.
 
-    Requires INTERACTIVE_MODAL_ENDPOINT set in .env. Exercises the full wire
-    protocol: WebSocket connect → {"type":"start"} handshake → PCM16 audio in
-    → PCM16 audio frames back.
+    Runs against both the provider and caller endpoints — they share one wire
+    protocol (``_InteractiveServerBase._handle_session``): WebSocket connect →
+    {"type":"start"} handshake → PCM16 audio in → PCM16 audio frames back.
 
-    Skipped automatically in CI unless the secret is present.
+    Skipped automatically when the corresponding endpoint env var is unset.
     """
 
     async def _run() -> list[bytes]:
-        endpoint = _modal_endpoint()
         session_id = "live-modal-test"
         audio_frames: list[bytes] = []
 
@@ -337,5 +358,5 @@ def test_live_modal_server_audio_roundtrip():
         return audio_frames
 
     frames = asyncio.run(_run())
-    assert frames, "no audio frames received from live Modal server"
+    assert frames, f"no audio frames received from live Modal server: {endpoint}"
     assert all(isinstance(f, bytes) for f in frames)
