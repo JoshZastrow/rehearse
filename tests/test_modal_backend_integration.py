@@ -291,6 +291,7 @@ def test_full_twilio_webhook_flow(tmp_path, monkeypatch):
         server_thread.join(timeout=3.0)
 
 
+@pytest.mark.live_modal
 @pytest.mark.skipif(
     not _modal_endpoint(),
     reason="INTERACTIVE_MODAL_ENDPOINT not set — skipping live Modal test",

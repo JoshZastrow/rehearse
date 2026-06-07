@@ -12,6 +12,7 @@ Use a GPU machine for fast tests.
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import os
 import time
 from pathlib import Path
@@ -26,10 +27,18 @@ _REQUIRED_FILES = [
     "tokenizer_spm_32k_3.model",
 ]
 _WEIGHTS_PRESENT = all((_WEIGHTS_DIR / f).exists() for f in _REQUIRED_FILES)
+# The local Moshi backend resamples with torchaudio; without it the inference
+# loop raises ModuleNotFoundError mid-run, so skip rather than fail slowly.
+_TORCHAUDIO_PRESENT = importlib.util.find_spec("torchaudio") is not None
 
 skip_no_weights = pytest.mark.skipif(
-    not _WEIGHTS_PRESENT or os.environ.get("SKIP_INTERACTIVE_E2E") == "1",
-    reason="Model weights not present — run scripts/download_moshi_weights.py first",
+    not _WEIGHTS_PRESENT
+    or not _TORCHAUDIO_PRESENT
+    or os.environ.get("SKIP_INTERACTIVE_E2E") == "1",
+    reason=(
+        "Moshi weights or torchaudio unavailable — run "
+        "scripts/download_moshi_weights.py and install torchaudio"
+    ),
 )
 
 

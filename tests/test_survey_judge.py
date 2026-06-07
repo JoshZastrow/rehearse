@@ -356,6 +356,7 @@ def _load_env_key() -> str | None:
 _HAS_API_KEY = bool(_load_env_key())
 
 
+@pytest.mark.live_api
 @pytest.mark.asyncio
 @pytest.mark.skipif(not _HAS_API_KEY, reason="ANTHROPIC_API_KEY not available")
 async def test_survey_presence_judge_real_llm_scores_captured_response(
@@ -393,6 +394,7 @@ async def test_survey_presence_judge_real_llm_scores_captured_response(
     assert score.value >= 0.6, f"Expected >= 0.6 for a rich response, got {score.value}"
 
 
+@pytest.mark.live_api
 @pytest.mark.asyncio
 @pytest.mark.skipif(not _HAS_API_KEY, reason="ANTHROPIC_API_KEY not available")
 async def test_survey_presence_judge_real_llm_scores_skipped_survey_low(

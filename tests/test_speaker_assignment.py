@@ -18,7 +18,6 @@ from train.pipeline.annotate import (
     _map_speaker_ids_to_roles,
 )
 
-
 # ─── Fixtures ────────────────────────────────────────────────────────────────
 
 _SEGMENTS = [

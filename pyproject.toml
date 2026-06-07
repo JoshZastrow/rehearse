@@ -48,10 +48,12 @@ build-backend = "hatchling.build"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-addopts = "-m 'not live_api'"
+addopts = "-m 'not live_api and not live_modal and not pipeline'"
 markers = [
     "live_api: hits real provider APIs; requires sourced .env. Deselected by default. Run with `pytest -m live_api`.",
     "live_modal: hits live Modal GPU endpoints; requires INTERACTIVE_PROVIDER_ENDPOINT and INTERACTIVE_CALLER_ENDPOINT. Run with `pytest -m live_modal`.",
+    "pipeline: requires a running pipeline CLM server. Deselected by default. Run with `pytest -m pipeline`.",
+    "slow: long-running test. Run explicitly with `pytest -m slow`.",
 ]
 
 [tool.ruff]
