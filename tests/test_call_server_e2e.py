@@ -171,7 +171,7 @@ def _config(session_root: Path) -> RuntimeConfig:
         disable_sms=True,  # no notifier => finalize never touches Twilio
         enable_consent=False,  # consent auto-granted; keeps the pipeline short
         finalize_sweep_enabled=False,  # no background sweeper task
-        interactive_modal_endpoint="",
+        interactive_provider_endpoint="",
     )
 
 

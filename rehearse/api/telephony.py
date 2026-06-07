@@ -154,7 +154,7 @@ def mount_twilio_routes(
 
         async def _place() -> None:
             """Place the outbound call and attach its SID to the session."""
-            await _prewarm_modal(config.interactive_modal_endpoint)
+            await _prewarm_modal(config.interactive_provider_endpoint)
             try:
                 call_sid = await client.place_call(From, voice_url, status_url)
                 await orchestrator.attach_call(handle.session_id, call_sid)
@@ -188,13 +188,13 @@ def mount_twilio_routes(
     ) -> Response:
         """Start a new session from a direct inbound phone call."""
         await _validate(request)
-        background.add_task(_prewarm_modal, config.interactive_modal_endpoint)
+        background.add_task(_prewarm_modal, config.interactive_provider_endpoint)
         trigger = TriggerEvent(from_number=From, body="<inbound-call>", received_at=utcnow())
         handle = await orchestrator.start(trigger)
         if CallSid:
             await orchestrator.attach_call(handle.session_id, CallSid)
         log.info("twilio.voice.inbound", session_id=handle.session_id, call_sid=CallSid)
-        if config.interactive_modal_endpoint:
+        if config.interactive_provider_endpoint:
             twiml = _hold_twiml(config, handle.session_id, first=True, attempt=0)
         else:
             twiml = _stream_twiml(config, handle.session_id)
@@ -222,7 +222,7 @@ def mount_twilio_routes(
                 "</Response>",
                 media_type="application/xml",
             )
-        if await _inference_ready(config.interactive_modal_endpoint):
+        if await _inference_ready(config.interactive_provider_endpoint):
             log.info("Inference server ready — connecting stream", session_id=session_id, attempt=attempt)
             return PlainTextResponse(_stream_twiml(config, session_id), media_type="application/xml")
         log.debug("Inference server not yet ready, retrying...", session_id=session_id, attempt=attempt)

@@ -18,7 +18,7 @@ def test_create_backend_interactive_returns_interactive_backend():
         hume_config_id="x",
         session_root=Path("/tmp"),
         backend_type="interactive",
-        interactive_modal_endpoint="wss://example.modal.run/ws",
+        interactive_provider_endpoint="wss://example.modal.run/ws",
     )
     backend = create_backend(cfg)
     assert isinstance(backend, ModalInteractiveBackend)

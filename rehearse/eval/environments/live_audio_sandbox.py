@@ -240,5 +240,5 @@ def _minimal_config(overrides: dict[str, str]) -> RuntimeConfig:
     cfg.interactive_device = os.environ.get("INTERACTIVE_DEVICE", "cuda")
     cfg.interactive_asr_model = os.environ.get("INTERACTIVE_ASR_MODEL", "base")
     cfg.interactive_model_type = os.environ.get("INTERACTIVE_MODEL_TYPE", "moshi")
-    cfg.interactive_modal_endpoint = os.environ.get("INTERACTIVE_PROVIDER_ENDPOINT", "")
+    cfg.interactive_provider_endpoint = os.environ.get("INTERACTIVE_PROVIDER_ENDPOINT", "")
     return cfg

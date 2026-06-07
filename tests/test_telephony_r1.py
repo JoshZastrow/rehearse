@@ -600,7 +600,7 @@ def test_voice_wait_hangs_up_after_max_attempts(
 
     monkeypatch.setattr(app_module, "TwilioRestClient", lambda cfg: FakeTwilioClient())
     modal_config = RuntimeConfig(
-        **{**config.__dict__, "interactive_modal_endpoint": "wss://fake.modal.run/ws"}
+        **{**config.__dict__, "interactive_provider_endpoint": "wss://fake.modal.run/ws"}
     )
     app = create_app(modal_config)
     client = TestClient(app)
@@ -628,7 +628,7 @@ def test_voice_wait_connects_stream_when_inference_ready(
 
     monkeypatch.setattr(app_module, "TwilioRestClient", lambda cfg: FakeTwilioClient())
     modal_config = RuntimeConfig(
-        **{**config.__dict__, "interactive_modal_endpoint": "wss://fake.modal.run/ws"}
+        **{**config.__dict__, "interactive_provider_endpoint": "wss://fake.modal.run/ws"}
     )
     app = create_app(modal_config)
     client = TestClient(app)

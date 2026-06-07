@@ -13,6 +13,8 @@ def create_backend(config: RuntimeConfig, store: object = None) -> object:
         case "interactive":
             from rehearse.backends.interactive.modal_backend import ModalInteractiveBackend
 
-            return ModalInteractiveBackend(endpoint=config.interactive_modal_endpoint, store=store)
+            return ModalInteractiveBackend(
+                endpoint=config.interactive_provider_endpoint, store=store
+            )
         case _:
             raise ValueError(f"Unknown backend_type: {config.backend_type!r}")

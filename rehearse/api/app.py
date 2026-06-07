@@ -40,7 +40,7 @@ async def _validate_anthropic(config: RuntimeConfig) -> None:
 
 
 async def _load_interactive_models(config: RuntimeConfig) -> None:
-    if config.interactive_modal_endpoint:
+    if config.interactive_provider_endpoint:
         return  # models run on Modal; nothing to load locally
     from rehearse.backends.interactive.loader import load_models
     await asyncio.get_running_loop().run_in_executor(
@@ -54,8 +54,8 @@ async def _load_interactive_models(config: RuntimeConfig) -> None:
 
 
 async def _prewarm_interactive(config: RuntimeConfig) -> None:
-    if config.interactive_modal_endpoint:
-        await _prewarm_modal(config.interactive_modal_endpoint)
+    if config.interactive_provider_endpoint:
+        await _prewarm_modal(config.interactive_provider_endpoint)
 
 
 # Each entry: (handler_name, set_of_applicable_backend_types, async_handler_fn)

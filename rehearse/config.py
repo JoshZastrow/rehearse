@@ -62,7 +62,7 @@ class RuntimeConfig:
     interactive_device: str = "cuda"         # INTERACTIVE_DEVICE — "cuda" or "cpu"
     interactive_asr_model: str = "base"      # INTERACTIVE_ASR_MODEL — whisper model size for user ASR
     interactive_model_type: str = "moshi"    # INTERACTIVE_MODEL_TYPE — "moshi" or "personaplex"
-    interactive_modal_endpoint: str = ""     # INTERACTIVE_PROVIDER_ENDPOINT — wss://... ProviderServer
+    interactive_provider_endpoint: str = ""     # INTERACTIVE_PROVIDER_ENDPOINT — wss://... ProviderServer
     enable_consent: bool = False
     enable_meeting_phase_processor: bool = False
     phase_classifier_model: str = "claude-haiku-4-5-20251001"
@@ -171,7 +171,7 @@ class RuntimeConfig:
             interactive_device=os.environ.get("INTERACTIVE_DEVICE", "cuda"),
             interactive_asr_model=os.environ.get("INTERACTIVE_ASR_MODEL", "base"),
             interactive_model_type=os.environ.get("INTERACTIVE_MODEL_TYPE", "moshi"),
-            interactive_modal_endpoint=os.environ.get("INTERACTIVE_PROVIDER_ENDPOINT", ""),
+            interactive_provider_endpoint=os.environ.get("INTERACTIVE_PROVIDER_ENDPOINT", ""),
             enable_consent=os.environ.get("ENABLE_CONSENT", "0") == "1",
             enable_meeting_phase_processor=os.environ.get("ENABLE_MEETING_PHASE_PROCESSOR", "0") == "1",
             phase_classifier_model=os.environ.get("PHASE_CLASSIFIER_MODEL", "claude-haiku-4-5-20251001"),

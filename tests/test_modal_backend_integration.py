@@ -137,7 +137,7 @@ def test_twilio_to_modal_backend_audio_roundtrip(tmp_path, monkeypatch):
             session_root=tmp_path,
             validate_twilio_signature=False,
             backend_type="interactive",
-            interactive_modal_endpoint=f"ws://127.0.0.1:{port}/ws",
+            interactive_provider_endpoint=f"ws://127.0.0.1:{port}/ws",
         )
 
         session_id = "modal-integration-test"
@@ -216,7 +216,7 @@ def test_full_twilio_webhook_flow(tmp_path, monkeypatch):
             session_root=tmp_path,
             validate_twilio_signature=False,
             backend_type="interactive",
-            interactive_modal_endpoint=f"ws://127.0.0.1:{ws_port}/ws",
+            interactive_provider_endpoint=f"ws://127.0.0.1:{ws_port}/ws",
         )
 
         import rehearse.api.telephony as telephony_module
