@@ -17,6 +17,9 @@ lora:
 first_codebook_weight_multiplier: 100.
 text_padding_weight: 0.5
 
+channel: 1
+main_speaker_label: "caller"
+
 duration_sec: 30
 batch_size: 1
 max_steps: 50
