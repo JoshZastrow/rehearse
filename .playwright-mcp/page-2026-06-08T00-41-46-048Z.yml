@@ -1,8 +1,0 @@
-- generic [ref=e3]:
-  - navigation [ref=e4]:
-    - link "← designs" [ref=e5] [cursor=pointer]:
-      - /url: /
-    - generic [ref=e6]: Design 2 · Minimal Orb
-  - generic:
-    - button "Mute": 🎙
-    - button "End call": ✕
