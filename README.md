@@ -35,7 +35,7 @@ Rehearse fixes the session structure to make this measurable. Three phases. One 
 
 **Naturalness at scale.** Turn-based scaffolding flattens prosody over long sessions. Pauses become mechanical. Response latency becomes predictable. The capability goal is a conversation that stays sonically natural across the full arc. Progress is measured against human baseline recordings using blind listener ratings and prosodic feature distributions.
 
-**Persona stability across phase transitions.** The agent plays three distinct roles in one call. Role drift is detectable in the transcript and in audio. The capability goal is consistent role behavior across all phase boundaries, validated by the eval harness scoring transition quality. There is currently no  detection, emotion, or persona steering. This can drift over long contexts.
+**Persona stability across phase transitions.** The agent plays three distinct roles in one call. Role drift is detectable in the transcript and in audio. The capability goal is consistent role behavior across all phase boundaries, validated by the eval harness scoring transition quality.
 
 **Outcome signal.** The ground truth is behavioral change in the real conversation the caller was preparing for. That signal arrives days later, if at all. The harder question is how to benchmark real-time interaction ability in real-world use cases at all. The current eval dimensions — affect perception, silence management, delivery — are a first approximation. We think the open research community is well-positioned to contribute independent, fair benchmarks here. New scorers, richer scenario datasets, and alternative judge implementations are the highest-value contributions to this repo.
 
@@ -105,115 +105,123 @@ make eval-watch RUN=<run_id>           # tail scores.jsonl live
 
 Each run produces `scores.jsonl` with per-turn scores, phase timings (with overrun warnings), and audio recordings. The same Pydantic types span the runtime and the eval harness — a frozen production session is replayable through any stage of the pipeline.
 
+## The Self-Improvement Loop
+
+The longer-term vision behind Rehearse is a closed loop: live sessions generate scored trajectories, scored trajectories inform model updates, and model updates improve the next session. Two improvement levers operate at different timescales.
+
+```
+[Live Session] → transcript.jsonl + prosody.jsonl + telemetry.jsonl
+      ↓
+[Eval Harness] → RubricScore across 7 dimensions (rwrd, cont, afct, dlvr, nint, slnc, spch)
+      ↓
+[Feedback Agent] → reads full trajectory + scores + improvement history
+      │
+      ├─→ Plateau NOT detected → HARNESS UPDATE
+      │     Rewrite system prompts, phase transitions, persona config
+      │     Loop back to live session
+      │
+      └─→ Plateau detected → WEIGHT UPDATE
+            Select RL algorithm based on reward structure
+            Dispatch LoRA training job on Modal GPU
+            Loop back with adapted model
+```
+
+**Sequencing rule:** Always start with harness iteration. Scaffold improvements are faster and cheaper — tune the prompts, phase logic, and persona compiler until scores stop moving, then fine-tune weights on the validated signal. Training on a noisy scaffold amplifies the noise.
+
+The training stack (in `train/`) implements FSDP + LoRA on Moshi 7B with manual bf16 mixed precision and regime-aware wrapping: LoRA for sequential adaptation, full fine-tuning when the domain shift is large enough that rank-bounded adapters saturate.
+
 ## Project Structure
 
-Top-level directories:
-
-| Directory | Purpose |
-|---|---|
-| `rehearse/` | Core Python package |
-| `tests/` | Unit and integration tests |
-| `evals/` | Eval datasets, fixtures, and run artifacts |
-| `scripts/` | Operational scripts (serving, diagnostics, scenario generation) |
-| `infra/` | Deployment and infrastructure configuration |
-| `web/` | Frontend assets |
-| `docs/` | Specs, plans, and architecture documents |
-| `dev/` | Local development tooling and lab configs |
-| `train/` | ML training pipeline (annotation, dataset prep) |
-
-Within `train/`:
-
 ```
-train/
-└── pipeline/
-    ├── schemas.py    # Pydantic models for session input and annotation output
-    ├── diarize.py    # Speaker diarization (pyannote) on Modal GPU
-    ├── annotate.py   # Whisper word-level annotation on Modal GPU
-    ├── prepare.py    # Stereo WAV preparation for moshi-finetune
-    └── dataset.py    # Build training manifest (JSONL) from annotated sessions
-```
-
-Within `rehearse/`:
-
-```
-rehearse/
-├── types.py            # Domain types and Pydantic models (widely imported)
-├── bus.py              # FrameBus — in-process async event bus
-├── frames.py           # Frame types published onto the bus
+rehearse/               # Core Python package
+├── types.py            # 37+ Pydantic domain models — most-imported file in the codebase
 ├── config.py           # RuntimeConfig loaded from environment
-├── storage.py          # LocalFilesystemStore — session artifact persistence
-├── pipeline.py         # Live-call assembly reference doc
+├── storage.py          # Session artifact persistence
+├── frames.py           # Audio/text frame types
 │
-├── session/            # Call lifecycle orchestration
-│   ├── session.py      # SessionOrchestrator, SessionHandle
-│   ├── conversation.py # run_session() — transport-agnostic session runner
-│   ├── runtime.py      # RuntimeHost — boots one session against a transport
-│   ├── finalize_sweeper.py  # Sweep stale in_progress sessions on restart
-│   └── synthesis.py    # SessionSynthesizer — post-call artifact generation
+├── agents/             # CLM conversation layer
+│   ├── new_clm_responder.py  # Primary conversation loop — reads frames, routes turns
+│   ├── clm.py          # Anthropic-SDK conversation agent with phase-aware prompting
+│   ├── router.py       # Phase-aware agent dispatch
+│   ├── registry.py     # Role-to-agent mapping
+│   ├── timecard.py     # Phase timing enforcement
+│   ├── topic.py        # Claude-backed topic classifier
+│   ├── persona_router.py      # SMS → EVI persona routing
+│   ├── persona_routing_agent.py  # Persona selection coordinator
+│   └── roles/
+│       ├── base.py     # RehearseAgent abstract base
+│       ├── intake.py   # Intake role
+│       ├── character.py  # Practice counterparty role
+│       └── feedback.py # Feedback role
 │
-├── phases/             # Conversation flow state machine
-│   ├── phases.py       # PhaseProcessor, PhaseBudgets — phase timing and transitions
-│   ├── phases_llm.py   # MeetingPhaseProcessor — LLM-driven phase detection
-│   ├── intake.py       # IntakeProcessor — captures caller situation during intake
-│   ├── consent.py      # ConsentGate — verbal recording-consent at call start
-│   ├── outcome.py      # OutcomeProbe — post-feedback yes/no outcome capture
-│   └── survey.py       # SurveyAgent — post-call satisfaction survey
+├── memory/             # Multi-session caller context
+│   ├── memory.py       # CallerMemory — Honcho-backed + in-memory implementations
+│   └── memory_manager.py  # Per-turn memory read/write orchestration
 │
-├── memory/             # Caller memory across sessions
-│   ├── memory.py       # CallerMemory protocol + implementations (Null, InMemory, Honcho)
-│   └── memory_manager.py  # MemoryManager — per-turn recall and storage
+├── personas/           # Persona catalog and routing
+│   ├── __init__.py     # Built-in persona definitions
+│   ├── registry.py     # PersonaRegistry — registration and lookup
+│   └── souls/          # Named persona soul documents
 │
-├── api/                # HTTP layer
-│   ├── app.py          # FastAPI app factory — wires routes, storage, orchestration
-│   ├── telephony.py    # Twilio webhooks, outbound calls, media websocket
-│   └── viewer.py       # /viewer page — renders session artifacts as HTML
+├── backends/           # Voice backend adapters
+│   ├── base.py         # Backend abstract interface
+│   ├── transport.py    # InMemoryTwoWayChannel — bidirectional frame exchange
+│   ├── prosody.py      # Prosody feature extraction
+│   └── interactive/    # Local Moshi/Mimi real-time inference
+│       ├── backend.py  # Thread-executor inference loop bridged to asyncio
+│       ├── loader.py   # Model weight loading
+│       └── asr.py      # ASR interface
 │
-├── agents/             # CLM agent roles and routing
-│   ├── clm.py          # CLM entrypoint and route mounting
-│   ├── new_clm_responder.py  # NewCLMResponder — per-turn CLM orchestration
-│   ├── router.py       # AgentRouter — selects agent for each turn
-│   ├── registry.py     # AgentRegistry — maps phase+intake to agent instances
-│   └── roles/          # Individual agent role implementations
-│
-├── audio/              # Audio codecs and voice participant contracts
-│   ├── participants.py # VoiceParticipant ABC and VoiceSpeaker protocol
-│   ├── twilio_stream.py  # TwilioCallerParticipant and TwilioStream
-│   ├── mulaw.py        # μ-law codec helpers
-│   └── resample.py     # PCM resampling
-│
-├── backends/           # LLM and voice backend adapters
-│   ├── transport.py    # RuntimeTransport — duplex transport abstraction
-│   ├── pipeline.py     # PipelineBackend — local STT/TTS pipeline
-│   ├── managed.py      # ManagedBackend — remote managed voice backend
-│   ├── tts.py          # TTS adapter
-│   └── factory.py      # Backend factory — selects backend from config
-│
-├── personas/           # Persona registry and prompt builders
-│   ├── __init__.py     # Coach/character/feedback prompts, consent classifier, intake builder
-│   ├── registry.py     # PersonaRegistry — maps intake to practice partner
-│   └── souls/          # Named persona definitions
+├── transports/         # LLM API transport factory (LiteLLM / Anthropic)
+├── session/
+│   ├── conversation.py # ConversationBackend protocol
+│   └── synthesis.py    # Post-session story/feedback generation (Claude Opus)
 │
 ├── services/           # External service integrations
-│   ├── hume_evi.py     # HumeEVIClient — Hume voice backend
-│   ├── hume_configs.py # Hume EVI config management
-│   └── memory_mcp_server.py  # MCP server exposing caller memory
+│   ├── hume_configs.py # Hume EVI configs-as-code — sync and diff
+│   ├── hume_configs_cli.py  # CLI for persona config sync
+│   └── memory_mcp_server.py  # MCP server exposing caller memory as tools
 │
-├── transports/         # LLM API transport clients
-│   ├── anthropic.py    # Anthropic streaming transport
-│   └── openai_compat.py  # OpenAI-compatible streaming transport
-│
-├── writers/            # Session artifact writers
-│   └── artifacts.py    # AudioRecorder, TranscriptWriter, ProsodyWriter, TimingWriter
+├── cli/init.py         # Interactive setup wizard (rehearse-init)
+├── train/              # Training dispatch (CLI + Modal job submission)
 │
 └── eval/               # Evaluation harness
+    ├── protocols.py    # BenchmarkExample, Scorer, Environment — shared interface contract
+    ├── runner.py       # Benchmark orchestration
     ├── cli.py          # rehearse-eval entry point
-    ├── runner.py       # Eval run orchestration
-    ├── scorers/        # LLM and deterministic judges
-    ├── providers/      # LLM provider adapters for eval
-    ├── targets/        # Eval targets (echo, raw LLM)
-    ├── environments/   # Sandbox environments (in-process, subprocess)
-    ├── customers/      # Synthetic customer drivers
-    └── executors/      # Task executors
+    ├── benchmarks/     # Benchmark definitions (MME-emotion, etc.)
+    ├── datasets/       # Eval dataset loaders
+    ├── environments/   # Sandbox environments (runtime sandbox, audio fixture, production replay)
+    ├── drivers/        # Synthetic caller drivers (LLM-backed, audio)
+    ├── scorers/        # LLM + deterministic judges (audio-native via Gemini, Claude)
+    ├── judges/         # AudioLLMProvider backends (Gemini, vLLM)
+    └── harness/        # Executor, reporter, streamer, watcher
+
+train/                  # ML training pipeline (separate package)
+├── train.py            # Main training loop (FSDP + LoRA + bf16)
+├── finetune/
+│   ├── args.py         # TrainArgs with LoRA / full-FT mutual-exclusivity checks
+│   ├── wrapped_model.py  # FSDP wrapping with regime selection
+│   ├── distributed.py  # torch.distributed rank/world-size abstractions
+│   ├── checkpointing.py  # FSDP checkpoint save/restore
+│   ├── mixed_precision.py  # Manual master-weight bf16 precision
+│   └── data/interleaver.py  # Audio+text token interleaving for Moshi
+└── pipeline/
+    ├── schemas.py      # Session and annotation Pydantic schemas
+    ├── diarize.py      # pyannote speaker diarization on Modal GPU
+    ├── annotate.py     # Whisper transcription + speaker labelling on Modal GPU
+    ├── prepare.py      # Stereo WAV preparation (provider left / caller right)
+    └── dataset.py      # Training manifest builder (JSONL)
+
+infra/                  # Modal-deployed cloud services
+├── interactive.py      # Moshi voice codec + LM inference (aiohttp WebSocket, A10G GPU)
+├── judge.py            # LiteLLM proxy for distributed eval scoring
+└── litellm_config.yaml # Model alias routing config
+
+evals/                  # Offline eval datasets and fixtures
+scripts/                # Operational tooling (serving, diagnostics, scenario generation)
+docs/                   # Specs, plans, and architecture documents
+tests/                  # Unit and integration tests
 ```
 
 ## Getting Started
