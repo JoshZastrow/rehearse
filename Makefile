@@ -129,10 +129,10 @@ _livekit-server: ## start livekit-server --dev on ws://localhost:7880 (install: 
 	livekit-server --dev --bind 0.0.0.0
 
 _token-server: ## start LiveKit JWT token server on http://localhost:8765
-	uv run python web/livekit/token_server.py
+	uv run --group livekit python web/livekit/token_server.py
 
 _rehearse-web-agent:
-	uv run python web/livekit/agent/agent.py
+	uv run --group livekit python web/livekit/agent/agent.py
 
 _rehearse-web-app:
 	cd web/livekit/app && npm run dev
