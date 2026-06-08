@@ -116,7 +116,7 @@ function RingButton({ state, onClick }: { state: string; onClick: () => void }) 
   const ringColors = ['#6366f1', '#818cf8', '#a5b4fc', '#c7d2fe']
 
   return (
-    <button onClick={isIdle ? onClick : undefined} style={ringBtnShell}>
+    <button onClick={isIdle ? onClick : undefined} style={ringBtnShell} aria-label="Start call">
       {/* concentric rings */}
       {ringColors.map((c, i) => (
         <span
