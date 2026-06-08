@@ -1,84 +1,45 @@
 /**
- * Design 2 — Minimal Orb
+ * Design 2 — Waveform Split
  *
- * Pure black canvas. One morphing blob, full screen. No chrome.
- * Tap anywhere to connect; mic + end buttons slide in when connected.
- *
- * States:
- *   idle       — dim grey breathing orb + "tap to begin" hint
- *   connecting — orb brightens + churns faster
- *   connected  — full audio-reactive orb; blue = agent, purple = user
- *   error      — orb turns red, retry hint
+ * Two stacked scrolling waveform panels (Caller=cyan, Agent=purple).
+ * Large concentric-ring button to start. Session timer top right.
+ * Mute / Settings bottom bar.
  */
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useVoiceSession } from '../hooks/useVoiceSession'
 
-type OrbState = 'idle' | 'connecting' | 'connected' | 'error'
+// ── elapsed timer hook ────────────────────────────────────────────────────────
 
-export default function Design2MinimalOrb() {
-  const session = useVoiceSession()
-  const state = session.connectionState as OrbState
-
-  const handleStageClick = () => {
-    if (state === 'idle' || state === 'error') void session.connect()
-  }
-
-  return (
-    <div style={shell} onClick={handleStageClick}>
-      <nav style={nav} onClick={(e) => e.stopPropagation()}>
-        <Link to="/" style={backLink}>← designs</Link>
-        <span style={navTitle}>Design 2 · Minimal Orb</span>
-      </nav>
-
-      <div style={stage}>
-        <MorphOrb
-          audioLevel={session.audioLevel}
-          activeSpeaker={session.activeSpeaker}
-          state={state}
-        />
-        {state === 'idle' && <p style={hint}>tap to begin</p>}
-        {state === 'error' && <p style={{ ...hint, color: '#f55' }}>tap to retry</p>}
-      </div>
-
-      {/* Mic + End slide up only when connected */}
-      <div
-        style={{
-          ...footer,
-          opacity: state === 'connected' ? 1 : 0,
-          transform: state === 'connected' ? 'translateY(0)' : 'translateY(14px)',
-          pointerEvents: state === 'connected' ? 'auto' : 'none',
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <button
-          aria-label={session.isMicOn ? 'Mute' : 'Unmute'}
-          style={{ ...ctrlBtn, opacity: session.isMicOn ? 1 : 0.4 }}
-          onClick={session.toggleMic}
-        >
-          {session.isMicOn ? '🎙' : '🔇'}
-        </button>
-        <button aria-label="End call" style={{ ...ctrlBtn, color: '#f44' }} onClick={session.disconnect}>
-          ✕
-        </button>
-      </div>
-    </div>
-  )
+function useElapsed(running: boolean) {
+  const [secs, setSecs] = useState(0)
+  useEffect(() => {
+    if (!running) { setSecs(0); return }
+    const id = setInterval(() => setSecs(s => s + 1), 1000)
+    return () => clearInterval(id)
+  }, [running])
+  const h = String(Math.floor(secs / 3600)).padStart(2, '0')
+  const m = String(Math.floor((secs % 3600) / 60)).padStart(2, '0')
+  const s = String(secs % 60).padStart(2, '0')
+  return `${h}:${m}:${s}`
 }
 
-// ── MorphOrb ──────────────────────────────────────────────────────────────────
+// ── scrolling waveform canvas ─────────────────────────────────────────────────
 
-function MorphOrb({
+function WaveformCanvas({
+  color,
   audioLevel,
-  activeSpeaker,
-  state,
+  active,
+  height = 90,
 }: {
+  color: string
   audioLevel: number
-  activeSpeaker: 'user' | 'agent' | null
-  state: OrbState
+  active: boolean
+  height?: number
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const historyRef = useRef<number[]>(Array(200).fill(0))
   const frameRef = useRef(0)
   const tRef = useRef(0)
   const lastRef = useRef(performance.now())
@@ -86,180 +47,542 @@ function MorphOrb({
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
-
-    // DPR-aware sizing — crisp on retina
     const dpr = window.devicePixelRatio || 1
-    const SIZE = 500
-    canvas.width = SIZE * dpr
-    canvas.height = SIZE * dpr
-    canvas.style.width = `${SIZE}px`
-    canvas.style.height = `${SIZE}px`
-
+    const W = canvas.offsetWidth || 600
+    const H = height
+    canvas.width = W * dpr
+    canvas.height = H * dpr
+    canvas.style.height = `${H}px`
     const ctx = canvas.getContext('2d')!
     ctx.scale(dpr, dpr)
 
     function draw(now: number) {
       const dt = Math.min((now - lastRef.current) / 1000, 0.05)
       lastRef.current = now
+      tRef.current += dt
 
-      const speed = state === 'idle' ? 0.28 : state === 'connecting' ? 1.4 : 1.0
-      tRef.current += dt * speed
-      const t = tRef.current
+      // push new sample
+      const amplitude = active
+        ? audioLevel * 0.7 + Math.sin(tRef.current * 8) * audioLevel * 0.3
+        : Math.sin(tRef.current * 1.2) * 0.04 + Math.sin(tRef.current * 3.1) * 0.015
+      historyRef.current.push(Math.max(0, Math.min(1, amplitude)))
+      if (historyRef.current.length > W) historyRef.current.shift()
 
-      ctx.clearRect(0, 0, SIZE, SIZE)
-      const cx = SIZE / 2
-      const cy = SIZE / 2
+      ctx.clearRect(0, 0, W, H)
 
-      // ── radius by state ──────────────────────────────────────────────────
-      const breathe = Math.sin(t * 1.6) * 0.04
-      const baseR =
-        state === 'idle'
-          ? SIZE * 0.20 * (1 + breathe)
-          : state === 'connecting'
-          ? SIZE * 0.28 * (1 + Math.sin(t * 3.5) * 0.07)
-          : state === 'error'
-          ? SIZE * 0.22 * (1 + breathe)
-          : SIZE * 0.28 * (1 + audioLevel * 0.28)
-
-      // ── hue / saturation / lightness by state ────────────────────────────
-      const hue =
-        state === 'idle'
-          ? 240
-          : state === 'connecting'
-          ? (t * 35) % 360
-          : state === 'error'
-          ? 0
-          : activeSpeaker === 'agent'
-          ? 220
-          : 270
-
-      const sat = state === 'idle' ? 18 : state === 'error' ? 80 : 82
-      const lit = state === 'idle' ? 52 : 68
-      const alpha = state === 'idle' ? 0.50 : 0.88
-
-      // ── smooth blob via Catmull-Rom splines ──────────────────────────────
-      const N = 10
-      const pts: { x: number; y: number }[] = []
-      for (let i = 0; i < N; i++) {
-        const angle = (i / N) * Math.PI * 2
-        const churn = state === 'connecting' ? 4 : 3
-        const wobble =
-          Math.sin(angle * churn + t * 1.1) * baseR * 0.14 +
-          Math.sin(angle * (churn + 2) + t * (state === 'connecting' ? 2.4 : 1.3)) * baseR * 0.07 +
-          (state === 'connected' ? audioLevel * baseR * 0.22 * Math.sin(angle * 2 + t * 4) : 0)
-        pts.push({
-          x: cx + Math.cos(angle) * (baseR + wobble),
-          y: cy + Math.sin(angle) * (baseR + wobble),
-        })
-      }
+      const history = historyRef.current
+      const mid = H / 2
+      const barW = W / history.length
 
       ctx.beginPath()
-      for (let i = 0; i < N; i++) {
-        const p0 = pts[(i - 1 + N) % N]
-        const p1 = pts[i]
-        const p2 = pts[(i + 1) % N]
-        const p3 = pts[(i + 2) % N]
-        // Catmull-Rom → cubic bezier control points
-        const cp1x = p1.x + (p2.x - p0.x) / 6
-        const cp1y = p1.y + (p2.y - p0.y) / 6
-        const cp2x = p2.x - (p3.x - p1.x) / 6
-        const cp2y = p2.y - (p3.y - p1.y) / 6
-        if (i === 0) ctx.moveTo(p1.x, p1.y)
-        ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y)
+      for (let i = 0; i < history.length; i++) {
+        const amp = history[i]
+        const x = i * barW
+        const h2 = Math.max(1, amp * mid * 0.9)
+        ctx.moveTo(x, mid - h2)
+        ctx.lineTo(x, mid + h2)
       }
-      ctx.closePath()
-
-      // ── radial gradient fill ──────────────────────────────────────────────
-      const grad = ctx.createRadialGradient(
-        cx, cy - baseR * 0.18, baseR * 0.04,
-        cx, cy, baseR * 1.1,
-      )
-      grad.addColorStop(0,    `hsla(${hue},     ${sat + 12}%, ${lit + 12}%, ${alpha})`)
-      grad.addColorStop(0.45, `hsla(${hue + 15},${sat}%,      ${lit - 5}%,  ${alpha * 0.82})`)
-      grad.addColorStop(1,    `hsla(${hue + 30},${sat - 15}%, ${lit - 22}%, 0)`)
-      ctx.fillStyle = grad
-      ctx.fill()
-
-      // ── outer glow pass ───────────────────────────────────────────────────
-      const glowR =
-        state === 'idle' ? 20
-        : state === 'connecting' ? 35
-        : 45 + audioLevel * 55
-      ctx.shadowBlur = glowR
-      ctx.shadowColor = `hsla(${hue}, ${sat}%, 62%, 0.55)`
-      ctx.fill()
+      // glow pass
+      ctx.strokeStyle = color
+      ctx.lineWidth = barW * 0.7
+      ctx.shadowBlur = active ? 8 : 4
+      ctx.shadowColor = color
+      ctx.globalAlpha = active ? 0.9 : 0.35
+      ctx.stroke()
       ctx.shadowBlur = 0
+      ctx.globalAlpha = 1
 
       frameRef.current = requestAnimationFrame(draw)
     }
 
     frameRef.current = requestAnimationFrame(draw)
     return () => cancelAnimationFrame(frameRef.current)
-  }, [audioLevel, activeSpeaker, state])
+  }, [color, audioLevel, active, height])
 
-  return <canvas ref={canvasRef} style={{ display: 'block' }} />
+  return (
+    <canvas
+      ref={canvasRef}
+      style={{ display: 'block', width: '100%', height }}
+    />
+  )
+}
+
+// ── concentric ring button ────────────────────────────────────────────────────
+
+function RingButton({ state, onClick }: { state: string; onClick: () => void }) {
+  const isIdle = state === 'idle' || state === 'error'
+  const isConnecting = state === 'connecting'
+  const isConnected = state === 'connected'
+
+  const ringColors = ['#6366f1', '#818cf8', '#a5b4fc', '#c7d2fe']
+
+  return (
+    <button onClick={isIdle ? onClick : undefined} style={ringBtnShell}>
+      {/* concentric rings */}
+      {ringColors.map((c, i) => (
+        <span
+          key={i}
+          style={{
+            position: 'absolute',
+            borderRadius: '50%',
+            border: `1.5px solid ${c}`,
+            opacity: isConnected ? 0.5 + i * 0.1 : isConnecting ? 0.3 + i * 0.1 : 0.18 + i * 0.08,
+            width: 64 + i * 22,
+            height: 64 + i * 22,
+            boxShadow: isConnected ? `0 0 ${6 + i * 4}px ${c}` : 'none',
+            transition: 'opacity 0.4s, box-shadow 0.4s',
+            animation: isConnecting ? `pulse-ring ${1.2 + i * 0.15}s ease-in-out infinite` : 'none',
+            animationDelay: `${i * 0.1}s`,
+          }}
+        />
+      ))}
+      {/* center circle */}
+      <span style={{
+        position: 'absolute',
+        borderRadius: '50%',
+        width: 58,
+        height: 58,
+        background: isConnected
+          ? 'linear-gradient(135deg, #6366f1, #a855f7)'
+          : isConnecting
+          ? 'linear-gradient(135deg, #4f46e5, #7c3aed)'
+          : 'linear-gradient(135deg, #1e1b4b, #312e81)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        boxShadow: isConnected ? '0 0 20px #6366f1aa' : 'none',
+        transition: 'background 0.4s, box-shadow 0.4s',
+      }}>
+        <span style={{ fontSize: 22, userSelect: 'none' }}>
+          {isConnecting ? '⟳' : '🎙'}
+        </span>
+      </span>
+      {/* label */}
+      <span style={{
+        position: 'absolute',
+        bottom: -30,
+        left: '50%',
+        transform: 'translateX(-50%)',
+        whiteSpace: 'nowrap',
+        color: isConnected ? '#a5b4fc' : '#475569',
+        fontSize: 11,
+        letterSpacing: '0.12em',
+        textTransform: 'uppercase',
+      }}>
+        {isConnected ? 'Session Active' : isConnecting ? 'Connecting…' : 'Tap to Start'}
+      </span>
+      <span style={{
+        position: 'absolute',
+        bottom: -46,
+        left: '50%',
+        transform: 'translateX(-50%)',
+        whiteSpace: 'nowrap',
+        color: '#334155',
+        fontSize: 10,
+        letterSpacing: '0.08em',
+      }}>
+        {isConnected ? '' : isConnecting ? '' : 'Start the conversation'}
+      </span>
+    </button>
+  )
+}
+
+// ── main component ────────────────────────────────────────────────────────────
+
+export default function Design2MinimalOrb() {
+  const session = useVoiceSession()
+  const state = session.connectionState
+  const elapsed = useElapsed(state === 'connected')
+
+  const callerActive = state === 'connected' && session.activeSpeaker === 'user'
+  const agentActive = state === 'connected' && session.activeSpeaker === 'agent'
+
+  const handleConnect = () => {
+    if (state === 'idle' || state === 'error') void session.connect()
+  }
+
+  return (
+    <div style={shell}>
+      <style>{`
+        @keyframes pulse-ring {
+          0%, 100% { transform: scale(1); opacity: inherit; }
+          50% { transform: scale(1.06); opacity: 0.6; }
+        }
+        @keyframes blink-live {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.3; }
+        }
+      `}</style>
+
+      {/* ── header ─────────────────────────────────────────────────────────── */}
+      <header style={header}>
+        <div style={logoWrap}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+            <path d="M12 2L4 7v10l8 5 8-5V7L12 2z" fill="#6366f1" opacity="0.9"/>
+            <path d="M12 2L4 7l8 5 8-5L12 2z" fill="#818cf8"/>
+          </svg>
+          <span style={logoText}>REHEARSE</span>
+        </div>
+
+        <div style={headerCenter}>
+          {state === 'connected' && (
+            <>
+              <span style={liveDot} />
+              <span style={liveLabel}>LIVE</span>
+              <span style={sessionLabel}>Session Active</span>
+            </>
+          )}
+          {state === 'connecting' && (
+            <span style={sessionLabel}>Connecting…</span>
+          )}
+          {(state === 'idle' || state === 'error') && (
+            <span style={{ ...sessionLabel, color: '#334155' }}>
+              {state === 'error' ? 'Connection failed' : 'Ready'}
+            </span>
+          )}
+        </div>
+
+        <div style={headerRight}>
+          {state === 'connected' && (
+            <span style={timerText}>{elapsed}</span>
+          )}
+          <nav style={{ marginLeft: 12 }} onClick={e => e.stopPropagation()}>
+            <Link to="/" style={backLink}>← designs</Link>
+          </nav>
+          <button style={menuBtn}>···</button>
+        </div>
+      </header>
+
+      {/* ── waveform box ───────────────────────────────────────────────────── */}
+      <div style={waveBox}>
+        {/* caller panel */}
+        <div style={wavePanel}>
+          <div style={panelHeader}>
+            <span style={speakerIcon}>👤</span>
+            <span style={{ ...panelLabel, color: '#00dcff' }}>CALLER</span>
+            <span style={{
+              ...statusChip,
+              color: callerActive ? '#00dcff' : '#334155',
+              borderColor: callerActive ? '#00dcff44' : '#1e293b',
+            }}>
+              {callerActive ? '● SPEAKING' : '○ LISTENING'}
+            </span>
+          </div>
+          <WaveformCanvas
+            color="#00dcff"
+            audioLevel={callerActive ? session.audioLevel : 0}
+            active={callerActive}
+            height={80}
+          />
+        </div>
+
+        {/* divider */}
+        <div style={panelDivider} />
+
+        {/* agent panel */}
+        <div style={wavePanel}>
+          <div style={panelHeader}>
+            <span style={speakerIcon}>✦</span>
+            <span style={{ ...panelLabel, color: '#c084fc' }}>AGENT</span>
+            <span style={{
+              ...statusChip,
+              color: agentActive ? '#c084fc' : '#334155',
+              borderColor: agentActive ? '#c084fc44' : '#1e293b',
+            }}>
+              {agentActive ? '● SPEAKING' : '○ LISTENING'}
+            </span>
+          </div>
+          <WaveformCanvas
+            color="#c084fc"
+            audioLevel={agentActive ? session.audioLevel : 0}
+            active={agentActive}
+            height={80}
+          />
+        </div>
+
+        {/* center cursor line */}
+        <div style={cursorLine}>
+          <div style={{ ...cursorDot, background: '#00dcff', boxShadow: '0 0 8px #00dcff' }} />
+          <div style={{ flex: 1, width: 1, background: 'linear-gradient(to bottom, #00dcff44, #c084fc44)' }} />
+          <div style={{ ...cursorDot, background: '#c084fc', boxShadow: '0 0 8px #c084fc' }} />
+        </div>
+      </div>
+
+      {/* ── side labels ────────────────────────────────────────────────────── */}
+      <div style={sideLabelRow}>
+        <div style={sideLabel}>
+          <span style={{ color: '#00dcff88', fontSize: 10 }}>CALLER</span>
+          <span style={{ color: '#475569', fontSize: 9 }}>Listen</span>
+        </div>
+        <div style={{ flex: 1 }} />
+        <div style={{ ...sideLabel, alignItems: 'flex-end' }}>
+          <span style={{ color: '#c084fc88', fontSize: 10 }}>AGENT</span>
+          <span style={{ color: '#475569', fontSize: 9 }}>Speak</span>
+        </div>
+      </div>
+
+      {/* ── ring button ────────────────────────────────────────────────────── */}
+      <div style={buttonRow}>
+        <RingButton state={state} onClick={handleConnect} />
+      </div>
+
+      {/* ── bottom bar ─────────────────────────────────────────────────────── */}
+      <footer style={bottomBar}>
+        <button
+          style={{
+            ...barBtn,
+            opacity: state === 'connected' ? 1 : 0.3,
+            color: session.isMicOn ? '#e2e8f0' : '#f87171',
+          }}
+          onClick={session.toggleMic}
+          disabled={state !== 'connected'}
+          aria-label={session.isMicOn ? 'Mute' : 'Unmute'}
+        >
+          <span style={{ fontSize: 18 }}>{session.isMicOn ? '🎧' : '🔇'}</span>
+          <span style={barBtnLabel}>Mute</span>
+        </button>
+
+        <div style={{ flex: 1 }} />
+
+        {state === 'connected' && (
+          <button style={{ ...barBtn, color: '#f87171' }} onClick={session.disconnect} aria-label="End call">
+            <span style={{ fontSize: 18 }}>✕</span>
+            <span style={barBtnLabel}>End</span>
+          </button>
+        )}
+
+        <div style={{ flex: 1 }} />
+
+        <button style={{ ...barBtn, opacity: 0.4 }} aria-label="Settings">
+          <span style={{ fontSize: 18 }}>⚙</span>
+          <span style={barBtnLabel}>Settings</span>
+        </button>
+      </footer>
+    </div>
+  )
 }
 
 // ── styles ────────────────────────────────────────────────────────────────────
 
 const shell: React.CSSProperties = {
-  height: '100dvh',
-  background: '#000',
+  minHeight: '100dvh',
+  background: '#020617',
   display: 'flex',
   flexDirection: 'column',
+  color: '#e2e8f0',
+  fontFamily: 'system-ui, -apple-system, sans-serif',
   userSelect: 'none',
 }
 
-const nav: React.CSSProperties = {
-  position: 'absolute',
-  top: 0,
-  left: 0,
+const header: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  gap: 12,
   padding: '12px 20px',
-  opacity: 0.3,
-  zIndex: 10,
-  transition: 'opacity 0.2s',
+  borderBottom: '1px solid #0f172a',
+  gap: 12,
+  flexShrink: 0,
 }
 
-const backLink: React.CSSProperties = { color: '#fff', fontSize: 13, textDecoration: 'none' }
-const navTitle: React.CSSProperties = { color: '#fff', fontSize: 13 }
+const logoWrap: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 7,
+}
 
-const stage: React.CSSProperties = {
+const logoText: React.CSSProperties = {
+  fontSize: 13,
+  fontWeight: 600,
+  letterSpacing: '0.15em',
+  color: '#94a3b8',
+}
+
+const headerCenter: React.CSSProperties = {
   flex: 1,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: 7,
+}
+
+const liveDot: React.CSSProperties = {
+  width: 7,
+  height: 7,
+  borderRadius: '50%',
+  background: '#22c55e',
+  animation: 'blink-live 1.4s ease-in-out infinite',
+}
+
+const liveLabel: React.CSSProperties = {
+  fontSize: 10,
+  fontWeight: 700,
+  letterSpacing: '0.15em',
+  color: '#22c55e',
+}
+
+const sessionLabel: React.CSSProperties = {
+  fontSize: 12,
+  color: '#64748b',
+  letterSpacing: '0.05em',
+}
+
+const headerRight: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+}
+
+const timerText: React.CSSProperties = {
+  fontSize: 13,
+  fontFamily: 'monospace',
+  color: '#94a3b8',
+  letterSpacing: '0.05em',
+}
+
+const backLink: React.CSSProperties = {
+  color: '#475569',
+  fontSize: 11,
+  textDecoration: 'none',
+}
+
+const menuBtn: React.CSSProperties = {
+  background: 'none',
+  border: 'none',
+  color: '#475569',
+  fontSize: 16,
+  cursor: 'pointer',
+  padding: '0 4px',
+  letterSpacing: '0.05em',
+}
+
+const waveBox: React.CSSProperties = {
+  position: 'relative',
+  margin: '20px 24px 0',
+  border: '1px solid #1e293b',
+  borderRadius: 12,
+  overflow: 'hidden',
+  background: '#030712',
+  flexShrink: 0,
+}
+
+const wavePanel: React.CSSProperties = {
+  padding: '10px 0 6px',
+}
+
+const panelHeader: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 7,
+  padding: '0 14px 6px',
+}
+
+const speakerIcon: React.CSSProperties = {
+  fontSize: 13,
+  opacity: 0.7,
+}
+
+const panelLabel: React.CSSProperties = {
+  fontSize: 11,
+  fontWeight: 700,
+  letterSpacing: '0.15em',
+}
+
+const statusChip: React.CSSProperties = {
+  marginLeft: 'auto',
+  fontSize: 9,
+  letterSpacing: '0.1em',
+  border: '1px solid',
+  borderRadius: 20,
+  padding: '1px 8px',
+  transition: 'color 0.3s, border-color 0.3s',
+}
+
+const panelDivider: React.CSSProperties = {
+  height: 1,
+  background: 'linear-gradient(to right, transparent, #1e293b 20%, #1e293b 80%, transparent)',
+  margin: '0 14px',
+}
+
+const cursorLine: React.CSSProperties = {
+  position: 'absolute',
+  top: 0,
+  left: '50%',
+  transform: 'translateX(-50%)',
+  width: 1,
+  height: '100%',
   display: 'flex',
   flexDirection: 'column',
   alignItems: 'center',
-  justifyContent: 'center',
-  gap: 20,
-  cursor: 'pointer',
+  pointerEvents: 'none',
 }
 
-const hint: React.CSSProperties = {
-  color: '#555',
-  fontSize: 12,
-  letterSpacing: '0.15em',
-  textTransform: 'lowercase',
-  margin: 0,
-}
-
-const footer: React.CSSProperties = {
-  display: 'flex',
-  justifyContent: 'center',
-  alignItems: 'center',
-  gap: 24,
-  paddingBottom: 36,
-  transition: 'opacity 0.3s ease, transform 0.3s ease',
-}
-
-const ctrlBtn: React.CSSProperties = {
-  width: 48,
-  height: 48,
+const cursorDot: React.CSSProperties = {
+  width: 8,
+  height: 8,
   borderRadius: '50%',
-  border: '1px solid #222',
-  background: '#111',
-  color: '#fff',
-  fontSize: 17,
+  flexShrink: 0,
+}
+
+const sideLabelRow: React.CSSProperties = {
+  display: 'flex',
+  padding: '6px 28px 0',
+  flexShrink: 0,
+}
+
+const sideLabel: React.CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 1,
+  alignItems: 'flex-start',
+  letterSpacing: '0.1em',
+  textTransform: 'uppercase',
+}
+
+const buttonRow: React.CSSProperties = {
+  flex: 1,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  paddingTop: 40,
+  paddingBottom: 20,
+}
+
+const ringBtnShell: React.CSSProperties = {
+  position: 'relative',
+  width: 160,
+  height: 160,
+  background: 'none',
+  border: 'none',
   cursor: 'pointer',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+}
+
+const bottomBar: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  padding: '14px 32px 24px',
+  borderTop: '1px solid #0f172a',
+  flexShrink: 0,
+  gap: 0,
+}
+
+const barBtn: React.CSSProperties = {
+  background: 'none',
+  border: 'none',
+  cursor: 'pointer',
+  color: '#e2e8f0',
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  gap: 4,
+  padding: '6px 14px',
+  borderRadius: 8,
+  transition: 'opacity 0.2s',
+}
+
+const barBtnLabel: React.CSSProperties = {
+  fontSize: 10,
+  letterSpacing: '0.08em',
+  color: '#475569',
 }
