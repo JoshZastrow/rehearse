@@ -126,7 +126,7 @@ rehearse-web: ## start livekit-server + token server + agent + Vite dev server (
 	$(MAKE) -j4 _livekit-server _token-server _rehearse-web-agent _rehearse-web-app
 
 _livekit-server: ## start livekit-server --dev on ws://localhost:7880 (install: brew install livekit)
-	livekit-server --dev --bind 0.0.0.0
+	livekit-server --dev --bind 0.0.0.0 --logging.level warn
 
 _token-server: ## start LiveKit JWT token server on http://localhost:8765
 	uv run --group livekit python web/livekit/token_server.py

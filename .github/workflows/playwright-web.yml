@@ -5,6 +5,7 @@ on:
     paths:
       - "web/livekit/app/**"
       - "web/livekit/token_server.py"
+      - "web/livekit/agent/agent.py"
       - ".github/workflows/playwright-web.yml"
   push:
     branches: [main]
@@ -18,6 +19,7 @@ jobs:
       LIVEKIT_ROOM_NAME: rehearse-room
       VITE_LIVEKIT_URL: ws://localhost:7880
       VITE_TOKEN_ENDPOINT: http://localhost:8765/api/livekit/token
+      SESSION_ROOT: /tmp/rehearse-sessions
 
     steps:
       - uses: actions/checkout@v4
@@ -37,7 +39,7 @@ jobs:
         working-directory: web/livekit/app
         run: npx playwright install --with-deps chromium
 
-      # ── Python / token server ──────────────────────────────────────────────
+      # ── Python / token server + agent ─────────────────────────────────────
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
@@ -60,9 +62,11 @@ jobs:
 
       # ── Token server ──────────────────────────────────────────────────────
       - name: Start token server
-        run: |
-          nohup uv run python web/livekit/token_server.py > /tmp/token-server.log 2>&1 &
-          echo "TOKEN_SERVER_PID=$!" >> $GITHUB_ENV
+        run: nohup uv run --group livekit python web/livekit/token_server.py > /tmp/token-server.log 2>&1 &
+
+      # ── Agent ─────────────────────────────────────────────────────────────
+      - name: Start agent
+        run: nohup uv run --group livekit python web/livekit/agent/agent.py > /tmp/agent.log 2>&1 &
 
       # ── Vite preview ─────────────────────────────────────────────────────
       - name: Build frontend
@@ -86,13 +90,20 @@ jobs:
         if: failure()
         run: |
           echo "=== token-server ===" && cat /tmp/token-server.log || true
+          echo "=== agent ===" && cat /tmp/agent.log || true
           echo "=== vite ===" && cat /tmp/vite.log || true
           echo "=== livekit ===" && docker logs livekit || true
 
       # ── Tests ──────────────────────────────────────────────────────────────
       - name: Run Playwright tests
         working-directory: web/livekit/app
+        env:
+          SESSION_ROOT: /tmp/rehearse-sessions
         run: npx playwright test
+
+      - name: Dump agent log on failure
+        if: failure()
+        run: cat /tmp/agent.log || true
 
       - uses: actions/upload-artifact@v4
         if: failure()
