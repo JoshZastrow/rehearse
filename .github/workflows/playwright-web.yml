@@ -78,7 +78,7 @@ jobs:
         run: |
           npx wait-on \
             http://localhost:7880 \
-            http://localhost:8765/api/livekit/token \
+            http-get://localhost:8765/api/livekit/token \
             http://localhost:5173 \
             --timeout 30000
 
