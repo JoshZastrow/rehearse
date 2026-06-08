@@ -13,12 +13,15 @@ from __future__ import annotations
 
 import os
 import uuid
+from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-load_dotenv()
+# Walk up from web/livekit/ to find the repo-root .env regardless of CWD.
+_REPO_ROOT = Path(__file__).parent.parent.parent
+load_dotenv(_REPO_ROOT / ".env")
 
 app = FastAPI()
 app.add_middleware(

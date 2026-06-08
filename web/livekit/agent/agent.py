@@ -1,18 +1,21 @@
 """LiveKit voice agent for Rehearse — bridges a WebRTC room to the Moshi backend.
 
-Thin entrypoint: builds a LiveKitRoomStream from the real rtc.Room, mints a
-session, then delegates to run_livekit_session() (importable in tests).
+Connects directly to a LiveKit room via rtc.Room (no livekit-agents framework),
+then delegates to run_livekit_session() which handles all audio routing and
+artifact writing.
 
 Environment variables:
   LIVEKIT_URL                    ws://localhost:7880 (or wss:// for cloud)
   LIVEKIT_API_KEY                devkey
   LIVEKIT_API_SECRET             secret
+  LIVEKIT_ROOM_NAME              rehearse-room
   INTERACTIVE_PROVIDER_ENDPOINT  wss://...modal.run/ws
   SESSION_ROOT                   sessions (optional; default: ./sessions)
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import sys
@@ -20,53 +23,96 @@ import uuid
 from pathlib import Path
 
 from dotenv import load_dotenv
-from livekit import agents, rtc
-from livekit.agents import JobContext, WorkerOptions
 
 # Make the repo root importable when run from web/livekit/agent/
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
+_REPO_ROOT = Path(__file__).parent.parent.parent.parent
+sys.path.insert(0, str(_REPO_ROOT))
 
+load_dotenv(_REPO_ROOT / ".env", override=False)
 load_dotenv(Path(__file__).parent / ".env", override=False)
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
 
 
-async def entrypoint(ctx: JobContext) -> None:
-    await ctx.connect()
-    await ctx.wait_for_participant()
-
-    endpoint = (
-        os.environ.get("INTERACTIVE_PROVIDER_ENDPOINT")
-        or os.environ.get("INTERACTIVE_MODAL_ENDPOINT", "")
-    )
-    if not endpoint:
-        log.error("INTERACTIVE_PROVIDER_ENDPOINT not set — agent cannot start")
-        return
+async def run_agent() -> None:
+    from livekit import rtc
+    from livekit.api import AccessToken, VideoGrants
 
     from rehearse.audio.livekit_stream import LiveKitRoomStream
     from rehearse.backends.interactive.modal_backend import ModalInteractiveBackend
     from rehearse.session.livekit_session import run_livekit_session, write_session_manifest
     from rehearse.storage import LocalFilesystemStore
 
+    lk_url = os.environ.get("LIVEKIT_URL", "ws://localhost:7880")
+    api_key = os.environ.get("LIVEKIT_API_KEY", "devkey")
+    api_secret = os.environ.get("LIVEKIT_API_SECRET", "secret")
+    room_name = os.environ.get("LIVEKIT_ROOM_NAME", "rehearse-room")
+    endpoint = os.environ.get("INTERACTIVE_PROVIDER_ENDPOINT") or os.environ.get("INTERACTIVE_MODAL_ENDPOINT", "")
+
+    if not endpoint:
+        log.warning("INTERACTIVE_PROVIDER_ENDPOINT not set — audio bridge will fail")
+
+    token = (
+        AccessToken(api_key, api_secret)
+        .with_identity(f"agent-{uuid.uuid4().hex[:8]}")
+        .with_grants(VideoGrants(room_join=True, room=room_name))
+        .to_jwt()
+    )
+
+    room = rtc.Room()
+
+    @room.on("participant_connected")
+    def _on_participant(participant: object) -> None:
+        log.info("participant connected: %s", getattr(participant, "identity", "?"))
+
+    @room.on("disconnected")
+    def _on_disconnected(reason: object = None) -> None:
+        log.info("room disconnected: %s", reason)
+
+    log.info("connecting to LiveKit room '%s' at %s", room_name, lk_url)
+    await room.connect(lk_url, token)
+    log.info("connected — waiting for participant")
+
+    # Wait for at least one remote participant (poll; room events fire async).
+    for _ in range(100):
+        if room.remote_participants:
+            break
+        await asyncio.sleep(0.1)
+    else:
+        log.warning("no participant joined after 10 s — proceeding anyway")
+
     session_id = str(uuid.uuid4())
     session_root = Path(os.environ.get("SESSION_ROOT", "sessions"))
     store = LocalFilesystemStore(session_root, "http://localhost:8000")
     write_session_manifest(store, session_id)
 
-    # Build and publish the agent's outbound audio track.
     audio_source = rtc.AudioSource(sample_rate=16000, num_channels=1)
     track = rtc.LocalAudioTrack.create_audio_track("agent-audio", audio_source)
-    await ctx.room.local_participant.publish_track(
+    await room.local_participant.publish_track(
         track,
         rtc.TrackPublishOptions(source=rtc.TrackSource.SOURCE_MICROPHONE),
     )
 
     stream = LiveKitRoomStream()
-    await stream.setup(ctx.room, audio_source)
+    await stream.setup(room, audio_source)
 
-    backend = ModalInteractiveBackend(endpoint)
-    await run_livekit_session(stream, session_id, backend, store=store, skip_consent=True)
+    backend = ModalInteractiveBackend(endpoint) if endpoint else None
+    if backend is None:
+        log.error("no backend — agent will not process audio")
+        await room.disconnect()
+        return
+
+    log.info("starting session %s", session_id)
+    try:
+        await run_livekit_session(stream, session_id, backend, store=store, skip_consent=True)
+    finally:
+        await room.disconnect()
+        log.info("session %s complete", session_id)
+
+
+def main() -> None:
+    asyncio.run(run_agent())
 
 
 if __name__ == "__main__":
-    agents.cli.run_app(WorkerOptions(entrypoint_fnc=entrypoint))
+    main()
