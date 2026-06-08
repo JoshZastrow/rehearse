@@ -1,4 +1,4 @@
-.PHONY: help init serve serve-memory setup setup-honcho setup-judge deploy-judge smoke-judge deploy-interactive smoke-interactive eval-list eval-voice-replay eval-voice-replay-live eval-voice-replay-dogfood eval-voice-smoke eval-voice-smoke-live eval-voice-rollout eval-voice-rollout-live eval-voice-rollout-audio eval-persona-routing eval-watch nightly-stability test lint
+.PHONY: help init serve serve-memory setup setup-honcho setup-judge deploy-judge smoke-judge deploy-interactive smoke-interactive eval-list eval-voice-replay eval-voice-replay-live eval-voice-replay-dogfood eval-voice-smoke eval-voice-smoke-live eval-voice-rollout eval-voice-rollout-live eval-voice-rollout-audio eval-persona-routing eval-watch nightly-stability test lint rehearse-web _rehearse-web-agent _rehearse-web-app _livekit-server _token-server test-web test-livekit test-livekit-live
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk -F':.*?## ' '{printf "  %-28s %s\n", $$1, $$2}'
@@ -121,6 +121,30 @@ eval-voice-rollout-audio: ## live-audio sandbox rollout through EVI (needs HUME_
 eval-watch: ## tail scores.jsonl for a run and render a live aggregate; usage: make eval-watch RUN=<run_id>
 	@if [ -z "$(RUN)" ]; then echo "usage: make eval-watch RUN=<run_id>"; exit 1; fi
 	uv run rehearse-eval watch --run-id $(RUN)
+
+rehearse-web: ## start livekit-server + token server + agent + Vite dev server (WebRTC prototype)
+	$(MAKE) -j4 _livekit-server _token-server _rehearse-web-agent _rehearse-web-app
+
+_livekit-server: ## start livekit-server --dev on ws://localhost:7880 (install: brew install livekit)
+	livekit-server --dev --bind 0.0.0.0
+
+_token-server: ## start LiveKit JWT token server on http://localhost:8765
+	uv run python web/livekit/token_server.py
+
+_rehearse-web-agent:
+	uv run python web/livekit/agent/agent.py
+
+_rehearse-web-app:
+	cd web/livekit/app && npm run dev
+
+test-web: ## run hermetic LiveKit e2e tests (no external deps; auto-includes new hermetic tests)
+	uv run pytest tests/test_livekit_e2e.py -v -m "not live_livekit and not live_modal"
+
+test-livekit: ## run full live_livekit suite (requires livekit-server --dev running)
+	uv run pytest tests/test_livekit_e2e.py -v -m live_livekit
+
+test-livekit-live: ## run live_modal + live_livekit (requires both Modal endpoints + livekit-server)
+	uv run pytest tests/test_livekit_e2e.py -v -m "live_modal and live_livekit"
 
 nightly-stability: ## diagnostic stability run — voice-judges-smoke × repetitions=5 (Spec 8)
 	uv run rehearse-eval run --eval voice-judges-smoke --repetitions 5

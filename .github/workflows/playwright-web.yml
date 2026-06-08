@@ -1,0 +1,102 @@
+name: playwright-web
+
+on:
+  pull_request:
+    paths:
+      - "web/livekit/app/**"
+      - "web/livekit/token_server.py"
+      - ".github/workflows/playwright-web.yml"
+  push:
+    branches: [main]
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    env:
+      LIVEKIT_API_KEY: devkey
+      LIVEKIT_API_SECRET: secret
+      LIVEKIT_ROOM_NAME: rehearse-room
+      VITE_LIVEKIT_URL: ws://localhost:7880
+      VITE_TOKEN_ENDPOINT: http://localhost:8765/api/livekit/token
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Node / frontend ────────────────────────────────────────────────────
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: web/livekit/app/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: web/livekit/app
+        run: npm ci
+
+      - name: Install Playwright browsers
+        working-directory: web/livekit/app
+        run: npx playwright install --with-deps chromium
+
+      # ── Python / token server ──────────────────────────────────────────────
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh && echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Install Python dependencies
+        run: uv sync --group livekit
+
+      # ── LiveKit server (Docker) ────────────────────────────────────────────
+      - name: Start livekit-server
+        run: |
+          docker run -d \
+            -p 7880:7880 \
+            --name livekit \
+            livekit/livekit-server \
+            --dev \
+            --bind 0.0.0.0
+
+      # ── Token server ──────────────────────────────────────────────────────
+      - name: Start token server
+        run: |
+          nohup uv run python web/livekit/token_server.py > /tmp/token-server.log 2>&1 &
+          echo "TOKEN_SERVER_PID=$!" >> $GITHUB_ENV
+
+      # ── Vite preview ─────────────────────────────────────────────────────
+      - name: Build frontend
+        working-directory: web/livekit/app
+        run: npm run build
+
+      - name: Start Vite preview
+        working-directory: web/livekit/app
+        run: nohup npx vite preview --port 5173 > /tmp/vite.log 2>&1 &
+
+      # ── Wait for all services ─────────────────────────────────────────────
+      - name: Wait for all services
+        run: |
+          npx wait-on \
+            http://localhost:7880 \
+            http-get://localhost:8765/api/livekit/token \
+            http://localhost:5173 \
+            --timeout 30000
+
+      - name: Dump service logs on failure
+        if: failure()
+        run: |
+          echo "=== token-server ===" && cat /tmp/token-server.log || true
+          echo "=== vite ===" && cat /tmp/vite.log || true
+          echo "=== livekit ===" && docker logs livekit || true
+
+      # ── Tests ──────────────────────────────────────────────────────────────
+      - name: Run Playwright tests
+        working-directory: web/livekit/app
+        run: npx playwright test
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: web/livekit/app/playwright-report/
+          retention-days: 7

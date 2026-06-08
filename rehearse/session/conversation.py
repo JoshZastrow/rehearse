@@ -65,6 +65,7 @@ async def run_session(
     model_id: str = "default",
     llm_client: Any = None,
     on_consent_declined: Callable[[], Awaitable[None]] | None = None,
+    bus: FrameBus | None = None,
 ) -> None:
     """Run the full conversation pipeline for one session.
 
@@ -93,7 +94,7 @@ async def run_session(
     _memory = memory or NullCallerMemory()
     _budgets = budgets or PhaseBudgets()
 
-    bus = FrameBus(session_id)
+    bus = bus or FrameBus(session_id)
     consent_state: dict[str, bool] = {"declined": False}
 
     def _consent_getter() -> ConsentState:

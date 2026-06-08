@@ -48,3 +48,11 @@ rehearse/models/kyutai/**/*.safetensors
 rehearse/models/kyutai/**/*.model
 rehearse/models/kyutai/**/config.json
 rehearse/models/kyutai/**/tokenizer*.model
+web/livekit/app/node_modules/
+web/livekit/app/dist/
+
+# Playwright / browser tool artifacts
+.playwright-mcp/
+web/livekit/app/test-results/
+web/livekit/app/playwright-report/
+*.png
