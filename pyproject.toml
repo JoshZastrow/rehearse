@@ -40,6 +40,10 @@ dev = [
     "httpx>=0.27",
     "deepeval>=3.9.9",
 ]
+livekit = [
+    "livekit>=1.0",
+    "livekit-api>=1.0",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -48,10 +52,11 @@ build-backend = "hatchling.build"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-addopts = "-m 'not live_api and not live_modal and not pipeline'"
+addopts = "-m 'not live_api and not live_modal and not pipeline and not live_livekit'"
 markers = [
     "live_api: hits real provider APIs; requires sourced .env. Deselected by default. Run with `pytest -m live_api`.",
     "live_modal: hits live Modal GPU endpoints; requires INTERACTIVE_PROVIDER_ENDPOINT and INTERACTIVE_CALLER_ENDPOINT. Run with `pytest -m live_modal`.",
+    "live_livekit: requires a running livekit-server --dev and livekit-rtc installed. Run with `pytest -m live_livekit`.",
     "pipeline: requires a running pipeline CLM server. Deselected by default. Run with `pytest -m pipeline`.",
     "slow: long-running test. Run explicitly with `pytest -m slow`.",
 ]
