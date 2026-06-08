@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Room, RoomEvent } from 'livekit-client'
+import { Room, RoomEvent, Track } from 'livekit-client'
 
 export type ConnectionState = 'idle' | 'connecting' | 'connected' | 'error'
 export type Speaker = 'user' | 'agent' | null
@@ -50,6 +50,16 @@ export function useVoiceSession(): VoiceSession {
       const token = await fetchToken()
       const room = new Room({ adaptiveStream: true, dynacast: true })
       roomRef.current = room
+
+      room.on(RoomEvent.TrackSubscribed, (track) => {
+        if (track.kind === Track.Kind.Audio) {
+          track.attach()
+        }
+      })
+
+      room.on(RoomEvent.TrackUnsubscribed, (track) => {
+        track.detach()
+      })
 
       room.on(RoomEvent.ActiveSpeakersChanged, (speakers) => {
         const local = room.localParticipant
