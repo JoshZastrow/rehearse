@@ -7,7 +7,6 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
 import { useVoiceSession } from '../hooks/useVoiceSession'
 
 // ── elapsed timer hook ────────────────────────────────────────────────────────
@@ -246,9 +245,6 @@ export default function Design2MinimalOrb() {
           {state === 'connected' && (
             <span style={timerText}>{elapsed}</span>
           )}
-          <nav style={{ marginLeft: 12 }} onClick={e => e.stopPropagation()}>
-            <Link to="/" style={backLink}>← designs</Link>
-          </nav>
           <button style={menuBtn}>···</button>
         </div>
       </header>
@@ -436,12 +432,6 @@ const timerText: React.CSSProperties = {
   fontFamily: 'monospace',
   color: '#94a3b8',
   letterSpacing: '0.05em',
-}
-
-const backLink: React.CSSProperties = {
-  color: '#475569',
-  fontSize: 11,
-  textDecoration: 'none',
 }
 
 const menuBtn: React.CSSProperties = {
