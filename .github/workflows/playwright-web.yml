@@ -58,16 +58,22 @@ jobs:
             --dev \
             --bind 0.0.0.0
 
-      # ── Token server + Vite ───────────────────────────────────────────────
+      # ── Token server ──────────────────────────────────────────────────────
       - name: Start token server
-        run: uv run python web/livekit/token_server.py &
-
-      - name: Build and start Vite preview
-        working-directory: web/livekit/app
         run: |
-          npm run build
-          npx vite preview --port 5173 &
+          nohup uv run python web/livekit/token_server.py > /tmp/token-server.log 2>&1 &
+          echo "TOKEN_SERVER_PID=$!" >> $GITHUB_ENV
 
+      # ── Vite preview ─────────────────────────────────────────────────────
+      - name: Build frontend
+        working-directory: web/livekit/app
+        run: npm run build
+
+      - name: Start Vite preview
+        working-directory: web/livekit/app
+        run: nohup npx vite preview --port 5173 > /tmp/vite.log 2>&1 &
+
+      # ── Wait for all services ─────────────────────────────────────────────
       - name: Wait for all services
         run: |
           npx wait-on \
@@ -75,6 +81,13 @@ jobs:
             http://localhost:8765/api/livekit/token \
             http://localhost:5173 \
             --timeout 30000
+
+      - name: Dump service logs on failure
+        if: failure()
+        run: |
+          echo "=== token-server ===" && cat /tmp/token-server.log || true
+          echo "=== vite ===" && cat /tmp/vite.log || true
+          echo "=== livekit ===" && docker logs livekit || true
 
       # ── Tests ──────────────────────────────────────────────────────────────
       - name: Run Playwright tests
