@@ -19,24 +19,24 @@ test.describe('Waveform UI', () => {
   test('connects to LiveKit room and shows session active', async ({ page }) => {
     await page.goto('/')
     await page.getByRole('button', { name: 'Start call' }).click()
-    await expect(page.getByText('Session Active')).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByText('Session Active').first()).toBeVisible({ timeout: 10_000 })
     await expect(page.getByText('LIVE')).toBeVisible()
   })
 
   test('End button returns to idle', async ({ page }) => {
     await page.goto('/')
     await page.getByRole('button', { name: 'Start call' }).click()
-    await expect(page.getByText('Session Active')).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByText('Session Active').first()).toBeVisible({ timeout: 10_000 })
 
     await page.getByRole('button', { name: 'End call' }).click()
     await expect(page.getByText('Tap to Start')).toBeVisible({ timeout: 8_000 })
-    await expect(page.getByText('Session Active')).not.toBeVisible()
+    await expect(page.getByText('Session Active').first()).not.toBeVisible()
   })
 
   test('session timer counts up when connected', async ({ page }) => {
     await page.goto('/')
     await page.getByRole('button', { name: 'Start call' }).click()
-    await expect(page.getByText('Session Active')).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByText('Session Active').first()).toBeVisible({ timeout: 10_000 })
 
     const timer = page.getByText(/^\d{2}:\d{2}:\d{2}$/)
     await expect(timer).toBeVisible()
