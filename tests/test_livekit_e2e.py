@@ -31,7 +31,6 @@ import asyncio
 import json
 import logging
 import os
-import struct
 import time
 import wave
 from contextlib import suppress
@@ -43,9 +42,7 @@ from rehearse.audio.livekit_stream import FakeRoomStream
 from rehearse.session.livekit_session import run_livekit_session, write_session_manifest
 from rehearse.storage import LocalFilesystemStore
 from rehearse.types import Session
-
-from tests._fakes import _ScriptedCoachBackend
-
+from tests._fakes import FakeRoom, _ScriptedCoachBackend
 
 # ---------------------------------------------------------------------------
 # Helpers shared across tiers
@@ -62,6 +59,7 @@ def _make_store(tmp_path: Path) -> LocalFilesystemStore:
 def _prep_session(store: LocalFilesystemStore) -> str:
     """Mint + persist a session manifest; return its id."""
     from datetime import UTC, datetime
+
     from rehearse.types import ConsentState
 
     session = Session(
@@ -175,6 +173,75 @@ async def test_livekit_hermetic_call_lifecycle(tmp_path: Path) -> None:
     # ---- 7. Clean shutdown -------------------------------------------------
     root_logger.removeHandler(collector)
     assert collector.errors == [], collector.errors
+
+
+def _load_agent_module():
+    """Import web/livekit/agent/agent.py by path (it is not an installed package).
+
+    Safe because agent.py's livekit imports are lazy (inside run_agent) and its
+    side effects (load_dotenv / basicConfig) live in main(), so import is clean.
+    """
+    import importlib.util
+
+    agent_path = Path(__file__).parent.parent / "web" / "livekit" / "agent" / "agent.py"
+    spec = importlib.util.spec_from_file_location("_rehearse_livekit_agent", agent_path)
+    assert spec and spec.loader, f"cannot load {agent_path}"
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+async def test_livekit_agent_serve_session_hermetic(tmp_path: Path) -> None:
+    """The agent's serve_session() wiring drives a full session — no livekit/Modal.
+
+    Covers the orchestration in web/livekit/agent/agent.py that the lifecycle test
+    bypasses: participant-wait, the run_livekit_session() call, and clean
+    room.disconnect(). Catches agent-side wiring bugs (wrong arg order, missing
+    manifest, no-disconnect) without a real LiveKit server.
+    """
+    agent_mod = _load_agent_module()
+
+    store = _make_store(tmp_path)
+    session_id = _prep_session(store)
+    room = FakeRoom(participants=1)
+    stream = FakeRoomStream(_caller_frames())
+    backend = _ScriptedCoachBackend()
+
+    await agent_mod.serve_session(
+        room, stream, backend, store, session_id, participant_wait_s=1.0
+    )
+
+    # Agent cleaned up the room.
+    assert room.disconnected, "serve_session did not disconnect the room"
+
+    # Real artifacts written through the same pipeline.
+    sdir = tmp_path / session_id
+    transcript = [
+        json.loads(line)
+        for line in (sdir / "transcript.jsonl").read_text().splitlines()
+        if line.strip()
+    ]
+    assert transcript, "transcript.jsonl is empty"
+    assert {r["speaker"] for r in transcript} >= {"coach", "user"}
+    assert _wav_frames(sdir / "audio.wav") > 0
+    assert backend.received_caller_audio, "backend received no caller audio"
+
+
+async def test_livekit_agent_serve_session_no_backend_disconnects(tmp_path: Path) -> None:
+    """serve_session() with backend=None logs + disconnects without running a session."""
+    agent_mod = _load_agent_module()
+
+    store = _make_store(tmp_path)
+    session_id = _prep_session(store)
+    room = FakeRoom(participants=1)
+    stream = FakeRoomStream(_caller_frames())
+
+    await agent_mod.serve_session(
+        room, stream, None, store, session_id, participant_wait_s=1.0
+    )
+
+    assert room.disconnected, "serve_session must disconnect even with no backend"
+    assert not (tmp_path / session_id / "transcript.jsonl").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -341,7 +408,7 @@ async def test_livekit_interactive_provider_generates_audio(tmp_path: Path) -> N
             run_livekit_session(fake_stream, session_id, backend, store=store),
             timeout=40.0,
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         feeder.cancel()
         pytest.fail("run_livekit_session() did not complete within 40 s")
     finally:
@@ -397,6 +464,7 @@ async def test_livekit_real_audio_conversation_between_interactive_endpoints(
     """
     from livekit import rtc
     from livekit.api import AccessToken, VideoGrants
+
     from rehearse.audio.livekit_stream import LiveKitRoomStream
     from rehearse.backends.interactive.modal_backend import ModalInteractiveBackend
     from rehearse.bus import FrameBus
@@ -508,7 +576,7 @@ async def test_livekit_real_audio_conversation_between_interactive_endpoints(
 
     try:
         await asyncio.wait_for(agent_task, timeout=45.0)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         agent_stream.close()
         with suppress(asyncio.TimeoutError):
             await asyncio.wait_for(agent_task, timeout=5.0)
@@ -529,11 +597,10 @@ async def test_livekit_real_audio_conversation_between_interactive_endpoints(
     sdir = tmp_path / session_id
 
     assert received_agent_audio, "provider generated no audio to caller in 45 s"
-    assert provider_backend._recv_task is None or True  # backend cleaned up
 
     transcript_path = sdir / "transcript.jsonl"
     assert transcript_path.exists()
-    rows = [json.loads(l) for l in transcript_path.read_text().splitlines() if l.strip()]
+    rows = [json.loads(line) for line in transcript_path.read_text().splitlines() if line.strip()]
     assert rows, "transcript.jsonl is empty"
     speakers = {r["speaker"] for r in rows}
     assert "coach" in speakers, f"no coach line in transcript — speakers: {speakers}"

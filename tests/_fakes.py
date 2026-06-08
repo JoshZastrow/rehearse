@@ -3,6 +3,7 @@
 Provides:
   _ScriptedCoachBackend  — GPU-free ConversationBackend (lifted from test_call_server_e2e.py)
   FakeRoomStream         — In-process LiveKit room stream for hermetic tests
+  FakeRoom               — Minimal rtc.Room stand-in for agent.serve_session() tests
 """
 
 from __future__ import annotations
@@ -12,6 +13,21 @@ import struct
 
 from rehearse.frames import AudioChunk, ProsodyEvent, TranscriptDelta
 from rehearse.types import ProsodyScores, Speaker
+
+
+class FakeRoom:
+    """Minimal stand-in for livekit rtc.Room — enough for agent.serve_session().
+
+    Exposes a truthy ``remote_participants`` (so the participant-wait loop exits)
+    and records ``disconnect()`` so tests can assert the agent cleaned up.
+    """
+
+    def __init__(self, *, participants: int = 1) -> None:
+        self.remote_participants = {f"p{i}": object() for i in range(participants)}
+        self.disconnected = False
+
+    async def disconnect(self) -> None:
+        self.disconnected = True
 
 
 class _ScriptedCoachBackend:

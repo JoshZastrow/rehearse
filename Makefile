@@ -137,8 +137,8 @@ _rehearse-web-agent:
 _rehearse-web-app:
 	cd web/livekit/app && npm run dev
 
-test-web: ## run hermetic LiveKit e2e test (no external deps)
-	uv run pytest tests/test_livekit_e2e.py -v -k "hermetic"
+test-web: ## run hermetic LiveKit e2e tests (no external deps; auto-includes new hermetic tests)
+	uv run pytest tests/test_livekit_e2e.py -v -m "not live_livekit and not live_modal"
 
 test-livekit: ## run full live_livekit suite (requires livekit-server --dev running)
 	uv run pytest tests/test_livekit_e2e.py -v -m live_livekit
