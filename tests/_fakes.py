@@ -50,7 +50,7 @@ class _ScriptedCoachBackend:
         self.received_caller_audio: list[bytes] = []
         self._session_id = ""
 
-    async def __aenter__(self) -> "_ScriptedCoachBackend":
+    async def __aenter__(self) -> _ScriptedCoachBackend:
         return self
 
     async def __aexit__(self, *_: object) -> None:
