@@ -3,6 +3,25 @@
 **Date:** 2026-06-08
 **Status:** Approved (brainstorming) — ready for implementation plan
 
+## Goal (verifiable)
+
+A single command (`npm run test:e2e:full` in `web/livekit/app`) runs one Playwright test that
+passes when, and only when, all of the following hold in one run against a local self-contained
+stack (no cloud, no Modal/Hume, no API keys):
+
+1. The browser clicks **Start call** and the UI reaches **Session Active** (token fetched, room
+   connected) within the test timeout.
+2. At least one coach transcript entry appears in the UI (the Pocket-TTS coach turn over the
+   DataChannel) — proving a real response, not just a connection.
+3. The browser clicks **End call** and the UI returns to idle.
+4. After the agent runner exits, `SESSION_ROOT/{session_id}/` contains: `session.json`,
+   `transcript.jsonl` with both `coach` and `user` speakers, `prosody.jsonl`, `audio.wav` with
+   > 0 frames, and per-role turn WAVs under `audio/coach/` and `audio/user/`.
+5. The session folder is deleted before the test ends (post-delete assertion: it no longer exists).
+
+Verification: the test is red before the implementation lands and green after, and re-running it
+leaves no residual session folder under `SESSION_ROOT`.
+
 ## Problem
 
 The frontend voice path (`useVoiceSession()` + the React UI) has no automated coverage
