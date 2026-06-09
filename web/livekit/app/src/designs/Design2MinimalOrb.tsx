@@ -304,6 +304,28 @@ export default function Design2MinimalOrb() {
         </div>
       </div>
 
+      {/* ── transcript log ─────────────────────────────────────────────────── */}
+      {session.transcript.length > 0 && (
+        <div style={transcriptBox} data-testid="transcript">
+          {session.transcript.map((entry) => (
+            <div
+              key={entry.id}
+              style={transcriptRow}
+              data-testid="transcript-entry"
+              data-speaker={entry.speaker}
+            >
+              <span style={{
+                ...transcriptWho,
+                color: entry.speaker === 'agent' ? '#c084fc' : '#00dcff',
+              }}>
+                {entry.speaker === 'agent' ? 'AGENT' : 'CALLER'}
+              </span>
+              <span style={transcriptText}>{entry.text}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* ── side labels ────────────────────────────────────────────────────── */}
       <div style={sideLabelRow}>
         <div style={sideLabel}>
@@ -510,6 +532,40 @@ const cursorDot: React.CSSProperties = {
   height: 8,
   borderRadius: '50%',
   flexShrink: 0,
+}
+
+const transcriptBox: React.CSSProperties = {
+  margin: '12px 24px 0',
+  padding: '8px 12px',
+  border: '1px solid #1e293b',
+  borderRadius: 10,
+  background: '#030712',
+  maxHeight: 120,
+  overflowY: 'auto',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 4,
+  flexShrink: 0,
+}
+
+const transcriptRow: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'baseline',
+  gap: 8,
+  fontSize: 12,
+}
+
+const transcriptWho: React.CSSProperties = {
+  fontSize: 9,
+  fontWeight: 700,
+  letterSpacing: '0.12em',
+  flexShrink: 0,
+  width: 48,
+}
+
+const transcriptText: React.CSSProperties = {
+  color: '#cbd5e1',
+  lineHeight: 1.4,
 }
 
 const sideLabelRow: React.CSSProperties = {

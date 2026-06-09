@@ -116,3 +116,111 @@ class _ScriptedCoachBackend:
 
     async def close(self) -> None:
         return None
+
+
+class LocalTtsCoachBackend(_ScriptedCoachBackend):
+    """Scripted coach backend whose audio is synthesized locally with Pocket TTS.
+
+    Same deterministic transcript/prosody turns as ``_ScriptedCoachBackend``, but
+    the coach audio is real speech generated on CPU by Pocket TTS instead of a
+    canned square wave. Used by the browser-driven hermetic e2e
+    (tests/e2e/runner.py) so the artifacts contain audible coach speech an
+    engineer can play back.
+
+    Pocket TTS (`load_model`, `generate_audio`) runs in a worker thread so the
+    asyncio event loop is never blocked. The model + voice load once per instance.
+    """
+
+    _COACH_TEXT = (
+        "Hello, let's begin your rehearsal. "
+        "Take a breath and tell me what's on your mind."
+    )
+    _VOICE = "alba"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._model = None
+        self._voice_state = None
+
+    def _synth_frames(self) -> list[bytes]:
+        """Load the model (first call) and return 20 ms PCM16 @ 16 kHz frames.
+
+        Runs synchronously — call via asyncio.to_thread.
+        """
+        import numpy as np  # noqa: PLC0415
+        from pocket_tts import TTSModel  # noqa: PLC0415
+
+        if self._model is None:
+            self._model = TTSModel.load_model()
+            self._voice_state = self._model.get_state_for_audio_prompt(self._VOICE)
+
+        audio = self._model.generate_audio(self._voice_state, self._COACH_TEXT)
+        samples = audio.numpy() if hasattr(audio, "numpy") else np.asarray(audio)
+        samples = np.asarray(samples, dtype=np.float32).reshape(-1)
+
+        # Resample model sample-rate -> 16 kHz via linear interpolation.
+        src_rate = int(self._model.sample_rate)
+        if src_rate != 16000 and samples.size:
+            n_out = int(round(samples.size * 16000 / src_rate))
+            src_x = np.linspace(0.0, 1.0, samples.size, endpoint=False)
+            dst_x = np.linspace(0.0, 1.0, n_out, endpoint=False)
+            samples = np.interp(dst_x, src_x, samples).astype(np.float32)
+
+        pcm16 = (np.clip(samples, -1.0, 1.0) * 32767.0).astype("<i2").tobytes()
+
+        # Slice into 20 ms frames (320 samples = 640 bytes); pad the tail.
+        frame_bytes = 640
+        frames = [pcm16[i : i + frame_bytes] for i in range(0, len(pcm16), frame_bytes)]
+        if frames and len(frames[-1]) < frame_bytes:
+            frames[-1] = frames[-1] + b"\x00" * (frame_bytes - len(frames[-1]))
+        return frames or [b"\x00" * frame_bytes]
+
+    async def start(self, session_id: str, bus: object) -> None:
+        self._session_id = session_id
+
+        # Synthesize before the burst (model load + generate happen off-loop).
+        coach_frames = await asyncio.to_thread(self._synth_frames)
+
+        await asyncio.sleep(0.2)  # let writers subscribe before burst
+
+        await bus.publish(  # type: ignore[union-attr]
+            TranscriptDelta(
+                session_id=session_id,
+                utterance_id="coach-1",
+                speaker=Speaker.COACH,
+                text=self._COACH_TEXT,
+                is_final=True,
+                ts_start=0.0,
+                ts_end=float(len(coach_frames) * 0.02),
+            )
+        )
+        await bus.publish(  # type: ignore[union-attr]
+            ProsodyEvent(
+                session_id=session_id,
+                utterance_id="coach-1",
+                speaker=Speaker.COACH,
+                scores=ProsodyScores(arousal=0.4, valence=0.3, emotions={"calm": 0.6}),
+                ts_start=0.0,
+                ts_end=float(len(coach_frames) * 0.02),
+            )
+        )
+        for frame in coach_frames:
+            await bus.publish(  # type: ignore[union-attr]
+                AudioChunk(
+                    session_id=session_id,
+                    speaker=Speaker.COACH,
+                    pcm16_16k=frame,
+                    ts=0.0,
+                )
+            )
+        await bus.publish(  # type: ignore[union-attr]
+            TranscriptDelta(
+                session_id=session_id,
+                utterance_id="user-1",
+                speaker=Speaker.USER,
+                text="Okay, I'm ready.",
+                is_final=True,
+                ts_start=0.5,
+                ts_end=0.9,
+            )
+        )

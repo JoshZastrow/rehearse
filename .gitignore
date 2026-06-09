@@ -56,3 +56,10 @@ web/livekit/app/dist/
 web/livekit/app/test-results/
 web/livekit/app/playwright-report/
 *.png
+
+# Browser-driven e2e session artifacts (kept locally for inspection).
+# Re-include the dir (the broad `sessions/` rule above would hide it), ignore
+# its contents, but keep the .gitkeep placeholder.
+!tests/e2e/sessions/
+tests/e2e/sessions/*
+!tests/e2e/sessions/.gitkeep
