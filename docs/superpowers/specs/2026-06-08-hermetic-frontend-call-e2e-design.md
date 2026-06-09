@@ -14,13 +14,18 @@ stack (no cloud, no Modal/Hume, no API keys):
 2. At least one coach transcript entry appears in the UI (the Pocket-TTS coach turn over the
    DataChannel) — proving a real response, not just a connection.
 3. The browser clicks **End call** and the UI returns to idle.
-4. After the agent runner exits, `SESSION_ROOT/{session_id}/` contains: `session.json`,
-   `transcript.jsonl` with both `coach` and `user` speakers, `prosody.jsonl`, `audio.wav` with
-   > 0 frames, and per-role turn WAVs under `audio/coach/` and `audio/user/`.
-5. The session folder is deleted before the test ends (post-delete assertion: it no longer exists).
+4. Artifacts are written under a **persisted test session root**, `tests/e2e_livekit/sessions/`
+   (created if missing). After the agent runner exits, `tests/e2e_livekit/sessions/{session_id}/`
+   contains: `session.json`, `transcript.jsonl` with both `coach` and `user` speakers,
+   `prosody.jsonl`, `audio.wav` with > 0 frames, and per-role turn WAVs under `audio/coach/` and
+   `audio/user/`.
+5. The absolute path to the session folder is printed to the console (by both the runner and the
+   test) so an engineer reading the logs can open and load the artifacts. **The folder is kept,
+   not deleted** — it is left on disk for post-test inspection.
 
-Verification: the test is red before the implementation lands and green after, and re-running it
-leaves no residual session folder under `SESSION_ROOT`.
+Verification: the test is red before the implementation lands and green after; after a green run
+the printed `tests/e2e_livekit/sessions/{session_id}/` path exists and contains the artifact set
+above.
 
 ## Problem
 
@@ -35,19 +40,13 @@ browser UI is never in the loop.
 This is the one remaining "full product" gap: nothing proves that **clicking Start call in the
 Web UI initiates a session and that artifacts land in the session folder after the call ends.**
 
-## Goal
+## Summary
 
 A hermetic, opt-in Playwright test that drives the real browser UI through a full call against
 a local self-contained stack (no cloud, no Modal/Hume, no API keys) and asserts that real
-artifacts are written to the session folder, then deletes the session.
-
-Success criteria:
-- Browser clicks **Start call** → UI reaches **Session Active** (token fetched, room connected).
-- The scripted coach responds; the response surfaces in the UI (transcript over DataChannel).
-- Browser clicks **End call** → UI returns to idle.
-- `SESSION_ROOT/{session_id}/` contains `session.json`, `transcript.jsonl` (coach + user
-  speakers), `prosody.jsonl`, `audio.wav` (>0 frames), and per-role turn WAVs.
-- The session folder is deleted at the end.
+artifacts are written to a persisted test session root (`tests/e2e_livekit/sessions/`, created if
+missing). The session folder is **kept** for inspection, and its absolute path is printed to the
+console. See the verifiable goal above for the exact pass conditions.
 
 ## Non-Goals
 
@@ -112,9 +111,11 @@ the manifest to `SESSION_ROOT`, then calls
 `serve_session(room, stream, LocalTtsCoachBackend(), store, session_id)`.
 
 - Reads `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `LIVEKIT_ROOM_NAME`,
-  `SESSION_ROOT` from env (same names production uses).
-- **Prints the session id to stdout** (one known line, e.g. `SESSION_ID=<uuid>`) so the test can
-  locate the folder without guessing.
+  `SESSION_ROOT` from env (same names production uses). The test sets `SESSION_ROOT` to the
+  persisted test root `tests/e2e_livekit/sessions/` (the runner creates it if missing).
+- **Prints the session id and the absolute session dir to stdout** (known lines, e.g.
+  `SESSION_ID=<uuid>` and `SESSION_DIR=<abs path>`) so the test can locate the folder without
+  guessing and an engineer reading the logs can open the artifacts directly.
 - Exits when the browser participant disconnects (stream ends → `run_livekit_session` returns →
   `serve_session` disconnects the room → process exits). Its exit is the test's "artifacts
   flushed" signal.
@@ -125,18 +126,20 @@ root to `sys.path` so `rehearse.*` and `tests._fakes` import.
 ### 3. `web/livekit/app/e2e/full-call.spec.ts` — the test
 
 Flow:
-1. A fixture spawns `runner.py` (env: shared room name + dev keys, `SESSION_ROOT` = a temp dir
-   the test owns). Capture stdout; parse `SESSION_ID=`. Runner connects and waits for a
+1. A fixture spawns `runner.py` with `SESSION_ROOT` set to `tests/e2e_livekit/sessions/`
+   (resolved to an absolute path; created if missing) plus the shared room name + dev keys.
+   Capture stdout; parse `SESSION_ID=` and `SESSION_DIR=`. Runner connects and waits for a
    participant.
 2. `page.goto('/')`, click **Start call**, assert UI reaches **Session Active**.
 3. Wait for a transcript entry (the Pocket-TTS coach turn arriving over the DataChannel) to
    confirm a real response — "asserts a response".
 4. Click **End call**, assert UI returns to idle.
 5. Await runner process exit, timeout-bounded.
-6. Assert artifacts in `SESSION_ROOT/{SESSION_ID}/`: `session.json`, `transcript.jsonl`
-   (coach + user speakers), `prosody.jsonl`, `audio.wav` (>0 frames via a WAV header check),
-   per-role turn WAVs under `audio/coach/` and `audio/user/`.
-7. Delete the session folder.
+6. Assert artifacts in `tests/e2e_livekit/sessions/{SESSION_ID}/`: `session.json`,
+   `transcript.jsonl` (coach + user speakers), `prosody.jsonl`, `audio.wav` (>0 frames via a WAV
+   header check), per-role turn WAVs under `audio/coach/` and `audio/user/`.
+7. Print the absolute session dir to the test console (e.g. via `console.log` / a reporter line)
+   and **leave the folder on disk** for inspection — do not delete it.
 
 ## Orchestration & wiring fixes
 
@@ -145,10 +148,13 @@ Flow:
 - Fix the existing `baseURL`/port mismatch: Vite serves on `:3000` but `baseURL` is `:5173`.
   Standardize on `:3000`.
 - The one-shot runner is **not** a webServer — it's spawned per-test by a fixture so the test
-  owns its lifecycle and `SESSION_ROOT`.
+  owns its lifecycle and points it at the persisted `SESSION_ROOT`.
 - Gating: a separate `test:e2e:full` npm script and a Playwright tag/grep so this heavy test is
   opt-in. Default `test:e2e` stays fast.
 - Add `pocket-tts` as a dependency (`uv add pocket-tts`) in the Python project.
+- Gitignore `tests/e2e_livekit/sessions/` (keep a `.gitkeep`) — runs accumulate session folders
+  there for inspection and must not be committed. Each run is a unique `{session_id}` subfolder
+  (uuid), so runs don't clobber each other; engineers can clear the dir manually.
 
 ## Risks / open verifications
 
@@ -166,6 +172,7 @@ Flow:
 ## Testing the test
 
 - Manual first pass: run the `test:e2e:full` script locally with `livekit-server` on PATH; confirm
-  green and that the temp `SESSION_ROOT` is empty after the run (folder deleted).
+  green and that the printed `tests/e2e_livekit/sessions/{session_id}/` path exists with the full
+  artifact set, openable for inspection after the run.
 - The existing hermetic Python tiers (`test_livekit_e2e.py`) remain the fast safety net and are
   untouched.
