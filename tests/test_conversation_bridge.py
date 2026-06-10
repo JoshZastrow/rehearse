@@ -48,7 +48,7 @@ async def test_bridge_routes_provider_audio_to_caller():
 
     pcm = _silence(640)
     await provider_bus.publish(
-        AudioChunk(session_id="p", speaker=Speaker.COACH, pcm16_16k=pcm, ts=0.0)
+        AudioChunk(session_id="p", speaker=Speaker.GUIDE, pcm16_16k=pcm, ts=0.0)
     )
     await asyncio.sleep(0.01)
 
@@ -80,7 +80,7 @@ async def test_bridge_routes_caller_audio_to_provider():
 
     pcm = _silence(320)
     await caller_bus.publish(
-        AudioChunk(session_id="c", speaker=Speaker.COACH, pcm16_16k=pcm, ts=0.0)
+        AudioChunk(session_id="c", speaker=Speaker.GUIDE, pcm16_16k=pcm, ts=0.0)
     )
     await asyncio.sleep(0.01)
 
@@ -117,7 +117,7 @@ async def test_bridge_stops_routing_on_end_of_call():
 
     # Publish audio after EndOfCall — must NOT reach caller
     await provider_bus.publish(
-        AudioChunk(session_id="p", speaker=Speaker.COACH, pcm16_16k=_silence(), ts=1.0)
+        AudioChunk(session_id="p", speaker=Speaker.GUIDE, pcm16_16k=_silence(), ts=1.0)
     )
     await asyncio.sleep(0.01)
 

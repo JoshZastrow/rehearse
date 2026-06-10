@@ -100,7 +100,7 @@ async def test_audio_recorder_writes_wav_and_manifest(writer_store: LocalFilesys
         ),
         AudioChunk(
             session_id=session_id,
-            speaker=Speaker.COACH,
+            speaker=Speaker.GUIDE,
             pcm16_16k=b"\x02\x00\x03\x00",
             ts=0.1,
         ),
@@ -133,7 +133,7 @@ async def test_audio_recorder_keeps_wav_playable_when_stream_aborts(
         )
         yield AudioChunk(
             session_id=session_id,
-            speaker=Speaker.COACH,
+            speaker=Speaker.GUIDE,
             pcm16_16k=b"\x30\x00\x40\x00",
             ts=0.05,
         )
@@ -170,7 +170,7 @@ async def test_audio_recorder_header_valid_after_each_chunk(
         snapshots.append(wav_path.read_bytes())
         yield AudioChunk(
             session_id=session_id,
-            speaker=Speaker.COACH,
+            speaker=Speaker.GUIDE,
             pcm16_16k=b"\xee\x00\xff\x00",
             ts=0.05,
         )
@@ -211,13 +211,13 @@ async def test_timing_writer_segments_turns_and_persists(
 
     frames = [
         # Coach turn 0: three contiguous chunks at t=0.0, 0.1, 0.2.
-        AudioChunk(session_id=session_id, speaker=Speaker.COACH, pcm16_16k=chunk_100ms, ts=0.0),
-        AudioChunk(session_id=session_id, speaker=Speaker.COACH, pcm16_16k=chunk_100ms, ts=0.0),
-        AudioChunk(session_id=session_id, speaker=Speaker.COACH, pcm16_16k=chunk_100ms, ts=0.0),
+        AudioChunk(session_id=session_id, speaker=Speaker.GUIDE, pcm16_16k=chunk_100ms, ts=0.0),
+        AudioChunk(session_id=session_id, speaker=Speaker.GUIDE, pcm16_16k=chunk_100ms, ts=0.0),
+        AudioChunk(session_id=session_id, speaker=Speaker.GUIDE, pcm16_16k=chunk_100ms, ts=0.0),
         # User turn 0 at t=1.0 (>600ms after coach last_end at 300ms; new role anyway).
         AudioChunk(session_id=session_id, speaker=Speaker.USER, pcm16_16k=chunk_100ms, ts=0.0),
         # Coach turn 1 at t=1.5 (1200ms after coach turn-0 end of 300ms → new turn).
-        AudioChunk(session_id=session_id, speaker=Speaker.COACH, pcm16_16k=chunk_100ms, ts=0.0),
+        AudioChunk(session_id=session_id, speaker=Speaker.GUIDE, pcm16_16k=chunk_100ms, ts=0.0),
         # User turn 1 at t=2.5 (1400ms after user turn-0 end of 1100ms → new turn).
         AudioChunk(session_id=session_id, speaker=Speaker.USER, pcm16_16k=chunk_100ms, ts=0.0),
     ]
@@ -312,7 +312,7 @@ async def test_timing_writer_output_round_trips_through_naturalness_scorer(
     def _c(short: bool = False) -> AudioChunk:
         return AudioChunk(
             session_id=session_id,
-            speaker=Speaker.COACH,
+            speaker=Speaker.GUIDE,
             pcm16_16k=chunk_300ms if short else chunk_500ms,
             ts=0.0,
         )
@@ -403,7 +403,7 @@ async def test_telemetry_logger_writes_assistant_events_only(
         TranscriptDelta(
             session_id=session_id,
             utterance_id="u2",
-            speaker=Speaker.COACH,
+            speaker=Speaker.GUIDE,
             text="hi there",
             is_final=True,
             ts_start=0.3,

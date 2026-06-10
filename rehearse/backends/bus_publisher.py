@@ -57,12 +57,12 @@ class BusPublisher:
         ))
 
     async def on_llm_response(self, text: str, utterance_id: str) -> None:
-        """LLM full response → TranscriptDelta(COACH, is_final=True)."""
+        """LLM full response → TranscriptDelta(GUIDE, is_final=True)."""
         now = time.time()
         await self._bus.publish(TranscriptDelta(
             session_id=self._session_id,
             utterance_id=utterance_id,
-            speaker=Speaker.COACH,
+            speaker=Speaker.GUIDE,
             text=text,
             is_final=True,
             ts_start=now,
@@ -70,10 +70,10 @@ class BusPublisher:
         ))
 
     async def on_bot_audio(self, pcm16_16k: bytes) -> None:
-        """Pipecat AudioRawFrame (bot) → AudioChunk(COACH)."""
+        """Pipecat AudioRawFrame (bot) → AudioChunk(GUIDE)."""
         await self._bus.publish(AudioChunk(
             session_id=self._session_id,
-            speaker=Speaker.COACH,
+            speaker=Speaker.GUIDE,
             pcm16_16k=pcm16_16k,
             ts=time.time(),
         ))

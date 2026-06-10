@@ -99,7 +99,7 @@ async def test_pipeline_backend_frame_contract(tmp_path: Path) -> None:
             ))
             await bus.publish(AudioChunk(
                 session_id=self._session_id,
-                speaker=Speaker.COACH,
+                speaker=Speaker.GUIDE,
                 pcm16_16k=b"\x00" * 640,
                 ts=now,
             ))

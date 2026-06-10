@@ -64,7 +64,7 @@ class _ScriptedCoachBackend:
             TranscriptDelta(
                 session_id=session_id,
                 utterance_id="coach-1",
-                speaker=Speaker.COACH,
+                speaker=Speaker.GUIDE,
                 text="Hello, let's begin your rehearsal.",
                 is_final=True,
                 ts_start=0.0,
@@ -75,7 +75,7 @@ class _ScriptedCoachBackend:
             ProsodyEvent(
                 session_id=session_id,
                 utterance_id="coach-1",
-                speaker=Speaker.COACH,
+                speaker=Speaker.GUIDE,
                 scores=ProsodyScores(arousal=0.4, valence=0.3, emotions={"calm": 0.6}),
                 ts_start=0.0,
                 ts_end=0.4,
@@ -85,7 +85,7 @@ class _ScriptedCoachBackend:
             await bus.publish(  # type: ignore[union-attr]
                 AudioChunk(
                     session_id=session_id,
-                    speaker=Speaker.COACH,
+                    speaker=Speaker.GUIDE,
                     pcm16_16k=self._COACH_FRAME,
                     ts=0.0,
                 )

@@ -120,7 +120,7 @@ async def test_intake_processor_captures_female_preference(tmp_path) -> None:
     # Coach asks about gender preference (natural phrasing)
     await bus.publish(TranscriptDelta(
         session_id=session_id, utterance_id="c1",
-        ts_start=ts, ts_end=ts, speaker=Speaker.COACH,
+        ts_start=ts, ts_end=ts, speaker=Speaker.GUIDE,
         text="Do you tend to find it easier talking through this kind of thing with men or women?",
         is_final=True,
     ))

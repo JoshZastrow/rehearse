@@ -25,7 +25,7 @@ class _FakeBackend:
     async def send_caller_audio(self, pcm: bytes) -> None:
         assert self._bus is not None
         await self._bus.publish(
-            AudioChunk(session_id=self._session_id, speaker=Speaker.COACH, pcm16_16k=pcm, ts=0.0)
+            AudioChunk(session_id=self._session_id, speaker=Speaker.GUIDE, pcm16_16k=pcm, ts=0.0)
         )
         await self._bus.publish(
             EndOfCall(session_id=self._session_id, reason="hangup", ts=0.0)

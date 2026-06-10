@@ -1,7 +1,7 @@
 """PipelineBackend — open-source audio pipeline behind ConversationBackend.
 
 Modular mode audio loop (no full Pipecat runner required):
-  Caller audio → energy VAD → faster-whisper STT → TTSService → AudioChunk(COACH)
+  Caller audio → energy VAD → faster-whisper STT → TTSService → AudioChunk(GUIDE)
 
 Swap the STT model with stt_model="whisper-tiny"|"whisper-medium" etc.
 Swap the TTS implementation by passing tts_service=YourTTSService().
@@ -189,7 +189,7 @@ class PipelineBackend:
                         pcm_response = await self._tts.synthesize(reply)
                         await bus.publish(AudioChunk(
                             session_id=self._session_id,
-                            speaker=Speaker.COACH,
+                            speaker=Speaker.GUIDE,
                             pcm16_16k=pcm_response,
                             ts=time.time(),
                         ))

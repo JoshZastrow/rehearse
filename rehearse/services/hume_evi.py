@@ -299,7 +299,7 @@ class HumeEVIClient:
         await bus.publish(
             AudioChunk(
                 session_id=self._session_id,
-                speaker=Speaker.COACH,
+                speaker=Speaker.GUIDE,
                 pcm16_16k=pcm16k,
                 ts=self._elapsed_s(),
             )
@@ -375,7 +375,7 @@ class HumeEVIClient:
             TranscriptDelta(
                 session_id=self._session_id,
                 utterance_id=pending.utterance_id,
-                speaker=Speaker.COACH,
+                speaker=Speaker.GUIDE,
                 text=pending.text,
                 is_final=True,
                 ts_start=pending.ts_start,

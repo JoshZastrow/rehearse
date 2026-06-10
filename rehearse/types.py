@@ -41,25 +41,31 @@ class Speaker(StrEnum):
 
     The canonical serialized values stay ``"user"``/``"coach"`` so existing
     artifacts, audio role directories, and scorers keep working unchanged.
-    ``PROVIDER`` (the coach model) and ``CALLER`` (the user) are the current
-    vocabulary; they are aliases of ``COACH``/``USER`` — ``Speaker.PROVIDER is
-    Speaker.COACH`` — and the strings ``"provider"``/``"caller"`` parse via
-    ``_missing_`` so data written with either label round-trips.
+    ``GUIDE`` (the guide model) and ``USER`` are the canonical members — the
+    role's display name has evolved Coach → Provider → Guide, and this member
+    plus web's ``roles.ts`` are the places it lives. ``PROVIDER``/``CALLER``
+    remain as aliases — ``Speaker.PROVIDER is Speaker.GUIDE`` — and the
+    strings ``"provider"``/``"caller"``/``"guide"`` parse via ``_missing_``
+    so data written with any label round-trips.
     """
 
     USER = "user"
-    COACH = "coach"
+    GUIDE = "coach"
     CHARACTER = "character"
-    # Aliases (same values as USER/COACH) — excluded from iteration, so
-    # `list(Speaker)` stays [USER, COACH, CHARACTER].
+    # Aliases (same values as USER/GUIDE) — excluded from iteration, so
+    # `list(Speaker)` stays [USER, GUIDE, CHARACTER].
     CALLER = "user"
     PROVIDER = "coach"
 
     @classmethod
     def _missing_(cls, value: object) -> "Speaker | None":
-        """Accept the current 'caller'/'provider' label strings on input."""
+        """Accept the 'caller'/'provider'/'guide' label strings on input."""
         if isinstance(value, str):
-            return {"caller": cls.USER, "provider": cls.COACH}.get(value.lower())
+            return {
+                "caller": cls.USER,
+                "provider": cls.GUIDE,
+                "guide": cls.GUIDE,
+            }.get(value.lower())
         return None
 
 

@@ -114,12 +114,21 @@ class EvalCallerParticipant(VoiceParticipant):
 
         watcher = asyncio.create_task(_bus_watcher())
         try:
+            quiet_s = 0.0
             while True:
                 try:
-                    chunk = await asyncio.wait_for(chunk_queue.get(), timeout=300)
+                    chunk = await asyncio.wait_for(chunk_queue.get(), timeout=0.5)
                 except asyncio.TimeoutError:
-                    log.warning("eval_caller.response_timeout")
-                    break
+                    quiet_s += 0.5
+                    if quiet_s >= 300:
+                        log.warning("eval_caller.response_timeout")
+                        break
+                    # Keep the line open while the next turn is synthesized —
+                    # a real caller's mic streams silence continuously; a dead
+                    # stream trips the backend's idle timeout mid-conversation.
+                    yield _SILENCE_500MS
+                    continue
+                quiet_s = 0.0
                 if chunk is None:
                     break
                 yield chunk

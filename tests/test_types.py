@@ -36,23 +36,23 @@ def test_session_has_backend_fields():
 def test_speaker_provider_caller_are_aliases_of_coach_user():
     from rehearse.types import Speaker
 
-    assert Speaker.PROVIDER is Speaker.COACH
+    assert Speaker.PROVIDER is Speaker.GUIDE
     assert Speaker.CALLER is Speaker.USER
     # canonical serialized values are unchanged (backward compatible on disk)
     assert Speaker.PROVIDER.value == "coach"
     assert Speaker.CALLER.value == "user"
     # aliases are excluded from iteration
-    assert list(Speaker) == [Speaker.USER, Speaker.COACH, Speaker.CHARACTER]
+    assert list(Speaker) == [Speaker.USER, Speaker.GUIDE, Speaker.CHARACTER]
 
 
 def test_speaker_parses_both_legacy_and_current_labels():
     from rehearse.types import Speaker
 
     assert Speaker("user") is Speaker.USER
-    assert Speaker("coach") is Speaker.COACH
+    assert Speaker("coach") is Speaker.GUIDE
     assert Speaker("caller") is Speaker.USER
-    assert Speaker("provider") is Speaker.COACH
-    assert Speaker("PROVIDER") is Speaker.COACH  # current labels are case-insensitive
+    assert Speaker("provider") is Speaker.GUIDE
+    assert Speaker("PROVIDER") is Speaker.GUIDE  # current labels are case-insensitive
 
 
 def test_speaker_round_trips_through_pydantic_for_current_labels():
@@ -68,6 +68,6 @@ def test_speaker_round_trips_through_pydantic_for_current_labels():
         text="hi",
         is_interim=False,
     )
-    assert frame.speaker is Speaker.COACH
+    assert frame.speaker is Speaker.GUIDE
     # serializes back to the canonical "coach"
     assert '"speaker":"coach"' in frame.model_dump_json()

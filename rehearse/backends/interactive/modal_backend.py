@@ -35,10 +35,10 @@ if TYPE_CHECKING:
 log = structlog.get_logger(__name__)
 
 # Maps wire labels to Speaker. Both legacy ("coach"/"user") and parameterized
-# ("provider"/"caller") labels are handled. Unknown labels default to COACH.
+# ("provider"/"caller") labels are handled. Unknown labels default to GUIDE.
 _SPEAKER_MAP: dict[str, Speaker] = {
-    "coach": Speaker.COACH,
-    "provider": Speaker.COACH,
+    "coach": Speaker.GUIDE,
+    "provider": Speaker.GUIDE,
     "user": Speaker.USER,
     "caller": Speaker.USER,
 }
@@ -54,6 +54,7 @@ class ModalInteractiveBackend:
         self._recv_task: asyncio.Task | None = None
         self._session_id = ""
         self._bus: FrameBus | None = None
+        self._hangup_logged = False
 
     async def __aenter__(self) -> ModalInteractiveBackend:
         return self
@@ -95,21 +96,37 @@ class ModalInteractiveBackend:
         self._recv_task = asyncio.create_task(self._recv_loop(), name=f"modal-recv-{session_id}")
         log.info("modal_interactive_backend.started", session_id=session_id, endpoint=self._endpoint)
 
+    async def _send(self, payload: bytes | str) -> None:
+        """Send if connected; drop silently after the server hangs up.
+
+        The server ends a session on its idle timeout and closes the socket;
+        the recv loop publishes EndOfCall for that. Audio already in flight
+        must not crash the session pump — hangup mid-send is normal telephony.
+        """
+        if not self._ws:
+            return
+        try:
+            await self._ws.send(payload)
+        except websockets.exceptions.ConnectionClosed:
+            if not self._hangup_logged:
+                self._hangup_logged = True
+                log.info(
+                    "modal_interactive_backend.send_after_close_dropped",
+                    session_id=self._session_id,
+                )
+
     async def send_caller_audio(self, pcm16_16k: bytes) -> None:
-        if self._ws:
-            await self._ws.send(pcm16_16k)
+        await self._send(pcm16_16k)
 
     async def say(self, request: object) -> None:
         """Speaker protocol: delegates to inject_speech."""
         await self.inject_speech(getattr(request, "text", str(request)))
 
     async def inject_speech(self, text: str) -> None:
-        if self._ws:
-            await self._ws.send(json.dumps({"type": "inject", "text": text}))
+        await self._send(json.dumps({"type": "inject", "text": text}))
 
     async def swap_persona(self, persona: PersonaSpec) -> None:
-        if self._ws:
-            await self._ws.send(json.dumps({"type": "swap_persona", **persona}))
+        await self._send(json.dumps({"type": "swap_persona", **persona}))
 
     async def close(self) -> None:
         if self._recv_task and not self._recv_task.done():
@@ -131,7 +148,7 @@ class ModalInteractiveBackend:
                 if isinstance(msg, bytes):
                     await self._bus.publish(AudioChunk(
                         session_id=self._session_id,
-                        speaker=Speaker.COACH,
+                        speaker=Speaker.GUIDE,
                         pcm16_16k=msg,
                         ts=time.time(),
                     ))
@@ -149,7 +166,7 @@ class ModalInteractiveBackend:
         assert self._bus is not None
         match data.get("type"):
             case "transcript":
-                speaker = _SPEAKER_MAP.get(data.get("speaker", ""), Speaker.COACH)
+                speaker = _SPEAKER_MAP.get(data.get("speaker", ""), Speaker.GUIDE)
                 await self._bus.publish(TranscriptDelta(
                     session_id=self._session_id,
                     utterance_id=data.get("utterance_id", str(uuid.uuid4())),
@@ -159,7 +176,7 @@ class ModalInteractiveBackend:
                     ts_start=time.time(),
                 ))
             case "prosody":
-                speaker = _SPEAKER_MAP.get(data.get("speaker", ""), Speaker.COACH)
+                speaker = _SPEAKER_MAP.get(data.get("speaker", ""), Speaker.GUIDE)
                 await self._bus.publish(ProsodyEvent(
                     session_id=self._session_id,
                     utterance_id=data.get("utterance_id", str(uuid.uuid4())),

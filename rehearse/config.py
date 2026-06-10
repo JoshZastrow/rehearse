@@ -58,10 +58,10 @@ class RuntimeConfig:
     pipeline_e2e_model: str = ""
     pipeline_e2e_checkpoint: str = ""
     interactive_checkpoint_path: str = ""     # INTERACTIVE_CHECKPOINT_PATH — local dir; empty = HF Hub
-    interactive_model_repo: str = "kyutai/moshiko-pytorch-bf16"  # INTERACTIVE_MODEL_REPO
+    interactive_model_repo: str = "nvidia/personaplex-7b-v1"  # INTERACTIVE_MODEL_REPO — follows model type
     interactive_device: str = "cuda"         # INTERACTIVE_DEVICE — "cuda" or "cpu"
     interactive_asr_model: str = "base"      # INTERACTIVE_ASR_MODEL — whisper model size for user ASR
-    interactive_model_type: str = "moshi"    # INTERACTIVE_MODEL_TYPE — "moshi" or "personaplex"
+    interactive_model_type: str = "personaplex"  # INTERACTIVE_MODEL_TYPE — "personaplex" (default) or "moshi"
     interactive_provider_endpoint: str = ""     # INTERACTIVE_PROVIDER_ENDPOINT — wss://... ProviderServer
     enable_consent: bool = False
     enable_meeting_phase_processor: bool = False
@@ -99,6 +99,14 @@ class RuntimeConfig:
 
         session_root = Path(os.environ.get("SESSIONS_DIR", "./sessions")).resolve()
         session_root.mkdir(parents=True, exist_ok=True)
+
+        # The default weights repo follows the model family unless overridden.
+        interactive_model_type = os.environ.get("INTERACTIVE_MODEL_TYPE", "personaplex")
+        interactive_model_repo = os.environ.get("INTERACTIVE_MODEL_REPO") or (
+            "nvidia/personaplex-7b-v1"
+            if interactive_model_type == "personaplex"
+            else "kyutai/moshiko-pytorch-bf16"
+        )
 
         return cls(
             twilio_account_sid=required["TWILIO_ACCOUNT_SID"],  # type: ignore[arg-type]
@@ -167,10 +175,10 @@ class RuntimeConfig:
             pipeline_e2e_model=os.environ.get("PIPELINE_E2E_MODEL", ""),
             pipeline_e2e_checkpoint=os.environ.get("PIPELINE_E2E_CHECKPOINT", ""),
             interactive_checkpoint_path=os.environ.get("INTERACTIVE_CHECKPOINT_PATH", ""),
-            interactive_model_repo=os.environ.get("INTERACTIVE_MODEL_REPO", "kyutai/moshiko-pytorch-bf16"),
+            interactive_model_repo=interactive_model_repo,
             interactive_device=os.environ.get("INTERACTIVE_DEVICE", "cuda"),
             interactive_asr_model=os.environ.get("INTERACTIVE_ASR_MODEL", "base"),
-            interactive_model_type=os.environ.get("INTERACTIVE_MODEL_TYPE", "moshi"),
+            interactive_model_type=interactive_model_type,
             interactive_provider_endpoint=os.environ.get("INTERACTIVE_PROVIDER_ENDPOINT", ""),
             enable_consent=os.environ.get("ENABLE_CONSENT", "0") == "1",
             enable_meeting_phase_processor=os.environ.get("ENABLE_MEETING_PHASE_PROCESSOR", "0") == "1",

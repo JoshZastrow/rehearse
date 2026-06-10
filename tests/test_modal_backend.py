@@ -93,7 +93,7 @@ async def test_modal_backend_start_publishes_end_of_call_on_connect_failure():
 
 @pytest.mark.asyncio
 async def test_modal_backend_maps_provider_label_to_coach():
-    """'provider' wire label from the refactored server must map to Speaker.COACH."""
+    """'provider' wire label from the refactored server must map to Speaker.GUIDE."""
     import asyncio
 
     backend = ModalInteractiveBackend(endpoint="ws://fake")
@@ -123,9 +123,9 @@ async def test_modal_backend_maps_provider_label_to_coach():
     from rehearse.frames import TranscriptDelta
     from rehearse.types import Speaker
     assert any(
-        isinstance(f, TranscriptDelta) and f.speaker == Speaker.COACH
+        isinstance(f, TranscriptDelta) and f.speaker == Speaker.GUIDE
         for f in frames
-    ), f"Expected Speaker.COACH for 'provider' label, got {frames}"
+    ), f"Expected Speaker.GUIDE for 'provider' label, got {frames}"
 
 
 @pytest.mark.asyncio

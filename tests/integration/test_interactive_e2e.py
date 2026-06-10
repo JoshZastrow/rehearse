@@ -70,6 +70,7 @@ async def test_interactive_backend_produces_audio_and_transcript():
         hf_repo="kyutai/moshiko-pytorch-bf16",
         device=device,
         asr_model="tiny",
+        model_type="moshi",  # local weights are upstream moshi (default is personaplex)
     )
     bus = FrameBus(session_id="e2e-test")
 
@@ -89,14 +90,14 @@ async def test_interactive_backend_produces_audio_and_transcript():
         deadline = time.monotonic() + 90.0
         while time.monotonic() < deadline:
             await backend.send_caller_audio(silence_chunk)
-            audio_frames = [f for f in collected if isinstance(f, AudioChunk) and f.speaker == Speaker.COACH]
+            audio_frames = [f for f in collected if isinstance(f, AudioChunk) and f.speaker == Speaker.GUIDE]
             if audio_frames:
                 break
             await asyncio.sleep(0.01)
 
     collector.cancel()
 
-    audio_frames = [f for f in collected if isinstance(f, AudioChunk) and f.speaker == Speaker.COACH]
+    audio_frames = [f for f in collected if isinstance(f, AudioChunk) and f.speaker == Speaker.GUIDE]
     assert audio_frames, "No AudioChunk(COACH) frames received within 90s"
 
     for f in audio_frames[:3]:
@@ -108,7 +109,7 @@ async def test_interactive_backend_produces_audio_and_transcript():
     total_audio_ms = sum(len(f.pcm16_16k) // 2 for f in audio_frames) / 16  # samples → ms
     print(f"  Total coach audio: {total_audio_ms:.0f} ms")
 
-    transcript = [f for f in collected if isinstance(f, TranscriptDelta) and f.speaker == Speaker.COACH]
+    transcript = [f for f in collected if isinstance(f, TranscriptDelta) and f.speaker == Speaker.GUIDE]
     print(f"  TranscriptDelta(COACH) frames: {len(transcript)}")
 
 
@@ -132,6 +133,7 @@ async def test_interactive_backend_closes_cleanly():
         hf_repo="kyutai/moshiko-pytorch-bf16",
         device=device,
         asr_model="tiny",
+        model_type="moshi",  # local weights are upstream moshi (default is personaplex)
     )
     bus = FrameBus(session_id="e2e-close-test")
 

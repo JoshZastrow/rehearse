@@ -268,7 +268,7 @@ class HumeEVIAdapter:
 
     async def _events(self) -> AsyncIterator[CoachTurnEvent]:
         async for frame in self._bus.subscribe():
-            if isinstance(frame, TranscriptDelta) and frame.speaker == Speaker.COACH:
+            if isinstance(frame, TranscriptDelta) and frame.speaker == Speaker.GUIDE:
                 yield CoachTranscriptEvent(
                     text=frame.text,
                     utterance_id=frame.utterance_id,
@@ -276,9 +276,9 @@ class HumeEVIAdapter:
                 # TranscriptDelta is published by HumeEVIClient on assistant_end —
                 # the last event of a coach turn. Signal turn complete immediately.
                 yield CoachTurnComplete()
-            elif isinstance(frame, AudioChunk) and frame.speaker == Speaker.COACH:
+            elif isinstance(frame, AudioChunk) and frame.speaker == Speaker.GUIDE:
                 yield CoachAudioEvent(pcm16_16k=frame.pcm16_16k)
-            elif isinstance(frame, ProsodyEvent) and frame.speaker == Speaker.COACH:
+            elif isinstance(frame, ProsodyEvent) and frame.speaker == Speaker.GUIDE:
                 yield CoachProsodyEvent(scores=frame.scores.emotions)
             elif isinstance(frame, EndOfCall):
                 break
@@ -611,7 +611,7 @@ class RuntimeHost:
                 TranscriptDelta(
                     session_id=session_id,
                     utterance_id=coach_utt_id,
-                    speaker=Speaker.COACH,
+                    speaker=Speaker.GUIDE,
                     text=coach_text,
                     is_final=True,
                     ts_start=coach_now,
@@ -640,7 +640,7 @@ class RuntimeHost:
                     TranscriptDelta(
                         session_id=session_id,
                         utterance_id=event.utterance_id,
-                        speaker=Speaker.COACH,
+                        speaker=Speaker.GUIDE,
                         text=event.text,
                         is_final=True,
                         ts_start=now,
@@ -655,7 +655,7 @@ class RuntimeHost:
                 await bus.publish(
                     AudioChunk(
                         session_id=session_id,
-                        speaker=Speaker.COACH,
+                        speaker=Speaker.GUIDE,
                         pcm16_16k=event.pcm16_16k,
                         ts=now,
                     )
@@ -666,7 +666,7 @@ class RuntimeHost:
                     ProsodyEvent(
                         session_id=session_id,
                         utterance_id=last_utterance_id,
-                        speaker=Speaker.COACH,
+                        speaker=Speaker.GUIDE,
                         scores=ProsodyScores(
                             arousal=0.0,
                             valence=0.0,
