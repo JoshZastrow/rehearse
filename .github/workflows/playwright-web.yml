@@ -18,6 +18,8 @@ jobs:
       LIVEKIT_ROOM_NAME: rehearse-room
       VITE_LIVEKIT_URL: ws://localhost:7880
       VITE_TOKEN_ENDPOINT: http://localhost:8765/api/livekit/token
+      # CI serves the built app via `vite preview` on :5173 (see below).
+      PLAYWRIGHT_BASE_URL: http://localhost:5173
 
     steps:
       - uses: actions/checkout@v4
@@ -92,7 +94,10 @@ jobs:
       # ── Tests ──────────────────────────────────────────────────────────────
       - name: Run Playwright tests
         working-directory: web/livekit/app
-        run: npx playwright test
+        # Excludes the @full browser-call test (heavy: spawns the agent runner
+        # + downloads the Pocket TTS model). Run that locally via
+        # `npm run test:e2e:full` after infra changes to the voice stack.
+        run: npm run test:e2e
 
       - uses: actions/upload-artifact@v4
         if: failure()

@@ -19,7 +19,9 @@ export default defineConfig({
   workers: 1,
   fullyParallel: false,
   use: {
-    baseURL: 'http://localhost:3000',
+    // Local dev serves vite on :3000 (webServer below). CI runs its own vite
+    // preview and overrides this via PLAYWRIGHT_BASE_URL.
+    baseURL: process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:3000',
     permissions: ['microphone'],
   },
   projects: [
@@ -36,7 +38,10 @@ export default defineConfig({
       },
     },
   ],
-  webServer: [
+  // Locally, Playwright boots the whole stack. In CI the playwright-web
+  // workflow starts livekit/token-server/vite itself (and excludes @full), so
+  // defining webServer there would collide on ports — leave it undefined.
+  webServer: process.env.CI ? undefined : [
     {
       // LiveKit dev server: in-memory, built-in devkey/secret, ws on :7880.
       command: 'livekit-server --dev --bind 0.0.0.0',
