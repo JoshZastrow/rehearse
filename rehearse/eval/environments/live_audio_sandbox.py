@@ -162,6 +162,11 @@ class LiveAudioSandboxEnvironment:
             "anthropic_api_key_set": bool(os.environ.get("ANTHROPIC_API_KEY")),
             "hume_api_key_set": bool(os.environ.get("HUME_API_KEY")),
         }
+        if provenance["backend_type"] == "interactive":
+            provenance["interactive_model_type"] = getattr(config, "interactive_model_type", "moshi")
+            provenance["interactive_provider_endpoint"] = getattr(
+                config, "interactive_provider_endpoint", ""
+            )
         (session_dir / "provenance.json").write_text(json.dumps(provenance, indent=2) + "\n")
 
         # Wrapper clients track usage on their own _usage dict.

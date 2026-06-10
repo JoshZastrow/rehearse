@@ -574,6 +574,25 @@ async def test_livekit_real_audio_conversation_between_interactive_endpoints(
         run_livekit_session(agent_stream, session_id, provider_backend, store=store)
     )
 
+    # The duplex loop is self-sustaining — each backend keeps producing audio
+    # while it hears the other — so neither side ends the call on its own
+    # (true for Moshi and PersonaPlex alike). Bound the conversation: once both
+    # ends have observably produced (agent audio at the caller room + a final
+    # agent transcript on the DataChannel), or after 30 s, close the stream so
+    # the session finalizes its artifacts within the 45 s budget.
+    async def _bound_conversation() -> None:
+        deadline = time.monotonic() + 30.0
+        while time.monotonic() < deadline:
+            if received_agent_audio and any(
+                m.get("type") == "transcript" and m.get("speaker") == "agent" and m.get("final")
+                for m in received_dc_messages
+            ):
+                break
+            await asyncio.sleep(0.5)
+        agent_stream.close()
+
+    bounder = asyncio.create_task(_bound_conversation())
+
     try:
         await asyncio.wait_for(agent_task, timeout=45.0)
     except TimeoutError:
@@ -582,6 +601,9 @@ async def test_livekit_real_audio_conversation_between_interactive_endpoints(
             await asyncio.wait_for(agent_task, timeout=5.0)
         pytest.fail("agent session did not complete within 45 s")
     finally:
+        bounder.cancel()
+        with suppress(asyncio.CancelledError):
+            await bounder
         primer.cancel()
         caller_publisher.cancel()
         with suppress(asyncio.CancelledError):

@@ -54,12 +54,39 @@ class InteractiveBackend:
         hf_repo: str,
         device: str,
         asr_model: str = "base",
+        model_type: str = "moshi",
+        text_prompt: str = "",
+        voice_prompt: str = "",
     ) -> None:
-        self._mimi, self._lm_gen, self._tokenizer = load_models(
-            checkpoint_path=checkpoint_path,
-            hf_repo=hf_repo,
-            device=device,
-        )
+        self._model_type = model_type
+        if model_type == "personaplex":
+            from rehearse.backends.interactive.personaplex_loader import (
+                apply_persona,
+                ensure_voice_prompt_dir,
+                load_personaplex_models,
+                resolve_voice_prompt,
+            )
+
+            self._mimi, self._lm_gen, self._tokenizer = load_personaplex_models(
+                checkpoint_path=checkpoint_path,
+                hf_repo=hf_repo,
+                device=device,
+            )
+            voice_dir = ensure_voice_prompt_dir(hf_repo)
+            apply_persona(
+                self._lm_gen,
+                self._tokenizer,
+                voice_prompt_path=resolve_voice_prompt(voice_dir, voice_prompt or "NATF0.pt"),
+                text_prompt=text_prompt,
+            )
+        elif model_type == "moshi":
+            self._mimi, self._lm_gen, self._tokenizer = load_models(
+                checkpoint_path=checkpoint_path,
+                hf_repo=hf_repo,
+                device=device,
+            )
+        else:
+            raise ValueError(f"Unknown interactive model_type: {model_type!r}")
         self._asr = InteractiveASR(model_size=asr_model)
         self._device = device
         self._frame_size: int = self._mimi.frame_size  # 1920 at 24 kHz
@@ -124,6 +151,11 @@ class InteractiveBackend:
         silence_streak = 0
 
         with self._mimi.streaming(1), self._lm_gen.streaming(1), torch.no_grad():
+            if self._model_type == "personaplex":
+                # Prefill voice + role conditioning before streaming; mimi is
+                # reused for voice prompt encoding then reset (PersonaPlex server.py).
+                self._lm_gen.step_system_prompts(self._mimi)
+                self._mimi.reset_streaming()
             while not self._stop.is_set():
                 try:
                     raw = self._audio_q.get(timeout=0.05)
@@ -163,7 +195,10 @@ class InteractiveBackend:
                         else:
                             silence_streak += 1
 
-                        audio_codes = tokens_out[:, 1:, :]
+                        # First 8 codebooks are the output audio stream. Equivalent
+                        # to [:, 1:] for Moshi (dep_q=8); PersonaPlex (dep_q=16)
+                        # also predicts input-stream codebooks that mimi must not see.
+                        audio_codes = tokens_out[:, 1:9, :]
                         wav = self._mimi.decode(audio_codes)
                         pcm16_out = self._wav_to_pcm16_16k(wav)
                         self._publish(AudioChunk(

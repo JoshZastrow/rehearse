@@ -1,7 +1,12 @@
-"""Interactive inference server for Rehearse — full-duplex Moshi audio on Modal GPU.
+"""Interactive inference server for Rehearse — full-duplex speech models on Modal GPU.
 
 Serves a WebSocket endpoint that accepts PCM16 16kHz audio from a caller and
-streams back coach audio + transcript/prosody events in real time.
+streams back coach audio + transcript/prosody events in real time. Two model
+types share the wire protocol:
+
+  moshi        kyutai/moshiko-pytorch-bf16 (ProviderServer / CallerServer)
+  personaplex  nvidia/personaplex-7b-v1 — Moshi finetune with voice + role
+               conditioning (PersonaplexProvider / PersonaplexCaller)
 
 Deploy:
     modal deploy infra/interactive.py
@@ -9,10 +14,13 @@ Deploy:
 The deployed WebSocket URLs are:
     wss://<workspace>--rehearse-interactive-providerserver-serve.modal.run/ws
     wss://<workspace>--rehearse-interactive-callerserver-serve.modal.run/ws
+    wss://<workspace>--rehearse-interactive-personaplexprovider-serve.modal.run/ws
+    wss://<workspace>--rehearse-interactive-personaplexcaller-serve.modal.run/ws
 
 Set in .env:
     INTERACTIVE_PROVIDER_ENDPOINT=wss://<workspace>--rehearse-interactive-providerserver-serve.modal.run/ws
     INTERACTIVE_CALLER_ENDPOINT=wss://<workspace>--rehearse-interactive-callerserver-serve.modal.run/ws
+(point the endpoint vars at the personaplex URLs to use PersonaPlex instead)
 
 Wire protocol:
   Client → server: {"type": "start", "session_id": "..."} (text) then raw PCM16 16kHz bytes
@@ -67,6 +75,41 @@ interactive_image = (
     )
 )
 
+# PersonaPlex needs NVIDIA's moshi fork (same `moshi` module name, so it gets
+# its own image). Deps are pinned to the fork's requirements — notably
+# torch<2.5 — and the fork itself installs with --no-deps so pip can't
+# downgrade/upgrade anything underneath us.
+personaplex_image = (
+    modal.Image.from_registry("nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04", add_python="3.12")
+    .entrypoint([])
+    .apt_install("git", "libopus-dev", "libportaudio2")
+    .uv_pip_install(
+        "torch==2.4.1",
+        "torchaudio==2.4.1",
+        "numpy>=1.26,<2.2",
+        "faster-whisper>=1.1.0",
+        "sentencepiece>=0.2.0",
+        "aiohttp>=3.9",
+        "pydantic>=2.9",
+        "structlog>=24.4",
+        "huggingface_hub>=0.24",
+        "safetensors>=0.4,<0.5",
+        "sphn>=0.1.4,<0.2",
+        "einops==0.7",
+        "sounddevice==0.5",
+        "tqdm>=4.48",
+    )
+    .run_commands(
+        "pip install --no-deps 'moshi-personaplex @ "
+        "git+https://github.com/NVIDIA/personaplex.git#subdirectory=moshi'",
+    )
+    .env({"HF_XET_HIGH_PERFORMANCE": "1"})
+    .add_local_dir(
+        str(Path(__file__).parents[1] / "rehearse"),
+        remote_path="/app/rehearse",
+    )
+)
+
 # ---------------------------------------------------------------------------
 # Volumes / App
 # ---------------------------------------------------------------------------
@@ -81,6 +124,36 @@ MINUTES = 60
 _AIOHTTP_PORT = 8998
 
 # ---------------------------------------------------------------------------
+# PersonaPlex persona defaults
+# ---------------------------------------------------------------------------
+
+_PERSONAPLEX_TEXT_PROMPTS = {
+    "provider": (
+        "You are a supportive conversation coach. Help the caller rehearse "
+        "difficult conversations: ask what they want to practice, play your "
+        "part, and give clear, encouraging feedback."
+    ),
+    "caller": "You enjoy having a good conversation.",
+}
+_PERSONAPLEX_VOICE_PROMPTS = {"provider": "NATF0.pt", "caller": "NATM0.pt"}
+
+
+def _resolve_persona(handshake: dict, speaker_role: str) -> tuple[str, str]:
+    """Return (text_prompt, voice_prompt) — handshake > env > role default."""
+    text = (
+        handshake.get("text_prompt")
+        or os.environ.get("PERSONAPLEX_TEXT_PROMPT")
+        or _PERSONAPLEX_TEXT_PROMPTS[speaker_role]
+    )
+    voice = (
+        handshake.get("voice_prompt")
+        or os.environ.get("PERSONAPLEX_VOICE_PROMPT")
+        or _PERSONAPLEX_VOICE_PROMPTS[speaker_role]
+    )
+    return text, voice
+
+
+# ---------------------------------------------------------------------------
 # Inference server base class
 # ---------------------------------------------------------------------------
 
@@ -93,6 +166,9 @@ class _InteractiveServerBase:
 
     speaker_role: str = "provider"
     """'provider' or 'caller'. Controls transcript labels and ASR target."""
+
+    model_type: str = "moshi"
+    """'moshi' or 'personaplex'. Selects the model loader and persona conditioning."""
 
     @property
     def _other_role(self) -> str:
@@ -111,14 +187,30 @@ class _InteractiveServerBase:
     @modal.enter()
     def load(self) -> None:
         sys.path.insert(0, "/app")
-        from rehearse.backends.interactive.loader import load_models  # type: ignore[import]
 
-        repo = os.environ.get("INTERACTIVE_MODEL_REPO", "kyutai/moshiko-pytorch-bf16")
-        self._mimi, self._lm_gen, self._tokenizer = load_models(
-            checkpoint_path=self.checkpoint_path,
-            hf_repo=repo,
-            device="cuda",
-        )
+        if self.model_type == "personaplex":
+            from rehearse.backends.interactive.personaplex_loader import (  # type: ignore[import]
+                DEFAULT_PERSONAPLEX_REPO,
+                ensure_voice_prompt_dir,
+                load_personaplex_models,
+            )
+
+            repo = os.environ.get("INTERACTIVE_MODEL_REPO", DEFAULT_PERSONAPLEX_REPO)
+            self._mimi, self._lm_gen, self._tokenizer = load_personaplex_models(
+                checkpoint_path=self.checkpoint_path,
+                hf_repo=repo,
+                device="cuda",
+            )
+            self._voice_prompt_dir = ensure_voice_prompt_dir(repo)
+        else:
+            from rehearse.backends.interactive.loader import load_models  # type: ignore[import]
+
+            repo = os.environ.get("INTERACTIVE_MODEL_REPO", "kyutai/moshiko-pytorch-bf16")
+            self._mimi, self._lm_gen, self._tokenizer = load_models(
+                checkpoint_path=self.checkpoint_path,
+                hf_repo=repo,
+                device="cuda",
+            )
 
         # Initialize streaming state once; reset per connection (Moshi's approach)
         self._mimi.streaming_forever(1)
@@ -146,7 +238,10 @@ class _InteractiveServerBase:
                     tokens = self._lm_gen.step(codes[:, :, c : c + 1])
                     if tokens is None:
                         continue
-                    _ = self._mimi.decode(tokens[:, 1:])
+                    # First 8 codebooks are the output audio stream. Equivalent
+                    # to [:, 1:] for Moshi (dep_q=8); PersonaPlex (dep_q=16)
+                    # also predicts input-stream codebooks mimi must not see.
+                    _ = self._mimi.decode(tokens[:, 1:9])
         torch.cuda.synchronize()
 
     async def _run_aiohttp(self) -> None:
@@ -229,6 +324,30 @@ class _InteractiveServerBase:
             self._mimi.reset_streaming()
             self._lm_gen.reset_streaming()
 
+            if self.model_type == "personaplex":
+                from rehearse.backends.interactive.personaplex_loader import (  # type: ignore[import]
+                    apply_persona,
+                    resolve_voice_prompt,
+                )
+
+                text_prompt, voice_name = _resolve_persona(handshake, self.speaker_role)
+                apply_persona(
+                    self._lm_gen,
+                    self._tokenizer,
+                    voice_prompt_path=resolve_voice_prompt(self._voice_prompt_dir, voice_name),
+                    text_prompt=text_prompt,
+                )
+                self._log(f"ws: session={session_id} prefilling persona (voice={voice_name})")
+                t_prefill = _time.monotonic()
+                # mimi is reused to encode the voice prompt, then reset before
+                # the conversation starts (matches PersonaPlex server.py).
+                await self._lm_gen.step_system_prompts_async(self._mimi)
+                self._mimi.reset_streaming()
+                self._log(
+                    f"ws: session={session_id} persona prefill done "
+                    f"in {_time.monotonic() - t_prefill:.1f}s"
+                )
+
             from rehearse.backends.interactive.asr import InteractiveASR  # type: ignore[import]
 
             frame_size = self._mimi.frame_size
@@ -238,7 +357,10 @@ class _InteractiveServerBase:
             silence_streak = 0
             leading_silence = 0      # silence tokens before first speech token this turn
             turn_has_speech = False  # whether current turn has emitted any text tokens
-            skip_frames = 1
+            # Moshi's server.py resets the encoder after the first frame to
+            # reapply left-padding; PersonaPlex's does not (its mimi was just
+            # reset after the persona prefill).
+            skip_frames = 1 if self.model_type == "moshi" else 0
             asr = InteractiveASR(model_size=os.environ.get("INTERACTIVE_ASR_MODEL", "base"))
             frames_rx = 0
             frames_tx = 0
@@ -323,7 +445,9 @@ class _InteractiveServerBase:
                                 if not turn_has_speech:
                                     leading_silence += 1
 
-                            wav = self._mimi.decode(tokens[:, 1:, :])
+                            # First 8 codebooks are the output audio stream
+                            # (PersonaPlex dep_q=16 carries 16; Moshi has 8).
+                            wav = self._mimi.decode(tokens[:, 1:9, :])
                             audio_16k = F.resample(
                                 wav.squeeze(0).squeeze(0).unsqueeze(0),
                                 _MOSHI_SR,
@@ -512,6 +636,48 @@ class CallerServer(_InteractiveServerBase):
         pass  # server started in load()
 
 
+@app.cls(
+    image=personaplex_image,
+    gpu="L40S",
+    scaledown_window=60 * MINUTES,
+    timeout=30 * MINUTES,
+    volumes={"/root/.cache/huggingface": hf_cache_vol, _SESSIONS_MOUNT: sessions_vol},
+    secrets=[modal.Secret.from_name("HF_TOKEN")],
+)
+class PersonaplexProvider(_InteractiveServerBase):
+    """PersonaPlex provider (coach) endpoint — voice + role conditioned.
+
+    nvidia/personaplex-7b-v1 is gated: the HF_TOKEN secret must belong to an
+    account that accepted the license. L40S over A10G: 16.7 GB bf16 weights +
+    KV + CUDA-graph pools crowd a 24 GB card, and the dep_q=16 depth
+    transformer doubles per-frame depformer steps vs Moshi.
+    """
+    model_type = "personaplex"
+    speaker_role = "provider"
+
+    @modal.web_server(_AIOHTTP_PORT)
+    def serve(self):
+        pass  # server started in load()
+
+
+@app.cls(
+    image=personaplex_image,
+    gpu="L40S",
+    scaledown_window=60 * MINUTES,
+    timeout=30 * MINUTES,
+    volumes={"/root/.cache/huggingface": hf_cache_vol, _SESSIONS_MOUNT: sessions_vol},
+    secrets=[modal.Secret.from_name("HF_TOKEN")],
+)
+class PersonaplexCaller(_InteractiveServerBase):
+    """PersonaPlex caller endpoint — voice + role conditioned synthetic caller."""
+    model_type = "personaplex"
+    speaker_role = "caller"
+
+    @modal.web_server(_AIOHTTP_PORT)
+    def serve(self):
+        pass  # server started in load()
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -537,8 +703,14 @@ def _write_mask(path: Path, token_rows: list[str]) -> None:
 
 
 @app.local_entrypoint()
-async def smoke_test() -> None:
-    """Send 5s of silence to the deployed server and verify audio frames come back."""
+async def smoke_test(endpoint: str = "") -> None:
+    """Send 5s of silence to the deployed server and verify audio frames come back.
+
+    Defaults to INTERACTIVE_PROVIDER_ENDPOINT from .env; pass --endpoint to
+    target another deployed class, e.g.:
+        modal run infra/interactive.py --endpoint \\
+            wss://<workspace>--rehearse-interactive-personaplexprovider-serve.modal.run/ws
+    """
     import struct
     import time
     from pathlib import Path as _Path
@@ -546,9 +718,9 @@ async def smoke_test() -> None:
     from dotenv import load_dotenv as _load_dotenv
     import websockets as _ws
 
-    _load_dotenv(_Path(__file__).parent.parent / ".env", override=True)
-
-    endpoint = os.environ.get("INTERACTIVE_PROVIDER_ENDPOINT", "")
+    if not endpoint:
+        _load_dotenv(_Path(__file__).parent.parent / ".env", override=True)
+        endpoint = os.environ.get("INTERACTIVE_PROVIDER_ENDPOINT", "")
     if not endpoint:
         raise RuntimeError("INTERACTIVE_PROVIDER_ENDPOINT not set — run `make deploy-interactive` and set the env var")
     ws_url = endpoint.replace("https://", "wss://").replace("http://", "ws://").rstrip("/")
