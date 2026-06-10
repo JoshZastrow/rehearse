@@ -96,7 +96,7 @@ async def _datachannel_bridge(stream: object, bus: FrameBus) -> None:
     """Forward TranscriptDelta / EndOfCall frames to the DataChannel."""
     async for frame in bus.subscribe():
         if isinstance(frame, TranscriptDelta):
-            speaker = "agent" if frame.speaker == Speaker.COACH else "user"
+            speaker = "agent" if frame.speaker == Speaker.GUIDE else "user"
             msg = {
                 "v": _DC_SCHEMA_VERSION,
                 "type": "transcript",

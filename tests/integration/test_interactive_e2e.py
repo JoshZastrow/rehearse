@@ -90,14 +90,14 @@ async def test_interactive_backend_produces_audio_and_transcript():
         deadline = time.monotonic() + 90.0
         while time.monotonic() < deadline:
             await backend.send_caller_audio(silence_chunk)
-            audio_frames = [f for f in collected if isinstance(f, AudioChunk) and f.speaker == Speaker.COACH]
+            audio_frames = [f for f in collected if isinstance(f, AudioChunk) and f.speaker == Speaker.GUIDE]
             if audio_frames:
                 break
             await asyncio.sleep(0.01)
 
     collector.cancel()
 
-    audio_frames = [f for f in collected if isinstance(f, AudioChunk) and f.speaker == Speaker.COACH]
+    audio_frames = [f for f in collected if isinstance(f, AudioChunk) and f.speaker == Speaker.GUIDE]
     assert audio_frames, "No AudioChunk(COACH) frames received within 90s"
 
     for f in audio_frames[:3]:
@@ -109,7 +109,7 @@ async def test_interactive_backend_produces_audio_and_transcript():
     total_audio_ms = sum(len(f.pcm16_16k) // 2 for f in audio_frames) / 16  # samples → ms
     print(f"  Total coach audio: {total_audio_ms:.0f} ms")
 
-    transcript = [f for f in collected if isinstance(f, TranscriptDelta) and f.speaker == Speaker.COACH]
+    transcript = [f for f in collected if isinstance(f, TranscriptDelta) and f.speaker == Speaker.GUIDE]
     print(f"  TranscriptDelta(COACH) frames: {len(transcript)}")
 
 

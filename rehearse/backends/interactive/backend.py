@@ -3,10 +3,10 @@
 Audio pipeline:
   send_caller_audio(PCM16 16kHz) → resample to 24kHz → mimi.encode()
     → lm_gen.step() → text tokens + audio tokens
-    → mimi.decode() → resample to 16kHz → AudioChunk(COACH)
+    → mimi.decode() → resample to 16kHz → AudioChunk(GUIDE)
 
 User transcription: faster-whisper runs on buffered user audio after each
-coach turn, emitting TranscriptDelta(USER, is_final=True) + ProsodyEvent(USER).
+guide turn, emitting TranscriptDelta(USER, is_final=True) + ProsodyEvent(USER).
 
 The inference loop runs in a ThreadPoolExecutor (sync streaming context
 managers + GPU calls). Frames are published back to the asyncio event loop
@@ -146,8 +146,8 @@ class InteractiveBackend:
 
     def _sync_inference_loop(self) -> None:
         pcm_buf = np.array([], dtype=np.float32)
-        coach_utt_id = str(uuid.uuid4())
-        coach_text_pieces: list[str] = []
+        guide_utt_id = str(uuid.uuid4())
+        guide_text_pieces: list[str] = []
         silence_streak = 0
 
         with self._mimi.streaming(1), self._lm_gen.streaming(1), torch.no_grad():
@@ -182,11 +182,11 @@ class InteractiveBackend:
                         pad_id = self._lm_gen.lm_model.text_padding_token_id
                         if text_id != pad_id:
                             piece = self._tokenizer.id_to_piece(text_id)
-                            coach_text_pieces.append(piece)
+                            guide_text_pieces.append(piece)
                             self._publish(TranscriptDelta(
                                 session_id=self._session_id,
-                                utterance_id=coach_utt_id,
-                                speaker=Speaker.COACH,
+                                utterance_id=guide_utt_id,
+                                speaker=Speaker.GUIDE,
                                 text=piece,
                                 is_final=False,
                                 ts_start=time.time(),
@@ -203,20 +203,20 @@ class InteractiveBackend:
                         pcm16_out = self._wav_to_pcm16_16k(wav)
                         self._publish(AudioChunk(
                             session_id=self._session_id,
-                            speaker=Speaker.COACH,
+                            speaker=Speaker.GUIDE,
                             pcm16_16k=pcm16_out,
                             ts=time.time(),
                         ))
 
-                        if silence_streak >= _SILENCE_FRAMES_TO_FLUSH and coach_text_pieces:
-                            self._flush_coach_turn(coach_utt_id, coach_text_pieces)
-                            coach_text_pieces = []
-                            coach_utt_id = str(uuid.uuid4())
+                        if silence_streak >= _SILENCE_FRAMES_TO_FLUSH and guide_text_pieces:
+                            self._flush_guide_turn(guide_utt_id, guide_text_pieces)
+                            guide_text_pieces = []
+                            guide_utt_id = str(uuid.uuid4())
                             silence_streak = 0
                             self._flush_user_turn()
 
-        if coach_text_pieces:
-            self._flush_coach_turn(coach_utt_id, coach_text_pieces)
+        if guide_text_pieces:
+            self._flush_guide_turn(guide_utt_id, guide_text_pieces)
         self._flush_user_turn()
         self._publish(EndOfCall(
             session_id=self._session_id,
@@ -241,12 +241,12 @@ class InteractiveBackend:
                 results.append(tokens)
         return results
 
-    def _flush_coach_turn(self, utt_id: str, pieces: list[str]) -> None:
+    def _flush_guide_turn(self, utt_id: str, pieces: list[str]) -> None:
         text = "".join(pieces).replace("▁", " ").strip()
         self._publish(TranscriptDelta(
             session_id=self._session_id,
             utterance_id=utt_id,
-            speaker=Speaker.COACH,
+            speaker=Speaker.GUIDE,
             text=text,
             is_final=True,
             ts_start=time.time(),

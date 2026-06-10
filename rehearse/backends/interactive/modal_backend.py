@@ -35,10 +35,10 @@ if TYPE_CHECKING:
 log = structlog.get_logger(__name__)
 
 # Maps wire labels to Speaker. Both legacy ("coach"/"user") and parameterized
-# ("provider"/"caller") labels are handled. Unknown labels default to COACH.
+# ("provider"/"caller") labels are handled. Unknown labels default to GUIDE.
 _SPEAKER_MAP: dict[str, Speaker] = {
-    "coach": Speaker.COACH,
-    "provider": Speaker.COACH,
+    "coach": Speaker.GUIDE,
+    "provider": Speaker.GUIDE,
     "user": Speaker.USER,
     "caller": Speaker.USER,
 }
@@ -148,7 +148,7 @@ class ModalInteractiveBackend:
                 if isinstance(msg, bytes):
                     await self._bus.publish(AudioChunk(
                         session_id=self._session_id,
-                        speaker=Speaker.COACH,
+                        speaker=Speaker.GUIDE,
                         pcm16_16k=msg,
                         ts=time.time(),
                     ))
@@ -166,7 +166,7 @@ class ModalInteractiveBackend:
         assert self._bus is not None
         match data.get("type"):
             case "transcript":
-                speaker = _SPEAKER_MAP.get(data.get("speaker", ""), Speaker.COACH)
+                speaker = _SPEAKER_MAP.get(data.get("speaker", ""), Speaker.GUIDE)
                 await self._bus.publish(TranscriptDelta(
                     session_id=self._session_id,
                     utterance_id=data.get("utterance_id", str(uuid.uuid4())),
@@ -176,7 +176,7 @@ class ModalInteractiveBackend:
                     ts_start=time.time(),
                 ))
             case "prosody":
-                speaker = _SPEAKER_MAP.get(data.get("speaker", ""), Speaker.COACH)
+                speaker = _SPEAKER_MAP.get(data.get("speaker", ""), Speaker.GUIDE)
                 await self._bus.publish(ProsodyEvent(
                     session_id=self._session_id,
                     utterance_id=data.get("utterance_id", str(uuid.uuid4())),

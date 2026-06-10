@@ -28,13 +28,13 @@ _BACKEND_PY = _REPO_ROOT / "rehearse" / "backends" / "interactive" / "backend.py
 def test_wrap_system_tags_wraps_plain_text():
     from rehearse.backends.interactive.personaplex_loader import wrap_system_tags
 
-    assert wrap_system_tags("You are a coach.") == "<system> You are a coach. <system>"
+    assert wrap_system_tags("You are a guide.") == "<system> You are a guide. <system>"
 
 
 def test_wrap_system_tags_is_idempotent():
     from rehearse.backends.interactive.personaplex_loader import wrap_system_tags
 
-    wrapped = "<system> You are a coach. <system>"
+    wrapped = "<system> You are a guide. <system>"
     assert wrap_system_tags(wrapped) == wrapped
 
 

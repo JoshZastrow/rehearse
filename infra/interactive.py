@@ -1,7 +1,7 @@
 """Interactive inference server for Rehearse — full-duplex speech models on Modal GPU.
 
 Serves a WebSocket endpoint that accepts PCM16 16kHz audio from a caller and
-streams back coach audio + transcript/prosody events in real time. Two model
+streams back guide audio + transcript/prosody events in real time. Two model
 types share the wire protocol:
 
   personaplex  nvidia/personaplex-7b-v1 — Moshi finetune with voice + role
@@ -129,7 +129,7 @@ _AIOHTTP_PORT = 8998
 
 _PERSONAPLEX_TEXT_PROMPTS = {
     "provider": (
-        "You are a supportive conversation coach. Help the caller rehearse "
+        "You are a supportive conversation guide. Help the caller rehearse "
         "difficult conversations: ask what they want to practice, play your "
         "part, and give clear, encouraging feedback."
     ),
@@ -352,8 +352,8 @@ class _InteractiveServerBase:
 
             frame_size = self._mimi.frame_size
             pcm_buf = np.array([], dtype=np.float32)
-            coach_utt_id = str(uuid.uuid4())
-            coach_pieces: list[str] = []
+            guide_utt_id = str(uuid.uuid4())
+            guide_pieces: list[str] = []
             silence_streak = 0
             leading_silence = 0      # silence tokens before first speech token this turn
             turn_has_speech = False  # whether current turn has emitted any text tokens
@@ -376,7 +376,9 @@ class _InteractiveServerBase:
 
             while True:
                 # Before first audio: give the client time to set up the bridge.
-                # After audio starts: a 3s gap means the session is over.
+                # After audio starts: real transports stream continuously (even
+                # silence arrives as frames), so a gap of _IDLE_TIMEOUT seconds
+                # in *frames* means the line is dead — not a pause in speech.
                 timeout = _IDLE_TIMEOUT if frames_rx > 0 else _FIRST_FRAME_TIMEOUT
                 try:
                     msg = await asyncio.wait_for(ws.receive(), timeout=timeout)
@@ -434,7 +436,7 @@ class _InteractiveServerBase:
                                 if token_piece == "<unk>":
                                     token_piece = None
                                 else:
-                                    coach_pieces.append(token_piece)
+                                    guide_pieces.append(token_piece)
                                     self._log(f"ws: session={session_id} token={token_piece!r}")
                                     if not turn_has_speech:
                                         t_first_speech_token = _time.monotonic()
@@ -471,7 +473,7 @@ class _InteractiveServerBase:
                                 if token_piece is not None:
                                     await ws.send_str(json.dumps({
                                         "type": "transcript",
-                                        "utterance_id": coach_utt_id,
+                                        "utterance_id": guide_utt_id,
                                         "speaker": self.speaker_role,
                                         "text": token_piece,
                                         "is_final": False,
@@ -481,12 +483,12 @@ class _InteractiveServerBase:
                                 return
                             frames_tx += 1
 
-                            if silence_streak >= _SILENCE_FLUSH and coach_pieces:
-                                text = "".join(coach_pieces).replace("▁", " ").strip()
+                            if silence_streak >= _SILENCE_FLUSH and guide_pieces:
+                                text = "".join(guide_pieces).replace("▁", " ").strip()
                                 try:
                                     await ws.send_str(json.dumps({
                                         "type": "transcript",
-                                        "utterance_id": coach_utt_id,
+                                        "utterance_id": guide_utt_id,
                                         "speaker": self.speaker_role,
                                         "text": text,
                                         "is_final": True,
@@ -501,7 +503,7 @@ class _InteractiveServerBase:
                                     "leading_silence_ms": leading_silence * 80,
                                     "time_to_first_audio_ms": round((t_first_audio_sent - t_turn_start) * 1000) if t_first_audio_sent else None,
                                     "time_to_first_speech_ms": round((t_first_speech_token - t_turn_start) * 1000) if t_first_speech_token else None,
-                                    "speech_tokens": len(coach_pieces),
+                                    "speech_tokens": len(guide_pieces),
                                     "text": text,
                                 }
                                 self._log(json.dumps(profile))
@@ -509,8 +511,8 @@ class _InteractiveServerBase:
                                     await ws.send_str(json.dumps(profile))
                                 except Exception:
                                     return
-                                coach_pieces = []
-                                coach_utt_id = str(uuid.uuid4())
+                                guide_pieces = []
+                                guide_utt_id = str(uuid.uuid4())
                                 silence_streak = 0
                                 leading_silence = 0
                                 turn_has_speech = False
@@ -549,11 +551,11 @@ class _InteractiveServerBase:
                 f"rx={frames_rx} tx={frames_tx} mimi_frames={mimi_frames} elapsed={elapsed:.1f}s"
             )
 
-            if coach_pieces:
-                text = "".join(coach_pieces).replace("▁", " ").strip()
+            if guide_pieces:
+                text = "".join(guide_pieces).replace("▁", " ").strip()
                 await ws.send_str(json.dumps({
                     "type": "transcript",
-                    "utterance_id": coach_utt_id,
+                    "utterance_id": guide_utt_id,
                     "speaker": self.speaker_role,
                     "text": text,
                     "is_final": True,
@@ -613,7 +615,7 @@ class _InteractiveServerBase:
     volumes={"/root/.cache/huggingface": hf_cache_vol, _SESSIONS_MOUNT: sessions_vol},
 )
 class ProviderServer(_InteractiveServerBase):
-    """Moshi provider (coach) model endpoint. Loads from HuggingFace by default."""
+    """Moshi provider (guide) model endpoint. Loads from HuggingFace by default."""
     checkpoint_path = ""
     speaker_role = "provider"
     model_type = "moshi"  # this image carries upstream moshi, not the PersonaPlex fork
@@ -650,7 +652,7 @@ class CallerServer(_InteractiveServerBase):
     secrets=[modal.Secret.from_name("HF_TOKEN")],
 )
 class PersonaplexProvider(_InteractiveServerBase):
-    """PersonaPlex provider (coach) endpoint — voice + role conditioned.
+    """PersonaPlex provider (guide) endpoint — voice + role conditioned.
 
     nvidia/personaplex-7b-v1 is gated: the HF_TOKEN secret must belong to an
     account that accepted the license. L40S over A10G: 16.7 GB bf16 weights +

@@ -368,7 +368,7 @@ async def test_user_interrupts_consent_prompt_with_yes() -> None:
         f for f in frames if isinstance(f, TranscriptDelta) and f.speaker == Speaker.USER
     ]
     coach_transcripts = [
-        f for f in frames if isinstance(f, TranscriptDelta) and f.speaker == Speaker.COACH
+        f for f in frames if isinstance(f, TranscriptDelta) and f.speaker == Speaker.GUIDE
     ]
 
     # The user's "yes" arrives as a final transcript — ConsentGate can classify it.

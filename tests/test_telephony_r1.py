@@ -340,10 +340,10 @@ def test_media_websocket_bridges_twilio_to_fake_hume(
             ))
             await bus.publish(TranscriptDelta(
                 session_id=session_id, utterance_id="coach-1",
-                speaker=Speaker.COACH, text="coach reply", is_final=True, ts_start=0.2, ts_end=0.3,
+                speaker=Speaker.GUIDE, text="coach reply", is_final=True, ts_start=0.2, ts_end=0.3,
             ))
             await bus.publish(AudioChunk(
-                session_id=session_id, speaker=Speaker.COACH,
+                session_id=session_id, speaker=Speaker.GUIDE,
                 pcm16_16k=struct.pack("<8h", 0, 50, 100, 150, 200, 150, 100, 50), ts=0.0,
             ))
             # Do not block — let telephony.py drive the call to completion

@@ -108,7 +108,7 @@ class IntakeProcessor:
         """Consume bus frames and update intake/persona artifacts as phases change."""
         async for frame in frames:
             if isinstance(frame, TranscriptDelta) and frame.is_final and self._phase == Phase.INTAKE:
-                if frame.speaker == Speaker.COACH:
+                if frame.speaker == Speaker.GUIDE:
                     # Watch for the coach asking about gender preference
                     if _coach_asked_gender_question(frame.text):
                         self._coach_asked_gender = True

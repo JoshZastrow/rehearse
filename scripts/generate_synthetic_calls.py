@@ -160,7 +160,7 @@ async def run_one_session(
 
     async def collect_provider(bus: FrameBus) -> None:
         async for frame in bus.subscribe():
-            if isinstance(frame, AudioChunk) and frame.speaker == Speaker.COACH:
+            if isinstance(frame, AudioChunk) and frame.speaker == Speaker.GUIDE:
                 provider_pcm.append(frame.pcm16_16k)
             elif isinstance(frame, TranscriptDelta) and frame.is_final:
                 row = {
@@ -179,7 +179,7 @@ async def run_one_session(
 
     async def collect_caller(bus: FrameBus) -> None:
         async for frame in bus.subscribe():
-            if isinstance(frame, AudioChunk) and frame.speaker == Speaker.COACH:
+            if isinstance(frame, AudioChunk) and frame.speaker == Speaker.GUIDE:
                 caller_pcm.append(frame.pcm16_16k)
             elif isinstance(frame, EndOfCall):
                 return

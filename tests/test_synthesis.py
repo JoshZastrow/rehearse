@@ -55,7 +55,7 @@ async def _freeze_fixture(
             utterance_id="u2",
             ts_start=1.6,
             ts_end=3.0,
-            speaker=Speaker.COACH,
+            speaker=Speaker.GUIDE,
             phase=Phase.PRACTICE,
             text="Open with the impact you've had this quarter.",
         ),
