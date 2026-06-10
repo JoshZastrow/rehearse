@@ -24,10 +24,13 @@ class AgentRunner {
   exited: Promise<number>
 
   constructor() {
-    this.proc = spawn('uv', ['run', 'python', 'tests/e2e/runner.py'], {
-      cwd: REPO_ROOT,
-      env: { ...process.env, ...RUNNER_ENV },
-    })
+    // The --group flags make uv install the runner's deps (livekit-rtc +
+    // pocket-tts) on first run, so this test needs no manual `uv pip install`.
+    this.proc = spawn(
+      'uv',
+      ['run', '--group', 'livekit', '--group', 'e2e', 'python', 'tests/e2e/runner.py'],
+      { cwd: REPO_ROOT, env: { ...process.env, ...RUNNER_ENV } },
+    )
     this.proc.stdout.on('data', (d) => this.onData(String(d)))
     this.proc.stderr.on('data', (d) => process.stderr.write(`[runner] ${d}`))
     this.exited = new Promise((res) => this.proc.on('close', (code) => res(code ?? -1)))

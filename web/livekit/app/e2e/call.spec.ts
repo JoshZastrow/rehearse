@@ -1,12 +1,14 @@
 import { test, expect } from '@playwright/test'
+import { ROLE_LABELS } from '../src/roles'
 
 test.describe('Waveform UI', () => {
   test('idle state renders waveform panels and start button', async ({ page }) => {
     await page.goto('/')
-    // Two CALLER spans exist (panel label + side label) — match the first
-    await expect(page.getByText('CALLER').first()).toBeVisible()
-    await expect(page.getByText('AGENT').first()).toBeVisible()
-    // textTransform: uppercase is CSS-only; DOM text is title-case
+    // Role labels come from the single source of truth (src/roles.ts); each
+    // appears twice (panel + side label). getByText is case-insensitive, so it
+    // matches both the uppercased panel chip and the title-case side label.
+    await expect(page.getByText(ROLE_LABELS.user).first()).toBeVisible()
+    await expect(page.getByText(ROLE_LABELS.agent).first()).toBeVisible()
     await expect(page.getByText('Tap to Start')).toBeVisible()
   })
 

@@ -8,6 +8,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useVoiceSession } from '../hooks/useVoiceSession'
+import { ROLE_LABELS, roleLabel } from '../roles'
 
 // ── elapsed timer hook ────────────────────────────────────────────────────────
 
@@ -255,7 +256,7 @@ export default function Design2MinimalOrb() {
         <div style={wavePanel}>
           <div style={panelHeader}>
             <span style={speakerIcon}>👤</span>
-            <span style={{ ...panelLabel, color: '#00dcff' }}>CALLER</span>
+            <span style={{ ...panelLabel, color: '#00dcff' }}>{ROLE_LABELS.user.toUpperCase()}</span>
             <span style={{
               ...statusChip,
               color: callerActive ? '#00dcff' : '#334155',
@@ -279,7 +280,7 @@ export default function Design2MinimalOrb() {
         <div style={wavePanel}>
           <div style={panelHeader}>
             <span style={speakerIcon}>✦</span>
-            <span style={{ ...panelLabel, color: '#c084fc' }}>AGENT</span>
+            <span style={{ ...panelLabel, color: '#c084fc' }}>{ROLE_LABELS.agent.toUpperCase()}</span>
             <span style={{
               ...statusChip,
               color: agentActive ? '#c084fc' : '#334155',
@@ -318,7 +319,7 @@ export default function Design2MinimalOrb() {
                 ...transcriptWho,
                 color: entry.speaker === 'agent' ? '#c084fc' : '#00dcff',
               }}>
-                {entry.speaker === 'agent' ? 'AGENT' : 'CALLER'}
+                {roleLabel(entry.speaker).toUpperCase()}
               </span>
               <span style={transcriptText}>{entry.text}</span>
             </div>
@@ -329,12 +330,12 @@ export default function Design2MinimalOrb() {
       {/* ── side labels ────────────────────────────────────────────────────── */}
       <div style={sideLabelRow}>
         <div style={sideLabel}>
-          <span style={{ color: '#00dcff88', fontSize: 10 }}>CALLER</span>
+          <span style={{ color: '#00dcff88', fontSize: 10 }}>{ROLE_LABELS.user}</span>
           <span style={{ color: '#475569', fontSize: 9 }}>Listen</span>
         </div>
         <div style={{ flex: 1 }} />
         <div style={{ ...sideLabel, alignItems: 'flex-end' }}>
-          <span style={{ color: '#c084fc88', fontSize: 10 }}>AGENT</span>
+          <span style={{ color: '#c084fc88', fontSize: 10 }}>{ROLE_LABELS.agent}</span>
           <span style={{ color: '#475569', fontSize: 9 }}>Speak</span>
         </div>
       </div>

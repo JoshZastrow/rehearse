@@ -1,7 +1,7 @@
 """Shared test fakes for the Rehearse test suite.
 
 Provides:
-  _ScriptedCoachBackend  — GPU-free ConversationBackend (lifted from test_call_server_e2e.py)
+  _ScriptedProviderBackend  — GPU-free ConversationBackend (lifted from test_call_server_e2e.py)
   FakeRoomStream         — In-process LiveKit room stream for hermetic tests
   FakeRoom               — Minimal rtc.Room stand-in for agent.serve_session() tests
 """
@@ -30,10 +30,10 @@ class FakeRoom:
         self.disconnected = True
 
 
-class _ScriptedCoachBackend:
-    """Fake ConversationBackend that emits a short scripted coach turn.
+class _ScriptedProviderBackend:
+    """Fake ConversationBackend that emits a short scripted provider turn.
 
-    Publishes a coach transcript line plus several frames of coach audio so
+    Publishes a provider transcript line plus several frames of provider audio so
     AudioRecorder produces a non-trivial audio.wav and a per-role turn WAV.
     Returns from start() immediately so the session drives to completion off
     the caller's audio stream.
@@ -44,13 +44,13 @@ class _ScriptedCoachBackend:
     """
 
     # 20 ms of mono PCM16 @ 16 kHz = 320 samples = 640 bytes.
-    _COACH_FRAME = struct.pack("<320h", *([1200, -1200] * 160))
+    _PROVIDER_FRAME = struct.pack("<320h", *([1200, -1200] * 160))
 
     def __init__(self) -> None:
         self.received_caller_audio: list[bytes] = []
         self._session_id = ""
 
-    async def __aenter__(self) -> _ScriptedCoachBackend:
+    async def __aenter__(self) -> _ScriptedProviderBackend:
         return self
 
     async def __aexit__(self, *_: object) -> None:
@@ -63,8 +63,8 @@ class _ScriptedCoachBackend:
         await bus.publish(  # type: ignore[union-attr]
             TranscriptDelta(
                 session_id=session_id,
-                utterance_id="coach-1",
-                speaker=Speaker.COACH,
+                utterance_id="provider-1",
+                speaker=Speaker.PROVIDER,
                 text="Hello, let's begin your rehearsal.",
                 is_final=True,
                 ts_start=0.0,
@@ -74,8 +74,8 @@ class _ScriptedCoachBackend:
         await bus.publish(  # type: ignore[union-attr]
             ProsodyEvent(
                 session_id=session_id,
-                utterance_id="coach-1",
-                speaker=Speaker.COACH,
+                utterance_id="provider-1",
+                speaker=Speaker.PROVIDER,
                 scores=ProsodyScores(arousal=0.4, valence=0.3, emotions={"calm": 0.6}),
                 ts_start=0.0,
                 ts_end=0.4,
@@ -85,16 +85,16 @@ class _ScriptedCoachBackend:
             await bus.publish(  # type: ignore[union-attr]
                 AudioChunk(
                     session_id=session_id,
-                    speaker=Speaker.COACH,
-                    pcm16_16k=self._COACH_FRAME,
+                    speaker=Speaker.PROVIDER,
+                    pcm16_16k=self._PROVIDER_FRAME,
                     ts=0.0,
                 )
             )
         await bus.publish(  # type: ignore[union-attr]
             TranscriptDelta(
                 session_id=session_id,
-                utterance_id="user-1",
-                speaker=Speaker.USER,
+                utterance_id="caller-1",
+                speaker=Speaker.CALLER,
                 text="Okay, I'm ready.",
                 is_final=True,
                 ts_start=0.5,
@@ -118,7 +118,7 @@ class _ScriptedCoachBackend:
         return None
 
 
-class LocalTtsProviderBackend(_ScriptedCoachBackend):
+class LocalTtsProviderBackend(_ScriptedProviderBackend):
     """Scripted provider backend whose audio is synthesized locally with Pocket TTS.
 
     Same deterministic transcript/prosody turns as the scripted base backend, but
