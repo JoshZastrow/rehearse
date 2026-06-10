@@ -1,8 +1,8 @@
 """Test-only LiveKit agent runner for the browser-driven hermetic e2e.
 
 Joins the same LiveKit room the browser joins, but instead of the real Modal
-provider it uses ``LocalTtsCoachBackend`` (scripted turns + Pocket-TTS coach
-audio). Writes session artifacts to ``SESSION_ROOT`` and prints machine-readable
+provider it uses ``LocalTtsProviderBackend`` (scripted turns + Pocket-TTS
+provider audio). Writes session artifacts to ``SESSION_ROOT`` and prints machine-readable
 markers so the Playwright test can locate the session folder and sequence the
 call:
 
@@ -35,7 +35,7 @@ sys.path.insert(0, str(_REPO_ROOT))
 
 from rehearse.session.livekit_session import write_session_manifest  # noqa: E402
 from rehearse.storage import LocalFilesystemStore  # noqa: E402
-from tests._fakes import LocalTtsCoachBackend  # noqa: E402
+from tests._fakes import LocalTtsProviderBackend  # noqa: E402
 
 log = logging.getLogger("e2e.runner")
 
@@ -105,7 +105,7 @@ async def run() -> None:
     _emit("AGENT_READY")
 
     serve_session = _load_serve_session()
-    backend = LocalTtsCoachBackend()
+    backend = LocalTtsProviderBackend()
     await serve_session(room, stream, backend, store, session_id, participant_wait_s=20.0)
 
     _emit("AGENT_DONE")

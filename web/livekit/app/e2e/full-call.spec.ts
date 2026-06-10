@@ -98,9 +98,10 @@ test('@full browser call writes session artifacts to disk', async ({ page }) => 
     await page.getByRole('button', { name: 'Start call' }).click()
     await expect(page.getByText('Session Active').first()).toBeVisible({ timeout: 30_000 })
 
-    // 3. The Pocket-TTS coach response surfaces in the UI transcript.
-    const coachEntry = page.locator('[data-testid="transcript-entry"][data-speaker="agent"]')
-    await expect(coachEntry.first()).toBeVisible({ timeout: 60_000 })
+    // 3. The Pocket-TTS provider response surfaces in the UI transcript.
+    //    (DataChannel maps the provider speaker to "agent" for the web client.)
+    const providerEntry = page.locator('[data-testid="transcript-entry"][data-speaker="agent"]')
+    await expect(providerEntry.first()).toBeVisible({ timeout: 60_000 })
 
     // 4. End the call; UI returns to idle.
     await page.getByRole('button', { name: 'End call' }).click()
@@ -119,15 +120,17 @@ test('@full browser call writes session artifacts to disk', async ({ page }) => 
 
     const transcript = join(sessionDir, 'transcript.jsonl')
     expect(existsSync(transcript)).toBeTruthy()
+    // provider/caller serialize to the canonical "coach"/"user" on disk
+    // (see rehearse.types.Speaker).
     const speakers = jsonlSpeakers(transcript)
-    expect(speakers.has('coach')).toBeTruthy()
-    expect(speakers.has('user')).toBeTruthy()
+    expect(speakers.has('coach')).toBeTruthy() // provider
+    expect(speakers.has('user')).toBeTruthy() // caller
 
     expect(existsSync(join(sessionDir, 'prosody.jsonl'))).toBeTruthy()
 
     expect(wavDataBytes(join(sessionDir, 'audio.wav'))).toBeGreaterThan(0)
-    expect(wavDataBytes(join(sessionDir, 'audio', 'coach', 'turn_0.wav'))).toBeGreaterThan(0)
-    expect(wavDataBytes(join(sessionDir, 'audio', 'user', 'turn_0.wav'))).toBeGreaterThan(0)
+    expect(wavDataBytes(join(sessionDir, 'audio', 'coach', 'turn_0.wav'))).toBeGreaterThan(0) // provider
+    expect(wavDataBytes(join(sessionDir, 'audio', 'user', 'turn_0.wav'))).toBeGreaterThan(0) // caller
 
     // 7. Print the kept session dir for inspection; do not delete it.
     console.log(`\n✓ Session artifacts kept for inspection:\n  ${sessionDir}\n`)

@@ -118,20 +118,24 @@ class _ScriptedCoachBackend:
         return None
 
 
-class LocalTtsCoachBackend(_ScriptedCoachBackend):
-    """Scripted coach backend whose audio is synthesized locally with Pocket TTS.
+class LocalTtsProviderBackend(_ScriptedCoachBackend):
+    """Scripted provider backend whose audio is synthesized locally with Pocket TTS.
 
-    Same deterministic transcript/prosody turns as ``_ScriptedCoachBackend``, but
-    the coach audio is real speech generated on CPU by Pocket TTS instead of a
+    Same deterministic transcript/prosody turns as the scripted base backend, but
+    the provider audio is real speech generated on CPU by Pocket TTS instead of a
     canned square wave. Used by the browser-driven hermetic e2e
-    (tests/e2e/runner.py) so the artifacts contain audible coach speech an
+    (tests/e2e/runner.py) so the artifacts contain audible provider speech an
     engineer can play back.
 
     Pocket TTS (`load_model`, `generate_audio`) runs in a worker thread so the
     asyncio event loop is never blocked. The model + voice load once per instance.
+
+    Note: ``Speaker.PROVIDER``/``Speaker.CALLER`` are the current vocabulary; they
+    serialize to the canonical ``"coach"``/``"user"`` (see rehearse.types.Speaker),
+    so on-disk artifacts still land under ``audio/coach`` etc.
     """
 
-    _COACH_TEXT = (
+    _PROVIDER_TEXT = (
         "Hello, let's begin your rehearsal. "
         "Take a breath and tell me what's on your mind."
     )
@@ -154,7 +158,7 @@ class LocalTtsCoachBackend(_ScriptedCoachBackend):
             self._model = TTSModel.load_model()
             self._voice_state = self._model.get_state_for_audio_prompt(self._VOICE)
 
-        audio = self._model.generate_audio(self._voice_state, self._COACH_TEXT)
+        audio = self._model.generate_audio(self._voice_state, self._PROVIDER_TEXT)
         samples = audio.numpy() if hasattr(audio, "numpy") else np.asarray(audio)
         samples = np.asarray(samples, dtype=np.float32).reshape(-1)
 
@@ -179,36 +183,36 @@ class LocalTtsCoachBackend(_ScriptedCoachBackend):
         self._session_id = session_id
 
         # Synthesize before the burst (model load + generate happen off-loop).
-        coach_frames = await asyncio.to_thread(self._synth_frames)
+        provider_frames = await asyncio.to_thread(self._synth_frames)
 
         await asyncio.sleep(0.2)  # let writers subscribe before burst
 
         await bus.publish(  # type: ignore[union-attr]
             TranscriptDelta(
                 session_id=session_id,
-                utterance_id="coach-1",
-                speaker=Speaker.COACH,
-                text=self._COACH_TEXT,
+                utterance_id="provider-1",
+                speaker=Speaker.PROVIDER,
+                text=self._PROVIDER_TEXT,
                 is_final=True,
                 ts_start=0.0,
-                ts_end=float(len(coach_frames) * 0.02),
+                ts_end=float(len(provider_frames) * 0.02),
             )
         )
         await bus.publish(  # type: ignore[union-attr]
             ProsodyEvent(
                 session_id=session_id,
-                utterance_id="coach-1",
-                speaker=Speaker.COACH,
+                utterance_id="provider-1",
+                speaker=Speaker.PROVIDER,
                 scores=ProsodyScores(arousal=0.4, valence=0.3, emotions={"calm": 0.6}),
                 ts_start=0.0,
-                ts_end=float(len(coach_frames) * 0.02),
+                ts_end=float(len(provider_frames) * 0.02),
             )
         )
-        for frame in coach_frames:
+        for frame in provider_frames:
             await bus.publish(  # type: ignore[union-attr]
                 AudioChunk(
                     session_id=session_id,
-                    speaker=Speaker.COACH,
+                    speaker=Speaker.PROVIDER,
                     pcm16_16k=frame,
                     ts=0.0,
                 )
@@ -216,8 +220,8 @@ class LocalTtsCoachBackend(_ScriptedCoachBackend):
         await bus.publish(  # type: ignore[union-attr]
             TranscriptDelta(
                 session_id=session_id,
-                utterance_id="user-1",
-                speaker=Speaker.USER,
+                utterance_id="caller-1",
+                speaker=Speaker.CALLER,
                 text="Okay, I'm ready.",
                 is_final=True,
                 ts_start=0.5,
