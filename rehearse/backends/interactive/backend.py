@@ -54,7 +54,7 @@ class InteractiveBackend:
         hf_repo: str,
         device: str,
         asr_model: str = "base",
-        model_type: str = "moshi",
+        model_type: str = "personaplex",
         text_prompt: str = "",
         voice_prompt: str = "",
     ) -> None:

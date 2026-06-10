@@ -241,9 +241,13 @@ def _minimal_config(overrides: dict[str, str]) -> RuntimeConfig:
     cfg.pipeline_clm_model = os.environ.get("PIPELINE_CLM_MODEL") or os.environ.get("LITELLM_MODEL", "coach")
     cfg.clm_url = os.environ.get("CLM_URL", "http://localhost:8000")
     cfg.interactive_checkpoint_path = os.environ.get("INTERACTIVE_CHECKPOINT_PATH", "")
-    cfg.interactive_model_repo = os.environ.get("INTERACTIVE_MODEL_REPO", "kyutai/moshiko-pytorch-bf16")
+    cfg.interactive_model_type = os.environ.get("INTERACTIVE_MODEL_TYPE", "personaplex")
+    cfg.interactive_model_repo = os.environ.get("INTERACTIVE_MODEL_REPO") or (
+        "nvidia/personaplex-7b-v1"
+        if cfg.interactive_model_type == "personaplex"
+        else "kyutai/moshiko-pytorch-bf16"
+    )
     cfg.interactive_device = os.environ.get("INTERACTIVE_DEVICE", "cuda")
     cfg.interactive_asr_model = os.environ.get("INTERACTIVE_ASR_MODEL", "base")
-    cfg.interactive_model_type = os.environ.get("INTERACTIVE_MODEL_TYPE", "moshi")
     cfg.interactive_provider_endpoint = os.environ.get("INTERACTIVE_PROVIDER_ENDPOINT", "")
     return cfg

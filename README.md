@@ -167,7 +167,7 @@ rehearse/               # Core Python package
 │   ├── base.py         # Backend abstract interface
 │   ├── transport.py    # InMemoryTwoWayChannel — bidirectional frame exchange
 │   ├── prosody.py      # Prosody feature extraction
-│   └── interactive/    # Local Moshi/Mimi real-time inference
+│   └── interactive/    # Local PersonaPlex/Moshi real-time inference
 │       ├── backend.py  # Thread-executor inference loop bridged to asyncio
 │       ├── loader.py   # Model weight loading
 │       └── asr.py      # ASR interface
@@ -214,7 +214,7 @@ train/                  # ML training pipeline (separate package)
     └── dataset.py      # Training manifest builder (JSONL)
 
 infra/                  # Modal-deployed cloud services
-├── interactive.py      # Moshi voice codec + LM inference (aiohttp WebSocket, A10G GPU)
+├── interactive.py      # PersonaPlex (default) + Moshi full-duplex inference (aiohttp WebSocket, L40S/A10G GPU)
 ├── judge.py            # LiteLLM proxy for distributed eval scoring
 └── litellm_config.yaml # Model alias routing config
 

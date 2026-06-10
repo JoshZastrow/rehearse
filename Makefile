@@ -60,15 +60,15 @@ deploy-judge: ## deploy LLM judge to inference backend (idempotent; safe to re-r
 smoke-judge: ## run the smoke test against the deployed judge
 	modal run infra/judge.py
 
-deploy-interactive: ## deploy interactive inference servers (Moshi A10G + PersonaPlex L40S) to Modal
+deploy-interactive: ## deploy interactive inference servers (PersonaPlex L40S + Moshi A10G) to Modal
 	modal deploy infra/interactive.py
 	@echo ""
-	@echo "Deployed. Add to .env (moshi):"
-	@echo "  INTERACTIVE_PROVIDER_ENDPOINT=wss://<workspace>--rehearse-interactive-providerserver-serve.modal.run/ws"
-	@echo "  INTERACTIVE_CALLER_ENDPOINT=wss://<workspace>--rehearse-interactive-callerserver-serve.modal.run/ws"
-	@echo "or (personaplex; set INTERACTIVE_MODEL_TYPE=personaplex):"
+	@echo "Deployed. Add to .env (personaplex, the default):"
 	@echo "  INTERACTIVE_PROVIDER_ENDPOINT=wss://<workspace>--rehearse-interactive-personaplexprovider-serve.modal.run/ws"
 	@echo "  INTERACTIVE_CALLER_ENDPOINT=wss://<workspace>--rehearse-interactive-personaplexcaller-serve.modal.run/ws"
+	@echo "or (moshi; set INTERACTIVE_MODEL_TYPE=moshi):"
+	@echo "  INTERACTIVE_PROVIDER_ENDPOINT=wss://<workspace>--rehearse-interactive-providerserver-serve.modal.run/ws"
+	@echo "  INTERACTIVE_CALLER_ENDPOINT=wss://<workspace>--rehearse-interactive-callerserver-serve.modal.run/ws"
 	@echo ""
 	@echo "Or get the URL automatically:"
 	@echo "  modal app url rehearse-interactive"

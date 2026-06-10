@@ -70,6 +70,7 @@ async def test_interactive_backend_produces_audio_and_transcript():
         hf_repo="kyutai/moshiko-pytorch-bf16",
         device=device,
         asr_model="tiny",
+        model_type="moshi",  # local weights are upstream moshi (default is personaplex)
     )
     bus = FrameBus(session_id="e2e-test")
 
@@ -132,6 +133,7 @@ async def test_interactive_backend_closes_cleanly():
         hf_repo="kyutai/moshiko-pytorch-bf16",
         device=device,
         asr_model="tiny",
+        model_type="moshi",  # local weights are upstream moshi (default is personaplex)
     )
     bus = FrameBus(session_id="e2e-close-test")
 

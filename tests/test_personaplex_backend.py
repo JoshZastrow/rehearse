@@ -260,9 +260,42 @@ def test_infra_defines_personaplex_server_classes():
         assert "HF_TOKEN" in decorator_src, f"{cls_name} missing HF_TOKEN secret"
 
 
-def test_infra_moshi_servers_keep_moshi_model_type():
+def test_infra_default_model_type_is_personaplex_and_moshi_servers_pin_moshi():
     mod = _infra_module()
-    assert mod._InteractiveServerBase.model_type == "moshi"
+    assert mod._InteractiveServerBase.model_type == "personaplex"
+
+    # The moshi classes ship an image with upstream moshi (no fork), so they
+    # must pin model_type explicitly now that the base defaults to personaplex.
+    tree = ast.parse(_INFRA_PY.read_text())
+    for cls_name in ("ProviderServer", "CallerServer"):
+        node = _class_def(tree, cls_name)
+        attrs = {
+            t.targets[0].id: getattr(t.value, "value", None)
+            for t in node.body
+            if isinstance(t, ast.Assign) and isinstance(t.targets[0], ast.Name)
+        }
+        assert attrs.get("model_type") == "moshi", cls_name
+
+
+def test_config_defaults_to_personaplex(monkeypatch):
+    import dataclasses
+
+    from rehearse.config import RuntimeConfig
+    from rehearse.eval.environments.live_audio_sandbox import _minimal_config
+
+    fields = {f.name: f.default for f in dataclasses.fields(RuntimeConfig)}
+    assert fields["interactive_model_type"] == "personaplex"
+    assert fields["interactive_model_repo"] == "nvidia/personaplex-7b-v1"
+
+    monkeypatch.delenv("INTERACTIVE_MODEL_TYPE", raising=False)
+    monkeypatch.delenv("INTERACTIVE_MODEL_REPO", raising=False)
+    cfg = _minimal_config({})
+    assert cfg.interactive_model_type == "personaplex"
+    assert cfg.interactive_model_repo == "nvidia/personaplex-7b-v1"
+
+    # The repo default follows the model family.
+    monkeypatch.setenv("INTERACTIVE_MODEL_TYPE", "moshi")
+    assert _minimal_config({}).interactive_model_repo == "kyutai/moshiko-pytorch-bf16"
 
 
 def test_infra_personaplex_image_pins_fork_compatible_torch():
@@ -354,9 +387,9 @@ async def test_live_audio_sandbox_provenance_records_interactive_model(
     from rehearse.eval.environments.live_audio_sandbox import LiveAudioSandboxEnvironment
     from tests.test_live_audio_sandbox_rollout import (
         _EndingBackend,
+        _example,
         _StubLLM,
         _StubTTS,
-        _example,
     )
 
     monkeypatch.setenv("BACKEND_TYPE", "interactive")

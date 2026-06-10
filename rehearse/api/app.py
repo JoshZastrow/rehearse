@@ -42,10 +42,15 @@ async def _validate_anthropic(config: RuntimeConfig) -> None:
 async def _load_interactive_models(config: RuntimeConfig) -> None:
     if config.interactive_provider_endpoint:
         return  # models run on Modal; nothing to load locally
-    from rehearse.backends.interactive.loader import load_models
+    if config.interactive_model_type == "personaplex":
+        from rehearse.backends.interactive.personaplex_loader import (
+            load_personaplex_models as _load,
+        )
+    else:
+        from rehearse.backends.interactive.loader import load_models as _load
     await asyncio.get_running_loop().run_in_executor(
         None,
-        lambda: load_models(
+        lambda: _load(
             config.interactive_checkpoint_path,
             config.interactive_model_repo,
             config.interactive_device,

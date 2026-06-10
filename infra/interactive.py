@@ -4,9 +4,9 @@ Serves a WebSocket endpoint that accepts PCM16 16kHz audio from a caller and
 streams back coach audio + transcript/prosody events in real time. Two model
 types share the wire protocol:
 
-  moshi        kyutai/moshiko-pytorch-bf16 (ProviderServer / CallerServer)
   personaplex  nvidia/personaplex-7b-v1 — Moshi finetune with voice + role
-               conditioning (PersonaplexProvider / PersonaplexCaller)
+               conditioning (PersonaplexProvider / PersonaplexCaller). Default.
+  moshi        kyutai/moshiko-pytorch-bf16 (ProviderServer / CallerServer)
 
 Deploy:
     modal deploy infra/interactive.py
@@ -167,8 +167,8 @@ class _InteractiveServerBase:
     speaker_role: str = "provider"
     """'provider' or 'caller'. Controls transcript labels and ASR target."""
 
-    model_type: str = "moshi"
-    """'moshi' or 'personaplex'. Selects the model loader and persona conditioning."""
+    model_type: str = "personaplex"
+    """'personaplex' (default) or 'moshi'. Selects the model loader and persona conditioning."""
 
     @property
     def _other_role(self) -> str:
@@ -613,9 +613,10 @@ class _InteractiveServerBase:
     volumes={"/root/.cache/huggingface": hf_cache_vol, _SESSIONS_MOUNT: sessions_vol},
 )
 class ProviderServer(_InteractiveServerBase):
-    """Provider (coach) model endpoint. Loads from HuggingFace by default."""
+    """Moshi provider (coach) model endpoint. Loads from HuggingFace by default."""
     checkpoint_path = ""
     speaker_role = "provider"
+    model_type = "moshi"  # this image carries upstream moshi, not the PersonaPlex fork
 
     @modal.web_server(_AIOHTTP_PORT)
     def serve(self):
@@ -630,9 +631,10 @@ class ProviderServer(_InteractiveServerBase):
     volumes={"/root/.cache/huggingface": hf_cache_vol, _SESSIONS_MOUNT: sessions_vol},
 )
 class CallerServer(_InteractiveServerBase):
-    """Caller model endpoint. Set checkpoint_path to a Volume path for fine-tuned weights."""
+    """Moshi caller model endpoint. Set checkpoint_path to a Volume path for fine-tuned weights."""
     checkpoint_path = ""      # e.g. "/mnt/training/runs/caller-v1"
     speaker_role = "caller"
+    model_type = "moshi"  # this image carries upstream moshi, not the PersonaPlex fork
 
     @modal.web_server(_AIOHTTP_PORT)
     def serve(self):
