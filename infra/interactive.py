@@ -518,7 +518,10 @@ class _InteractiveServerBase:
                                 t_turn_start = now
                                 t_first_audio_sent = None
                                 t_first_speech_token = None
-                                user_text = asr.transcribe_and_reset()
+                                # Off the event loop: long turns make whisper
+                                # transcription take >20s, which would block
+                                # keepalive pongs and drop the connection.
+                                user_text = await asyncio.to_thread(asr.transcribe_and_reset)
                                 if user_text:
                                     user_utt_id = str(uuid.uuid4())
                                     try:
@@ -557,7 +560,7 @@ class _InteractiveServerBase:
                 }))
                 self._log(f"ws: session={session_id} transcript[final]={text!r}")
 
-            user_text = asr.transcribe_and_reset()
+            user_text = await asyncio.to_thread(asr.transcribe_and_reset)
             if user_text:
                 user_utt_id = str(uuid.uuid4())
                 try:

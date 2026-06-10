@@ -54,6 +54,7 @@ class ModalInteractiveBackend:
         self._recv_task: asyncio.Task | None = None
         self._session_id = ""
         self._bus: FrameBus | None = None
+        self._hangup_logged = False
 
     async def __aenter__(self) -> ModalInteractiveBackend:
         return self
@@ -95,21 +96,37 @@ class ModalInteractiveBackend:
         self._recv_task = asyncio.create_task(self._recv_loop(), name=f"modal-recv-{session_id}")
         log.info("modal_interactive_backend.started", session_id=session_id, endpoint=self._endpoint)
 
+    async def _send(self, payload: bytes | str) -> None:
+        """Send if connected; drop silently after the server hangs up.
+
+        The server ends a session on its idle timeout and closes the socket;
+        the recv loop publishes EndOfCall for that. Audio already in flight
+        must not crash the session pump — hangup mid-send is normal telephony.
+        """
+        if not self._ws:
+            return
+        try:
+            await self._ws.send(payload)
+        except websockets.exceptions.ConnectionClosed:
+            if not self._hangup_logged:
+                self._hangup_logged = True
+                log.info(
+                    "modal_interactive_backend.send_after_close_dropped",
+                    session_id=self._session_id,
+                )
+
     async def send_caller_audio(self, pcm16_16k: bytes) -> None:
-        if self._ws:
-            await self._ws.send(pcm16_16k)
+        await self._send(pcm16_16k)
 
     async def say(self, request: object) -> None:
         """Speaker protocol: delegates to inject_speech."""
         await self.inject_speech(getattr(request, "text", str(request)))
 
     async def inject_speech(self, text: str) -> None:
-        if self._ws:
-            await self._ws.send(json.dumps({"type": "inject", "text": text}))
+        await self._send(json.dumps({"type": "inject", "text": text}))
 
     async def swap_persona(self, persona: PersonaSpec) -> None:
-        if self._ws:
-            await self._ws.send(json.dumps({"type": "swap_persona", **persona}))
+        await self._send(json.dumps({"type": "swap_persona", **persona}))
 
     async def close(self) -> None:
         if self._recv_task and not self._recv_task.done():
