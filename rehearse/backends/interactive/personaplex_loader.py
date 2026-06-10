@@ -97,7 +97,10 @@ def ensure_voice_prompt_dir(hf_repo: str) -> str:
     if not voices_dir.exists():
         log.info("personaplex_loader.extracting_voices", tgz=str(voices_tgz))
         with tarfile.open(voices_tgz, "r:gz") as tar:
-            tar.extractall(path=voices_tgz.parent)
+            # The archive is external (HF repo, env-selectable) — filter="data"
+            # rejects path traversal (../ or absolute members), links escaping
+            # the root, and device files instead of writing them to disk.
+            tar.extractall(path=voices_tgz.parent, filter="data")
     if not voices_dir.exists():
         raise RuntimeError("voices.tgz did not contain a 'voices/' directory")
     return str(voices_dir)

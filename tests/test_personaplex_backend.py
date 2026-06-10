@@ -62,6 +62,51 @@ def test_resolve_voice_prompt_raises_when_dir_empty(tmp_path: Path):
         resolve_voice_prompt(str(tmp_path), "NATF0.pt")
 
 
+def _make_tgz(path: Path, members: dict[str, bytes]) -> None:
+    import io
+    import tarfile
+
+    with tarfile.open(path, "w:gz") as tar:
+        for name, data in members.items():
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+
+
+def _stub_hub_download(monkeypatch, tgz: Path) -> None:
+    fake_hub = types.ModuleType("huggingface_hub")
+    fake_hub.hf_hub_download = lambda repo, filename: str(tgz)
+    monkeypatch.setitem(sys.modules, "huggingface_hub", fake_hub)
+
+
+def test_ensure_voice_prompt_dir_extracts_voices(monkeypatch, tmp_path: Path):
+    from rehearse.backends.interactive.personaplex_loader import ensure_voice_prompt_dir
+
+    tgz = tmp_path / "voices.tgz"
+    _make_tgz(tgz, {"voices/NATF0.pt": b"x"})
+    _stub_hub_download(monkeypatch, tgz)
+
+    out = Path(ensure_voice_prompt_dir("nvidia/personaplex-7b-v1"))
+    assert out.name == "voices"
+    assert (out / "NATF0.pt").read_bytes() == b"x"
+
+
+def test_ensure_voice_prompt_dir_rejects_tar_path_traversal(monkeypatch, tmp_path: Path):
+    """voices.tgz is an external archive — members escaping the extraction
+    root (../ or absolute paths) must be rejected, not written to disk."""
+    import tarfile
+
+    from rehearse.backends.interactive.personaplex_loader import ensure_voice_prompt_dir
+
+    tgz = tmp_path / "voices.tgz"
+    _make_tgz(tgz, {"../evil.txt": b"pwn", "voices/NATF0.pt": b"x"})
+    _stub_hub_download(monkeypatch, tgz)
+
+    with pytest.raises(tarfile.TarError):
+        ensure_voice_prompt_dir("nvidia/personaplex-7b-v1")
+    assert not (tmp_path.parent / "evil.txt").exists()
+
+
 # ---------------------------------------------------------------------------
 # load_personaplex_models — fork detection + loading
 # ---------------------------------------------------------------------------
