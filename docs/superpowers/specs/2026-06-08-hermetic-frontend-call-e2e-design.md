@@ -94,11 +94,11 @@ canned PCM it synthesizes the provider line with Pocket TTS:
 - `generate_audio(voice_state, "Hello, let's begin your rehearsal.")` → 1-D PCM torch tensor at
   `tts_model.sample_rate`.
 - Resample to 16 kHz, convert to PCM16 bytes, slice into 20 ms (640-byte) `AudioChunk` frames,
-  publish to the bus (mirrors `_ScriptedCoachBackend`'s frame cadence so `AudioRecorder` produces
+  publish to the bus (mirrors `_ScriptedProviderBackend`'s frame cadence so `AudioRecorder` produces
   a non-trivial `audio.wav` + per-role turn WAVs).
 - All Pocket TTS calls (`load_model`, `generate_audio`) run via `asyncio.to_thread` so the event
   loop is never blocked.
-- Keeps `_ScriptedCoachBackend`'s 0.2 s pre-publish sleep so the artifact writers subscribe first.
+- Keeps `_ScriptedProviderBackend`'s 0.2 s pre-publish sleep so the artifact writers subscribe first.
 
 Naming: `LocalTtsProviderBackend` describes the function (local synthesis), keeping the Pocket TTS
 library an implementation detail — consistent with the no-vendor-names-in-files convention.
@@ -152,7 +152,8 @@ Flow:
   owns its lifecycle and points it at the persisted `SESSION_ROOT`.
 - Gating: a separate `test:e2e:full` npm script and a Playwright tag/grep so this heavy test is
   opt-in. Default `test:e2e` stays fast.
-- Add `pocket-tts` as a dependency (`uv add pocket-tts`) in the Python project.
+- `pocket-tts` is declared in a dedicated `e2e` dependency group; the runner is launched with
+  `uv run --group livekit --group e2e`, so deps auto-install on first run (no manual step).
 - Gitignore `tests/e2e/sessions/` (keep a `.gitkeep`) — runs accumulate session folders
   there for inspection and must not be committed. Each run is a unique `{session_id}` subfolder
   (uuid), so runs don't clobber each other; engineers can clear the dir manually.

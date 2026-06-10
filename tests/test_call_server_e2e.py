@@ -35,14 +35,13 @@ import websockets
 
 from rehearse.audio.mulaw import encode_pcm16
 from rehearse.config import RuntimeConfig
-from rehearse.frames import AudioChunk, EndOfCall, ProsodyEvent, TranscriptDelta
+from rehearse.frames import AudioChunk, ProsodyEvent, TranscriptDelta
 from rehearse.types import ProsodyScores, Speaker
-
 
 # --- A scripted, GPU-free coach backend -------------------------------------
 
 
-class _ScriptedCoachBackend:
+class _ScriptedProviderBackend:
     """Fake ConversationBackend that emits a short scripted coach turn.
 
     Publishes a coach transcript line plus several frames of coach audio so the
@@ -58,7 +57,7 @@ class _ScriptedCoachBackend:
         self.received_caller_audio: list[bytes] = []
         self._session_id = ""
 
-    async def __aenter__(self) -> "_ScriptedCoachBackend":
+    async def __aenter__(self) -> _ScriptedProviderBackend:
         return self
 
     async def __aexit__(self, *_: object) -> None:
@@ -207,7 +206,7 @@ async def test_full_call_lifecycle_on_real_server(
     from rehearse.api import app as app_module
     from rehearse.api import telephony as telephony_module
 
-    backend = _ScriptedCoachBackend()
+    backend = _ScriptedProviderBackend()
 
     class _FakeTwilio:
         async def place_call(self, *a, **k) -> str:

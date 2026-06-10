@@ -3,7 +3,7 @@
 Mirrors test_call_server_e2e.py with three test tiers:
 
   Tier A  (default suite, hermetic):
-    run_livekit_session() with FakeRoomStream + _ScriptedCoachBackend.
+    run_livekit_session() with FakeRoomStream + _ScriptedProviderBackend.
     Asserts the same 7-condition lifecycle as the Twilio e2e test.
     No LiveKit server, no Modal, no browser required.
 
@@ -42,7 +42,7 @@ from rehearse.audio.livekit_stream import FakeRoomStream
 from rehearse.session.livekit_session import run_livekit_session, write_session_manifest
 from rehearse.storage import LocalFilesystemStore
 from rehearse.types import Session
-from tests._fakes import FakeRoom, _ScriptedCoachBackend
+from tests._fakes import FakeRoom, _ScriptedProviderBackend
 
 # ---------------------------------------------------------------------------
 # Helpers shared across tiers
@@ -109,7 +109,7 @@ def _caller_frames(n: int = 15) -> asyncio.Queue:
 # ---------------------------------------------------------------------------
 
 async def test_livekit_hermetic_call_lifecycle(tmp_path: Path) -> None:
-    """Full lifecycle with FakeRoomStream + _ScriptedCoachBackend — no external deps.
+    """Full lifecycle with FakeRoomStream + _ScriptedProviderBackend — no external deps.
 
     Asserts parity with test_call_server_e2e.py:
       1. Session minted and session.json written.
@@ -129,7 +129,7 @@ async def test_livekit_hermetic_call_lifecycle(tmp_path: Path) -> None:
     session_id = _prep_session(store)
 
     fake_stream = FakeRoomStream(_caller_frames())
-    backend = _ScriptedCoachBackend()
+    backend = _ScriptedProviderBackend()
 
     # ---- 1 + 2. Session minted; run_livekit_session() completes. -----------
     assert (tmp_path / session_id / "session.json").exists()
@@ -205,7 +205,7 @@ async def test_livekit_agent_serve_session_hermetic(tmp_path: Path) -> None:
     session_id = _prep_session(store)
     room = FakeRoom(participants=1)
     stream = FakeRoomStream(_caller_frames())
-    backend = _ScriptedCoachBackend()
+    backend = _ScriptedProviderBackend()
 
     await agent_mod.serve_session(
         room, stream, backend, store, session_id, participant_wait_s=1.0
@@ -323,7 +323,7 @@ async def test_livekit_agent_session_via_real_room(tmp_path: Path) -> None:
     )
 
     # Run the agent session in the background.
-    backend = _ScriptedCoachBackend()
+    backend = _ScriptedProviderBackend()
     agent_task = asyncio.create_task(
         run_livekit_session(agent_stream, session_id, backend, store=store)
     )
