@@ -66,7 +66,8 @@ def test_find_run_for_resume(tmp_path):
     ledger.append(_rec("r1", kind="ablation", excluded=("a", "b"), loss=2.5))
     hit = ledger.find_run(manifest_hash="m1", excluded_ids=["b", "a"], seed=0, eval_set_version=1)
     assert hit is not None and hit.run_id == "r1"
-    assert ledger.find_run(manifest_hash="m1", excluded_ids=["c"], seed=0, eval_set_version=1) is None
+    miss = ledger.find_run(manifest_hash="m1", excluded_ids=["c"], seed=0, eval_set_version=1)
+    assert miss is None
 
 
 def test_flagged_cohort_marks_cooldown(tmp_path):

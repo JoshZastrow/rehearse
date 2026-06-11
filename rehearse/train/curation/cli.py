@@ -106,9 +106,7 @@ def _build_live_pieces(args: argparse.Namespace) -> dict[str, Any]:
         "criteria_dir": args.criteria_dir,
         "out": args.out,
         "ledger": RunLedger(args.ledger),
-        "trainer_factory": lambda train_ids: ModalTrainer(
-            manifest_path=args.out, train_ids=train_ids
-        ),
+        "trainer_factory": lambda train_ids: ModalTrainer(manifest_path=args.out),
         "volume_client": TrainingVolumeClient(),
         "max_steps": args.max_steps,
         "max_runs": args.max_runs,

@@ -1,4 +1,3 @@
-import pytest
 from rehearse.train.modal import _rewrite_config_paths, _to_volume_path
 
 
@@ -6,6 +5,16 @@ def test_rewrite_sets_train_data():
     cfg = {"data": {"train_data": "/local/sessions.jsonl", "eval_data": ""}, "run_dir": "runs/exp1"}
     result = _rewrite_config_paths(cfg)
     assert result["data"]["train_data"] == "/data/data/sessions.jsonl"
+
+
+def test_rewrite_passes_through_volume_train_data():
+    """Ablation runs supply their own /data/... manifest; rewrite must not clobber it."""
+    cfg = {
+        "data": {"train_data": "/data/data/ablation/run-1.jsonl", "eval_data": ""},
+        "run_dir": "runs/exp1",
+    }
+    result = _rewrite_config_paths(cfg)
+    assert result["data"]["train_data"] == "/data/data/ablation/run-1.jsonl"
 
 
 def test_rewrite_sets_run_dir():

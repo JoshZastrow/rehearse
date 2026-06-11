@@ -46,7 +46,9 @@ def _rewrite_config_paths(config_dict: dict) -> dict:
     out = dict(config_dict)
     run_name = Path(out.get("run_dir", "run")).name
     out["data"] = dict(out.get("data", {}))
-    out["data"]["train_data"] = "/data/data/sessions.jsonl"
+    # Paths already on the Volume (e.g. ablation manifests) pass through untouched.
+    if not str(out["data"].get("train_data", "")).startswith("/data/"):
+        out["data"]["train_data"] = "/data/data/sessions.jsonl"
     out["run_dir"] = f"/data/runs/{run_name}"
     return out
 
