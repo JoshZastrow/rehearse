@@ -112,3 +112,25 @@ async def test_annotate_session_async_skips_missing_audio(tmp_path: Path) -> Non
     with patch("train.pipeline.annotate.modal.Cls.from_name") as mock_from_name:
         await annotate_session_async(SESSION_ID, audio_path)
         mock_from_name.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_annotate_session_async_skips_when_app_not_deployed(audio_dir: Path) -> None:
+    """When the Modal app is not deployed, skip gracefully — no traceback, no output."""
+    import modal
+
+    audio_path = audio_dir / "audio.wav"
+    annotator = MagicMock()
+    annotator.run.spawn.aio = AsyncMock(
+        side_effect=modal.exception.NotFoundError("App 'rehearse-annotate' not found")
+    )
+    remote_cls = MagicMock(return_value=annotator)
+
+    with patch(
+        "train.pipeline.annotate.modal.Cls.from_name",
+        return_value=remote_cls,
+    ):
+        # Must not raise — the missing app is handled internally.
+        await annotate_session_async(SESSION_ID, audio_path)
+
+    assert not (audio_dir / "audio.json").exists(), "audio.json should not be written"

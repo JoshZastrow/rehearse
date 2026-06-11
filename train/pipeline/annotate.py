@@ -527,6 +527,13 @@ async def annotate_session_async(
             pass
         else:
             asyncio.create_task(_prepare_async(session_id, audio_path))
+    except modal.exception.NotFoundError:
+        logger.warning(
+            "annotate_session_async: Modal app 'rehearse-annotate' is not deployed; "
+            "skipping annotation for session %s. Run `make deploy-annotate` "
+            "(modal deploy train/pipeline/annotate.py) to enable it.",
+            session_id,
+        )
     except Exception:
         logger.exception("annotate_session_async: failed for session %s", session_id)
 
