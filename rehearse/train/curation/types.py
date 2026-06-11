@@ -26,4 +26,6 @@ class SessionReview(BaseModel):
     criteria_version: int
     audio_duration: float
     model: str | None = None
+    split: Literal["train", "heldout"] | None = None
+    ablation: dict | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
