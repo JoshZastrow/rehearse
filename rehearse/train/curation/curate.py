@@ -65,6 +65,77 @@ class CurationResult:
     entries: list[dict[str, Any]]
 
 
+def tombstone_sessions(
+    *,
+    sessions_root: Path,
+    out: Path,
+    convictions: list[Any],  # ablation.Conviction; duck-typed to avoid an import cycle
+    volume_client: Any = None,
+) -> None:
+    """Evict convicted sessions: rewrite manifests without them, flip review.json.
+
+    Artifacts stay on the volume (auditable; re-admission is a manifest rewrite).
+    The manifest is rewritten before any review.json flips, so a crash leaves
+    either the old corpus or the complete new one.
+    """
+    convicted = {c.session_id: c for c in convictions}
+    entries = [json.loads(line) for line in out.read_text().splitlines() if line.strip()]
+    kept = [e for e in entries if Path(e["path"]).parent.name not in convicted]
+    with open(out, "w") as fh:
+        for entry in kept:
+            fh.write(json.dumps(entry) + "\n")
+
+    files: list[tuple[str, bytes]] = []
+    if volume_client is not None:
+        remote_entries = [
+            {
+                **e,
+                "path": f"/data/{_VOLUME_SESSIONS_PREFIX}/"
+                f"{Path(e['path']).parent.name}/audio_stereo.wav",
+            }
+            for e in kept
+        ]
+        manifest = ("\n".join(json.dumps(e) for e in remote_entries) + "\n").encode()
+        files.append((_VOLUME_MANIFEST_PATH, manifest))
+
+    for session_id, conviction in convicted.items():
+        session_dir = next(
+            (
+                p.parent
+                for p in sessions_root.rglob("audio_stereo.wav")
+                if p.parent.name == session_id
+            ),
+            None,
+        )
+        if session_dir is None:
+            logger.warning("tombstone: no session dir found for %s", session_id)
+            continue
+        review = SessionReview.model_validate_json((session_dir / "review.json").read_text())
+        review = review.model_copy(
+            update={
+                "decision": "rejected",
+                "turning_point": None,
+                "ablation": conviction.model_dump(),
+                "rationale": (
+                    f"Tombstoned by ablation {conviction.run_ids}: held-out loss delta "
+                    f"{conviction.delta} (noise band {conviction.noise_band}). "
+                    f"Prior rationale: {review.rationale}"
+                ),
+            }
+        )
+        (session_dir / "review.json").write_text(review.model_dump_json(indent=2))
+        files.append(
+            (
+                f"{_VOLUME_SESSIONS_PREFIX}/{session_id}/review.json",
+                review.model_dump_json(indent=2).encode(),
+            )
+        )
+        logger.info("Tombstoned %s (delta %.4f)", session_id, conviction.delta)
+
+    if volume_client is not None and files:
+        volume_client.push(files)
+
+
 def _load_existing_review(session_dir: Path, criteria_version: int) -> SessionReview | None:
     path = session_dir / "review.json"
     if not path.exists():
