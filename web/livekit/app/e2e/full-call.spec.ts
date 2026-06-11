@@ -98,10 +98,21 @@ test('@full browser call writes session artifacts to disk', async ({ page }) => 
     await page.getByRole('button', { name: 'Start call' }).click()
     await expect(page.getByText('Session Active').first()).toBeVisible({ timeout: 30_000 })
 
-    // 3. The Pocket-TTS provider response surfaces in the UI transcript.
-    //    (DataChannel maps the provider speaker to "agent" for the web client.)
+    // 3. The Pocket-TTS provider response surfaces as RSVP word chunks at
+    //    center stage. (DataChannel maps the provider speaker to "agent".)
     const providerEntry = page.locator('[data-testid="transcript-entry"][data-speaker="agent"]')
     await expect(providerEntry.first()).toBeVisible({ timeout: 60_000 })
+
+    // RSVP reader contract: large speed-reader font, and caller speech is
+    // never rendered — only the guide/agent transcript reaches the screen.
+    const fontSize = await providerEntry
+      .first()
+      .evaluate((el) => parseFloat(getComputedStyle(el).fontSize))
+    expect(fontSize).toBeGreaterThanOrEqual(36)
+    await expect(
+      page.locator('[data-testid="transcript-entry"][data-speaker="user"]'),
+    ).toHaveCount(0)
+    await page.screenshot({ path: 'test-results/rsvp-live.png' })
 
     // 4. End the call; UI returns to idle.
     await page.getByRole('button', { name: 'End call' }).click()
