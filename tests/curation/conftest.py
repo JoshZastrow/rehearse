@@ -21,6 +21,27 @@ class FakeJudgeBackend:
         return self._respond(system, user)
 
 
+class FakeTrainer:
+    """Planted loss model: loss = base + sum(harm of included sessions) + seed jitter."""
+
+    def __init__(self, *, session_ids, harm=None, base=3.0, seed_jitter=None):
+        self.session_ids = list(session_ids)
+        self._harm = harm or {}
+        self._base = base
+        self._jitter = seed_jitter or {}
+        self.calls: list[dict] = []
+
+    def run(self, *, excluded_ids, seed, max_steps, kind):
+        included = [s for s in self.session_ids if s not in excluded_ids]
+        loss = (
+            self._base
+            + sum(self._harm.get(s, 0.0) for s in included)
+            + self._jitter.get(seed, 0.0)
+        )
+        self.calls.append({"excluded": sorted(excluded_ids), "seed": seed, "kind": kind})
+        return loss
+
+
 class FakeVolumeClient:
     """Records pushed (volume_path, bytes) pairs instead of hitting Modal."""
 
