@@ -287,6 +287,7 @@ class _InteractiveServerBase:
         _SILENCE_FLUSH = 10
         _FIRST_FRAME_TIMEOUT = 30.0  # seconds to wait for first audio frame
         _IDLE_TIMEOUT = 10.0         # seconds without audio after stream starts → end session
+        _CALLER_VAD_RMS = 0.01       # incoming-frame RMS above this = caller voice (true-latency anchor)
 
         self._log("ws: connection received, awaiting handshake")
 
@@ -370,6 +371,8 @@ class _InteractiveServerBase:
             t_turn_start = t_start
             t_first_audio_sent: float | None = None
             t_first_speech_token: float | None = None
+            t_caller_last_voice: float | None = None     # last voiced caller frame this turn
+            turn_response_latency_ms: int | None = None  # caller-stop → model-first-speech
             caller_buf = bytearray()
             provider_buf = bytearray()
             token_rows: list[str] = []
@@ -404,6 +407,8 @@ class _InteractiveServerBase:
                 caller_buf += raw
                 self._asr_push_received(asr, raw)
                 pcm16 = np.frombuffer(raw, dtype=np.int16).astype(np.float32)
+                if pcm16.size and np.sqrt(np.mean((pcm16 / 32768.0) ** 2)) >= _CALLER_VAD_RMS:
+                    t_caller_last_voice = _time.monotonic()
                 t_in = torch.from_numpy(pcm16 / 32768.0).float().unsqueeze(0)
                 pcm_24k = F.resample(t_in, _REHEARSE_SR, _MOSHI_SR).squeeze(0).numpy()
                 pcm_buf = np.concatenate([pcm_buf, pcm_24k])
@@ -440,6 +445,10 @@ class _InteractiveServerBase:
                                     self._log(f"ws: session={session_id} token={token_piece!r}")
                                     if not turn_has_speech:
                                         t_first_speech_token = _time.monotonic()
+                                        if t_caller_last_voice is not None:
+                                            turn_response_latency_ms = round(
+                                                (t_first_speech_token - t_caller_last_voice) * 1000
+                                            )
                                         turn_has_speech = True
                                     silence_streak = 0
                             if token_piece is None:
@@ -503,6 +512,7 @@ class _InteractiveServerBase:
                                     "leading_silence_ms": leading_silence * 80,
                                     "time_to_first_audio_ms": round((t_first_audio_sent - t_turn_start) * 1000) if t_first_audio_sent else None,
                                     "time_to_first_speech_ms": round((t_first_speech_token - t_turn_start) * 1000) if t_first_speech_token else None,
+                                    "response_latency_ms": turn_response_latency_ms,
                                     "speech_tokens": len(guide_pieces),
                                     "text": text,
                                 }
@@ -520,6 +530,8 @@ class _InteractiveServerBase:
                                 t_turn_start = now
                                 t_first_audio_sent = None
                                 t_first_speech_token = None
+                                t_caller_last_voice = None
+                                turn_response_latency_ms = None
                                 # Off the event loop: long turns make whisper
                                 # transcription take >20s, which would block
                                 # keepalive pongs and drop the connection.

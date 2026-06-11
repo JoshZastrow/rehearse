@@ -2,12 +2,13 @@
  * Design 2 — Waveform Split
  *
  * Two stacked scrolling waveform panels (Caller=cyan, Agent=purple).
- * Large concentric-ring button to start. Session timer top right.
- * Mute / Settings bottom bar.
+ * Large concentric-ring button to start; once connected the center becomes
+ * an RSVP-style reader streaming the guide/agent transcript as word chunks.
+ * Session timer top right. Mute / Settings bottom bar.
  */
 
 import { useEffect, useRef, useState } from 'react'
-import { useVoiceSession } from '../hooks/useVoiceSession'
+import { useVoiceSession, type TranscriptEntry } from '../hooks/useVoiceSession'
 
 // ── elapsed timer hook ────────────────────────────────────────────────────────
 
@@ -186,12 +187,98 @@ function RingButton({ state, onClick }: { state: string; onClick: () => void }) 
   )
 }
 
+// ── RSVP transcript reader ────────────────────────────────────────────────────
+
+// Speed-reader style: guide/agent words appear as short chunks at a fixed
+// center point. Caller speech is never rendered.
+const MAX_CHUNK_WORDS = 3
+const MAX_CHUNK_CHARS = 18
+const CATCHUP_BACKLOG = 20
+
+/** Pull the next 1-3 word chunk off the queue (mutates it). */
+function takeChunk(queue: string[]): string[] {
+  const words: string[] = []
+  let chars = 0
+  while (queue.length > 0 && words.length < MAX_CHUNK_WORDS) {
+    const word = queue[0]
+    if (words.length > 0 && chars + 1 + word.length > MAX_CHUNK_CHARS) break
+    words.push(queue.shift()!)
+    chars += (words.length > 1 ? 1 : 0) + word.length
+    if (/[.!?,;:…]$/.test(word)) break // hold chunks at clause boundaries
+  }
+  return words
+}
+
+/**
+ * Turn the growing agent transcript into a paced stream of word chunks.
+ * Entries update in place by id (partials grow), so per-entry word counts
+ * track what has already been queued; only new tail words are appended.
+ */
+function useRsvpChunk(transcript: TranscriptEntry[], active: boolean): string {
+  const [chunk, setChunk] = useState('')
+  const queueRef = useRef<string[]>([])
+  const queuedWordsRef = useRef(new Map<string, number>())
+
+  useEffect(() => {
+    for (const entry of transcript) {
+      if (entry.speaker !== 'agent') continue
+      const words = entry.text.split(/\s+/).filter(Boolean)
+      const queued = queuedWordsRef.current.get(entry.id) ?? 0
+      if (words.length > queued) {
+        queueRef.current.push(...words.slice(queued))
+        queuedWordsRef.current.set(entry.id, words.length)
+      }
+    }
+  }, [transcript])
+
+  useEffect(() => {
+    if (!active) {
+      queueRef.current = []
+      setChunk('')
+      return
+    }
+    let timer = 0
+    function tick() {
+      const queue = queueRef.current
+      if (queue.length === 0) {
+        timer = window.setTimeout(tick, 80)
+        return
+      }
+      const words = takeChunk(queue)
+      setChunk(words.join(' '))
+      // ~360 wpm at steady state; rush when a long response lands at once.
+      let delay = 180 + words.length * 80
+      if (queue.length > CATCHUP_BACKLOG) delay *= 0.6
+      timer = window.setTimeout(tick, delay)
+    }
+    tick()
+    return () => clearTimeout(timer)
+  }, [active])
+
+  return chunk
+}
+
+function RsvpReader({ chunk }: { chunk: string }) {
+  return (
+    <div style={rsvpStage} data-testid="rsvp-stage">
+      {chunk ? (
+        <span style={rsvpWord} data-testid="transcript-entry" data-speaker="agent">
+          {chunk}
+        </span>
+      ) : (
+        <span style={rsvpIdle}>· · ·</span>
+      )}
+    </div>
+  )
+}
+
 // ── main component ────────────────────────────────────────────────────────────
 
 export default function Design2MinimalOrb() {
   const session = useVoiceSession()
   const state = session.connectionState
   const elapsed = useElapsed(state === 'connected')
+  const rsvpChunk = useRsvpChunk(session.transcript, state === 'connected')
 
   const callerActive = state === 'connected' && session.activeSpeaker === 'user'
   const agentActive = state === 'connected' && session.activeSpeaker === 'agent'
@@ -304,28 +391,6 @@ export default function Design2MinimalOrb() {
         </div>
       </div>
 
-      {/* ── transcript log ─────────────────────────────────────────────────── */}
-      {session.transcript.length > 0 && (
-        <div style={transcriptBox} data-testid="transcript">
-          {session.transcript.map((entry) => (
-            <div
-              key={entry.id}
-              style={transcriptRow}
-              data-testid="transcript-entry"
-              data-speaker={entry.speaker}
-            >
-              <span style={{
-                ...transcriptWho,
-                color: entry.speaker === 'agent' ? '#c084fc' : '#00dcff',
-              }}>
-                {entry.speaker === 'agent' ? 'AGENT' : 'CALLER'}
-              </span>
-              <span style={transcriptText}>{entry.text}</span>
-            </div>
-          ))}
-        </div>
-      )}
-
       {/* ── side labels ────────────────────────────────────────────────────── */}
       <div style={sideLabelRow}>
         <div style={sideLabel}>
@@ -339,9 +404,13 @@ export default function Design2MinimalOrb() {
         </div>
       </div>
 
-      {/* ── ring button ────────────────────────────────────────────────────── */}
+      {/* ── center stage: ring button → RSVP reader once connected ─────────── */}
       <div style={buttonRow}>
-        <RingButton state={state} onClick={handleConnect} />
+        {state === 'connected' ? (
+          <RsvpReader chunk={rsvpChunk} />
+        ) : (
+          <RingButton state={state} onClick={handleConnect} />
+        )}
       </div>
 
       {/* ── bottom bar ─────────────────────────────────────────────────────── */}
@@ -534,38 +603,29 @@ const cursorDot: React.CSSProperties = {
   flexShrink: 0,
 }
 
-const transcriptBox: React.CSSProperties = {
-  margin: '12px 24px 0',
-  padding: '8px 12px',
-  border: '1px solid #1e293b',
-  borderRadius: 10,
-  background: '#030712',
-  maxHeight: 120,
-  overflowY: 'auto',
+const rsvpStage: React.CSSProperties = {
   display: 'flex',
-  flexDirection: 'column',
-  gap: 4,
-  flexShrink: 0,
+  alignItems: 'center',
+  justifyContent: 'center',
+  width: '100%',
+  padding: '0 24px',
 }
 
-const transcriptRow: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'baseline',
-  gap: 8,
-  fontSize: 12,
+const rsvpWord: React.CSSProperties = {
+  fontSize: 'clamp(2.5rem, 7vw, 4.5rem)',
+  fontWeight: 650,
+  letterSpacing: '-0.02em',
+  lineHeight: 1.15,
+  color: '#f1f5f9',
+  textAlign: 'center',
+  whiteSpace: 'nowrap',
+  textShadow: '0 0 28px #c084fc55',
 }
 
-const transcriptWho: React.CSSProperties = {
-  fontSize: 9,
-  fontWeight: 700,
-  letterSpacing: '0.12em',
-  flexShrink: 0,
-  width: 48,
-}
-
-const transcriptText: React.CSSProperties = {
-  color: '#cbd5e1',
-  lineHeight: 1.4,
+const rsvpIdle: React.CSSProperties = {
+  fontSize: 22,
+  letterSpacing: '0.4em',
+  color: '#334155',
 }
 
 const sideLabelRow: React.CSSProperties = {
