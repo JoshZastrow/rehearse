@@ -63,9 +63,15 @@ export default defineConfig({
       stderr: 'pipe',
     },
     {
-      // Vite dev server hosting the React app.
+      // Vite dev server hosting the React app. Point it at the local LiveKit
+      // dev server and the token server above so local runs are self-contained
+      // (CI sets these same vars via the playwright-web workflow env).
       command: 'npm run dev',
       url: 'http://localhost:3000',
+      env: {
+        VITE_LIVEKIT_URL: 'ws://localhost:7880',
+        VITE_TOKEN_ENDPOINT: 'http://localhost:8765/api/livekit/token',
+      },
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,
     },
