@@ -5,8 +5,11 @@ then delegates to run_livekit_session() which handles all audio routing and
 artifact writing.
 
 Structure:
-  run_agent()     — resolves env, builds the real room/track/stream/backend (needs
-                    livekit-rtc), then calls serve_session().
+  run_agent()     — resident loop: run_call() for every caller, respawning after
+                    finished or crashed calls until the process is killed.
+  run_call()      — one call: resolves env, builds the real room/track/stream/
+                    backend (needs livekit-rtc), waits for a caller, then calls
+                    serve_session().
   serve_session() — transport-agnostic over `room`: waits for a participant, runs
                     the session, disconnects. No livekit import → hermetically
                     testable with a FakeRoom + FakeRoomStream (see test_livekit_e2e).
@@ -43,6 +46,35 @@ from rehearse.session.livekit_session import (  # noqa: E402
 
 log = logging.getLogger(__name__)
 
+# room.disconnect() can wedge on a half-dead connection (observed 2026-06-10:
+# a completed session's disconnect never returned, parking the agent in the
+# room for hours). Teardown is timeboxed so the process always exits; the
+# server prunes the participant once the socket closes.
+_DISCONNECT_TIMEOUT_S = 10.0
+
+
+async def _disconnect(room: object) -> None:
+    """room.disconnect() bounded by _DISCONNECT_TIMEOUT_S — never hangs."""
+    try:
+        async with asyncio.timeout(_DISCONNECT_TIMEOUT_S):
+            await room.disconnect()  # type: ignore[union-attr]
+    except TimeoutError:
+        log.warning(
+            "room.disconnect() timed out after %ss — exiting anyway", _DISCONNECT_TIMEOUT_S
+        )
+
+
+# Resident-loop pacing: poll cadence while waiting for a caller, and the pause
+# between calls (also the retry delay when livekit-server isn't up yet).
+_PARTICIPANT_POLL_S = 0.5
+_RESPAWN_DELAY_S = 2.0
+
+
+async def _wait_for_participant(room: object) -> None:
+    """Block until someone is in the room — never start a session into an empty room."""
+    while not room.remote_participants:  # type: ignore[union-attr]
+        await asyncio.sleep(_PARTICIPANT_POLL_S)
+
 
 async def serve_session(
     room: object,
@@ -70,18 +102,19 @@ async def serve_session(
 
     if backend is None:
         log.error("no backend — agent will not process audio")
-        await room.disconnect()  # type: ignore[union-attr]
+        await _disconnect(room)
         return
 
     log.info("starting session %s", session_id)
     try:
         await run_livekit_session(stream, session_id, backend, store=store, skip_consent=True)
     finally:
-        await room.disconnect()  # type: ignore[union-attr]
+        await _disconnect(room)
         log.info("session %s complete", session_id)
 
 
-async def run_agent() -> None:
+async def run_call() -> None:
+    """One full call: connect, wait for a caller, run the session, disconnect."""
     from livekit import rtc  # noqa: PLC0415
     from livekit.api import AccessToken, VideoGrants  # noqa: PLC0415
 
@@ -117,7 +150,8 @@ async def run_agent() -> None:
 
     log.info("connecting to LiveKit room '%s' at %s", room_name, lk_url)
     await room.connect(lk_url, token)
-    log.info("connected — waiting for participant")
+    log.info("connected — waiting for a caller")
+    await _wait_for_participant(room)
 
     session_id = str(uuid.uuid4())
     session_root = Path(os.environ.get("SESSION_ROOT", "sessions"))
@@ -134,8 +168,29 @@ async def run_agent() -> None:
     stream = LiveKitRoomStream()
     await stream.setup(room, audio_source)
 
+    # End the inbound stream promptly when the caller leaves, so the session
+    # completes even if the audio-track end event is delayed. Without this the
+    # session lingers, swallows the next caller's audio, and the resident loop
+    # never gets to serve call #2 (observed: send_after_close_dropped on the
+    # prior session id, then a dtls timeout for the new participant).
+    @room.on("participant_disconnected")
+    def _on_caller_left(participant: object) -> None:  # noqa: ANN401
+        log.info("caller left — closing stream")
+        stream.close()
+
     backend = ModalInteractiveBackend(endpoint) if endpoint else None
     await serve_session(room, stream, backend, store, session_id)
+
+
+async def run_agent() -> None:
+    """Resident loop — serve calls back-to-back until the process is killed."""
+    while True:
+        try:
+            await run_call()
+            log.info("call finished — respawning for the next caller")
+        except Exception:
+            log.exception("call failed — respawning")
+        await asyncio.sleep(_RESPAWN_DELAY_S)
 
 
 def main() -> None:

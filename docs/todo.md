@@ -1,6 +1,84 @@
 # Rehearse Evals — TODO
 
-Last updated: 2026-05-06
+Last updated: 2026-06-26
+
+---
+
+## Interactivity benchmark harness (2026-06-26)
+
+Build an eval harness that runs our model against the interactivity benchmarks
+Thinking Machines reported for TML-Interaction-Small. No competing model scores
+meaningfully on these, so they're a clean target for the interactive/proactive
+direction. TimeSpeak and CueSpeak are TML-internal (no public release found —
+we'd reproduce them from the published task definitions); the other three adapt
+existing public datasets.
+
+- [ ] **Stand up `evals/interactivity/` harness.** One runner that loads a
+  benchmark spec, streams clips/audio to our model under a proactive protocol
+  (model decides *when* to speak, not just *what*), and emits per-benchmark
+  metrics in our existing `runs/{run_id}/` artifact schema. Reference baseline
+  to beat: TML-Interaction-Small.
+
+- [ ] **TimeSpeak** (timed speech initiation) — metric: macro-accuracy
+  (TML-Small = 64.7%). TML-internal; reconstruct from the task definition.
+
+- [ ] **CueSpeak** (verbal cue-triggered speech) — metric: macro-accuracy
+  (TML-Small = 81.7%). TML-internal; reconstruct from the task definition.
+
+- [ ] **ProactiveVideoQA** (visual cue-triggered speech) — metric: PAUC
+  (TML-Small = 31.5; no-response baseline = 25.0). Public:
+  arXiv:2507.09313, repo github.com/yellow-binary-tree/ProactiveVideoQA
+  (PAUC scorer + data live here; see also MMDuet2, arXiv:2512.06810).
+
+- [ ] **RepCount-A** (visual action counting) — metric: off-by-one accuracy
+  (TML-Small = 33.4%). Public: RepCount dataset from TransRAC (arXiv:2204.01018);
+  RepCount-A split used by FCA-RAC (arXiv:2406.12178).
+
+- [ ] **Charades temporal localization** (visual action timing) — metric: mIoU
+  (TML-Small = 30.4). Public: Charades-STA from TALL (arXiv:1705.02101) over
+  the Charades dataset.
+
+Notes: ProactiveVideoQA/RepCount/Charades are video benchmarks — our model is
+audio-first, so the harness needs a vision path (or we scope to the two speech
+benchmarks first and gate vision behind the multimodal track). PAUC and mIoU
+scorers should be vendored from the source repos, not reimplemented, so our
+numbers are comparable to the reported baselines.
+
+---
+
+## STT fine-tuning track (2026-06-12)
+
+### Shipped
+
+- [x] **`dev/STT` educational lab** — three-lesson curriculum for supervised
+  fine-tuning of a speech-to-text model, modeled on the tinker-cookbook SDFT
+  recipe. Lesson 0: the STT decoder is a language model (timestamps are
+  tokens). Lesson 1: canonical Whisper SFT + WER eval. Lesson 2 (capstone):
+  fine-tune to emit a diarized `[speaker, time, word]` stream in one decoding
+  pass — two-speaker mixes built so speaker is ground truth by construction,
+  word times distilled from the pretrained model's alignment.
+- [x] **Verified end to end on laptop MPS** with reference results recorded in
+  the lesson README: format validity 0% → 91.9%, WER 0.155, speaker accuracy
+  95.9%, word-time error 0.19 s (whisper-tiny, 80 clips, 300 steps).
+- [x] **Architecture findings written up** (`dev/STT/README.md`, "Where this
+  points in rehearse"): today the interactive backend transcribes the caller
+  with a post-hoc per-turn faster-whisper pass — turn-level, no word times —
+  and caller `ProsodyEvent`s are hardcoded zeros (`backend.py:275`); the
+  `ProsodyService` seam exists but only the Null impl is wired.
+
+### Next top priority
+
+- [ ] **Apply the lesson-2 recipe to real rehearse data.** Build a
+  `[speaker, word, time]` training set from stereo session recordings
+  (`audio_stereo.wav`): channel = ground-truth speaker, per-channel alignment
+  = word times — the same construct-the-labels trick as `make_dataset.py`,
+  on real conversational audio. Fine-tune whisper-small and evaluate on the
+  same four axes. Gate: beats the current post-hoc turn-level ASR before any
+  backend integration.
+
+Runner-up (small, unblocks the Feedback-Agent loop): wire a real
+`ProsodyService` into `InteractiveBackend` instead of inline zeros, so
+`prosody.jsonl` carries signal before curation or the SIA loop depends on it.
 
 ## Result
 

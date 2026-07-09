@@ -178,7 +178,7 @@ async def test_livekit_hermetic_call_lifecycle(tmp_path: Path) -> None:
 def _load_agent_module():
     """Import web/livekit/agent/agent.py by path (it is not an installed package).
 
-    Safe because agent.py's livekit imports are lazy (inside run_agent) and its
+    Safe because agent.py's livekit imports are lazy (inside run_call) and its
     side effects (load_dotenv / basicConfig) live in main(), so import is clean.
     """
     import importlib.util
@@ -242,6 +242,93 @@ async def test_livekit_agent_serve_session_no_backend_disconnects(tmp_path: Path
 
     assert room.disconnected, "serve_session must disconnect even with no backend"
     assert not (tmp_path / session_id / "transcript.jsonl").exists()
+
+
+async def test_livekit_agent_serve_session_hanging_disconnect_times_out(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A wedged room.disconnect() must not hang the agent forever.
+
+    Observed 2026-06-10: the dev agent finished its session (artifacts
+    finalized, Modal ws closed) but disconnect never returned, parking the
+    agent in rehearse-room for 7+ hours. serve_session timeboxes the
+    disconnect so the process can exit and the server prunes the participant.
+    """
+    agent_mod = _load_agent_module()
+    monkeypatch.setattr(agent_mod, "_DISCONNECT_TIMEOUT_S", 0.2)
+
+    class HangingRoom(FakeRoom):
+        async def disconnect(self) -> None:
+            await asyncio.Event().wait()  # wedged — never returns
+
+    store = _make_store(tmp_path)
+    session_id = _prep_session(store)
+    room = HangingRoom(participants=1)
+    stream = FakeRoomStream(_caller_frames())
+    backend = _ScriptedCoachBackend()
+
+    # Must complete despite the wedged disconnect.
+    await asyncio.wait_for(
+        agent_mod.serve_session(
+            room, stream, backend, store, session_id, participant_wait_s=1.0
+        ),
+        timeout=10.0,
+    )
+
+
+async def test_livekit_agent_wait_for_participant_blocks_until_join(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """_wait_for_participant() holds while the room is empty, returns on join.
+
+    Resident mode must never start a session into an empty room (the old 10s
+    proceed-anyway path produced caller-less Modal sessions).
+    """
+    agent_mod = _load_agent_module()
+    monkeypatch.setattr(agent_mod, "_PARTICIPANT_POLL_S", 0.01)
+
+    room = FakeRoom(participants=0)
+    task = asyncio.create_task(agent_mod._wait_for_participant(room))
+    await asyncio.sleep(0.1)
+    assert not task.done(), "must keep waiting while the room is empty"
+
+    room.remote_participants["p0"] = object()
+    await asyncio.wait_for(task, timeout=2.0)
+
+
+async def test_livekit_agent_run_agent_respawns_between_calls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """run_agent() serves call after call, surviving a crashed call.
+
+    The resident loop replaces the old one-shot agent (one call per
+    `make rehearse-web`): a finished or crashed call must be followed by
+    another run_call(), without a process restart.
+    """
+    agent_mod = _load_agent_module()
+    monkeypatch.setattr(agent_mod, "_RESPAWN_DELAY_S", 0.01)
+
+    calls: list[int] = []
+
+    async def fake_run_call() -> None:
+        calls.append(len(calls))
+        if len(calls) == 1:
+            raise RuntimeError("boom — first call crashes")
+
+    monkeypatch.setattr(agent_mod, "run_call", fake_run_call)
+
+    task = asyncio.create_task(agent_mod.run_agent())
+    try:
+        for _ in range(200):
+            if len(calls) >= 3:
+                break
+            await asyncio.sleep(0.01)
+    finally:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+
+    assert len(calls) >= 3, f"loop served only {len(calls)} call(s) — no respawn"
 
 
 # ---------------------------------------------------------------------------

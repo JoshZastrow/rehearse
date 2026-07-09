@@ -41,6 +41,8 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 dev/lab
+dev/STT
+/runs/
 /.claude/worktrees
 
 # Model weights (downloaded at runtime)
