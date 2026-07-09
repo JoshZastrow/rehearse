@@ -228,17 +228,17 @@ def _collect_core(existing: dict[str, str], force: bool) -> dict[str, str]:
 def _collect_backend(existing: dict[str, str], force: bool, env_only: bool, root: Path) -> dict[str, str]:
     """Ask which backend to use and collect backend-specific settings."""
     _section("Backend Type")
-    current_backend = existing.get("BACKEND_TYPE", "managed")
+    current_backend = existing.get("BACKEND_TYPE", "interactive")
 
     print("  Available backends:")
-    print("    1) managed     — Hume EVI handles voice, STT, TTS (default)")
+    print("    1) managed     — Hume EVI handles voice, STT, TTS")
     print("    2) pipeline    — Open-source STT (Whisper) + TTS (Kokoro) + LiteLLM")
-    print("    3) interactive — Full-duplex Moshi model (local GPU or Modal cloud)")
+    print("    3) interactive — Full-duplex PersonaPlex model (local GPU or Modal cloud) (default)")
     print()
 
     choice_map = {"1": "managed", "2": "pipeline", "3": "interactive",
                   "managed": "managed", "pipeline": "pipeline", "interactive": "interactive"}
-    default_num = {"managed": "1", "pipeline": "2", "interactive": "3"}.get(current_backend, "1")
+    default_num = {"managed": "1", "pipeline": "2", "interactive": "3"}.get(current_backend, "3")
 
     raw = _ask(f"Backend (1/2/3 or name)", default=default_num)
     backend = choice_map.get(raw.strip(), current_backend)
@@ -472,7 +472,7 @@ def _wizard(force: bool = False, env_only: bool = False) -> None:
 
     # Summary
     print(f"\n{_BOLD}Setup complete.{_RESET} Next steps:\n")
-    backend = updates.get("BACKEND_TYPE", existing.get("BACKEND_TYPE", "managed"))
+    backend = updates.get("BACKEND_TYPE", existing.get("BACKEND_TYPE", "interactive"))
     if backend == "interactive":
         endpoint = updates.get("INTERACTIVE_PROVIDER_ENDPOINT", "")
         if endpoint:

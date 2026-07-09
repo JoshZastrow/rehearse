@@ -7,15 +7,23 @@
  ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚══════╝
 ```
 
-<p align="center"><b>A research prototype for training and evaluating long-horizon conversational voice agents.</b></p>
+<p align="center"><b>A continual-learning method for hard conversations. A human rehearses the conversation they need to have against a model that plays the other side — and both improve.</b></p>
 
 ---
 
 ## What This Is
 
-Rehearse is built for interactive, conversational support. How well can a voice agent hold a coherent, emotionally attuned conversation across long conversations and multiple sessions?
+Rehearse is a continual-learning method built around a simple asymmetry: a hard conversation gives you exactly one real take. There is no reset, no second attempt from the same starting point, and an outcome signal that arrives days later, if at all.
 
-A caller brings a hard conversation they have had or need to have and works through it on the phone. One continuous call: intake, practice, feedback. 
+Rehearse turns that one-shot conversation into something you can practice against. A caller brings a hard conversation they have had or need to have and works through it on the phone with a model that plays the other side. One continuous call: intake, practice, feedback.
+
+Both parties are learners. The **caller** rehearses the conversation itself — consolidating the handful of moves that actually land. The **provider** model rehearses being a coherent, emotionally attuned counterpart — scoring each session and folding the signal back into its weights. Co-training is literal for the model and experiential for the human. The rehearsal is the shared mechanism that improves both.
+
+## Why This Is a Continual-Learning Problem
+
+Most conversational skill cannot be learned by grinding. You cannot run a thousand parallel rollouts of a hard conversation from the same starting point — there is one real take, the feedback is sparse and delayed, and the environment (the other person, and you) never resets to the same state twice. This is the un-grindable, non-stationary regime where more compute alone does not help: what is scarce is samples, not FLOPs.
+
+Rehearse manufactures the missing samples. Rehearsal is a replayable practice environment for a domain that otherwise offers none — the caller gets to run the conversation many times before the one that counts, and the model gets many scored trajectories from an interaction that, in the wild, would produce exactly one. Learning that sticks means consolidation, not recall: the caller carries a few sharpened intuitions into the real conversation, and the model distills scored sessions into its weights rather than an ever-growing context window.
 
 ## The Research Problem
 
@@ -53,19 +61,29 @@ These focus on measuring whether the conversation worked for the caller.
 
 ## Current Architecture
 
-The initial design is a scaffolded, multi-model system — purpose-built to prove out the conversational agent interface before committing to model infrastructure. The roadmap is to replace off-the-shelf components with self-hosted models as the interface and eval harness mature.
+The native architecture is a **full-duplex audio model** — a single speech-to-speech model that hears and speaks on one continuous stream, based on [PersonaPlex](https://github.com/NVIDIA/personaplex) (NVIDIA's Moshi 7B finetune with voice + role conditioning). This is the self-hosted path the whole system is built toward: no STT→LLM→TTS relay, no external voice-activity detector deciding whose turn it is. The model itself chooses when to speak, when to listen, and when to hold silence — which is exactly the behavior the eval harness scores.
+
+**How the model runs** (`rehearse/backends/interactive/`, served from `infra/interactive.py`):
+
+- Caller audio (PCM16 16 kHz) is resampled to 24 kHz and encoded by the **Mimi** neural codec into discrete tokens.
+- The LM steps at **12.5 Hz (80 ms frames)**, emitting interleaved text tokens (the provider's transcript) and audio tokens on the same clock — this simultaneity is what makes it full-duplex rather than turn-based.
+- Mimi decodes the provider's audio codebooks back to 16 kHz speech, streamed to the caller with no turn gate in between. PersonaPlex's `dep_q=16` depth transformer predicts both input- and output-stream codebooks; only the 8 output codebooks are decoded to audio.
+- Persona is set by **conditioning, not prompting**: a voice prompt fixes the speaker identity and a text prompt fixes the role, both prefilled as system prompts before the stream opens. Two conditioned endpoints run the same weights — **PersonaplexProvider** (the guide) and **PersonaplexCaller** (a synthetic caller that drives evals without a live phone).
+- Caller-side transcription runs faster-whisper on buffered caller audio; the inference loop lives in a thread executor bridged back to asyncio.
 
 | Layer | Component |
 |---|---|
-| Voice (STT + TTS + prosody) | Hume EVI |
-| Coach + character brain | Claude (Sonnet for turns, Opus for synthesis) |
-| Dialog management | Hume EVI turn detection + phase timer |
+| Speech model | **PersonaPlex 7B** — full-duplex, voice + role conditioned (upstream Moshi selectable) |
+| Neural codec | Mimi — 24 kHz streaming encode/decode |
+| Caller transcription | faster-whisper on buffered caller audio |
+| Serving | aiohttp WebSocket on Modal **L40S GPU** |
 | Telephony | Twilio — SMS trigger, outbound call, Media Streams |
 | Caller memory | Honcho (cloud or self-hosted) |
+| Post-session synthesis | Claude Opus (story + feedback generation) |
 | Eval judges | Gemini 2.5 (audio-native) + Claude Opus |
 | Service | FastAPI + Uvicorn |
 
-The limitations of scaffolded turn detection are visible in the data: no proactive interjection, no response to vocal cues that don't cross an audio VAD boundary. The eval harness tracks these failure modes.
+**Managed fallback (no GPU required).** For environments without GPU access, a scaffolded stack is selectable via `BACKEND_TYPE=managed`: Hume EVI (STT + TTS + prosody) with Claude driving turns, dialog gated by Hume's VAD plus a phase timer. It is turn-based by construction, so its limits are visible in the data — no proactive interjection, no response to vocal cues that don't cross a turn boundary. The full-duplex model is the default specifically to remove that ceiling; the eval harness tracks both so the improvement is measurable.
 
 ## Eval Harness
 
@@ -107,7 +125,7 @@ Each run produces `scores.jsonl` with per-turn scores, phase timings (with overr
 
 ## The Self-Improvement Loop
 
-The longer-term vision behind Rehearse is a closed loop: live sessions generate scored trajectories, scored trajectories inform model updates, and model updates improve the next session. Two improvement levers operate at different timescales.
+The model half of co-training is a closed loop: live sessions generate scored trajectories, scored trajectories inform model updates, and model updates improve the next session. Two improvement levers operate at different timescales.
 
 ```
 [Live Session] → transcript.jsonl + prosody.jsonl + telemetry.jsonl
@@ -127,6 +145,8 @@ The longer-term vision behind Rehearse is a closed loop: live sessions generate 
 ```
 
 **Sequencing rule:** Always start with harness iteration. Scaffold improvements are faster and cheaper — tune the prompts, phase logic, and persona compiler until scores stop moving, then fine-tune weights on the validated signal. Training on a noisy scaffold amplifies the noise.
+
+**The caller's loop.** The model side above has a literal artifact — scored trajectories, LoRA updates on Modal. The caller's side runs on the same session and the same rubric, but the "weight update" happens in the person: the sharpened intuition they carry into the real conversation. Both loops ultimately optimize the same outcome signal — whether the real conversation, days later, went better. That shared, sparse reward is the joint objective of the whole system.
 
 The training stack (in `train/`) implements FSDP + LoRA on Moshi 7B with manual bf16 mixed precision and regime-aware wrapping: LoRA for sequential adaptation, full fine-tuning when the domain shift is large enough that rank-bounded adapters saturate.
 

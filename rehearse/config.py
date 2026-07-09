@@ -47,7 +47,7 @@ class RuntimeConfig:
     honcho_workspace_id: str = "rehearse"
     honcho_base_url: str | None = None  # set to http://localhost:8001 for self-hosted
     memory_mcp_url: str | None = None  # MEMORY_MCP_URL — MCP memory server endpoint
-    backend_type: str = "managed"
+    backend_type: str = "interactive"
     managed_api_key: str = ""
     managed_config_id: str = ""
     pipeline_speech_mode: str = "modular"
@@ -150,7 +150,7 @@ class RuntimeConfig:
             honcho_workspace_id=os.environ.get("HONCHO_WORKSPACE_ID", "rehearse"),
             honcho_base_url=os.environ.get("HONCHO_BASE_URL") or None,
             memory_mcp_url=os.environ.get("MEMORY_MCP_URL") or None,
-            backend_type=os.environ.get("BACKEND_TYPE", "managed"),
+            backend_type=os.environ.get("BACKEND_TYPE", "interactive"),
             managed_api_key=(
                 os.environ.get("MANAGED_API_KEY")
                 or os.environ.get("HUME_API_KEY")
