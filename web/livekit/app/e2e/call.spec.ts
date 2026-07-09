@@ -1,48 +1,43 @@
 import { test, expect } from '@playwright/test'
 
-test.describe('Waveform UI', () => {
-  test('idle state renders waveform panels and start button', async ({ page }) => {
+test.describe('Live Speech Dialogue UI', () => {
+  test('idle state renders both speaker panels and start button', async ({ page }) => {
     await page.goto('/')
-    // Two CALLER spans exist (panel label + side label) — match the first
-    await expect(page.getByText('CALLER').first()).toBeVisible()
-    await expect(page.getByText('AGENT').first()).toBeVisible()
-    // textTransform: uppercase is CSS-only; DOM text is title-case
-    await expect(page.getByText('Tap to Start')).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'LIVE SPEECH DIALOGUE' })).toBeVisible()
+    await expect(page.getByText('YOU', { exact: true })).toBeVisible()
+    await expect(page.getByText('SYSTEM', { exact: true })).toBeVisible()
+    await expect(page.getByText('TAP TO START')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Start call' })).toBeVisible()
   })
 
-  test('clicking start button transitions out of idle', async ({ page }) => {
+  test('clicking start transitions out of idle', async ({ page }) => {
     await page.goto('/')
     await page.getByRole('button', { name: 'Start call' }).click()
-    await expect(page.getByText('Tap to Start')).not.toBeVisible({ timeout: 5_000 })
+    await expect(page.getByText('TAP TO START')).not.toBeVisible({ timeout: 5_000 })
   })
 
-  test('connects to LiveKit room and shows session active', async ({ page }) => {
+  test('connects to LiveKit room and shows CONNECTED', async ({ page }) => {
     await page.goto('/')
     await page.getByRole('button', { name: 'Start call' }).click()
-    await expect(page.getByText('Session Active').first()).toBeVisible({ timeout: 10_000 })
-    await expect(page.getByText('LIVE')).toBeVisible()
+    await expect(page.getByText('CONNECTED', { exact: true })).toBeVisible({ timeout: 10_000 })
+    // The LIVE indicator and the End-call control are present once connected.
+    await expect(page.getByText('LIVE', { exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'End call' })).toBeVisible()
   })
 
-  test('End button returns to idle', async ({ page }) => {
+  test('End returns to idle', async ({ page }) => {
     await page.goto('/')
     await page.getByRole('button', { name: 'Start call' }).click()
-    await expect(page.getByText('Session Active').first()).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByText('CONNECTED', { exact: true })).toBeVisible({ timeout: 10_000 })
 
     await page.getByRole('button', { name: 'End call' }).click()
-    await expect(page.getByText('Tap to Start')).toBeVisible({ timeout: 8_000 })
-    await expect(page.getByText('Session Active').first()).not.toBeVisible()
+    await expect(page.getByText('TAP TO START')).toBeVisible({ timeout: 8_000 })
   })
 
-  test('session timer counts up when connected', async ({ page }) => {
+  test('both YOU and SYSTEM RSVP pills are present when connected', async ({ page }) => {
     await page.goto('/')
     await page.getByRole('button', { name: 'Start call' }).click()
-    await expect(page.getByText('Session Active').first()).toBeVisible({ timeout: 10_000 })
-
-    const timer = page.getByText(/^\d{2}:\d{2}:\d{2}$/)
-    await expect(timer).toBeVisible()
-    const t1 = await timer.textContent()
-    await page.waitForTimeout(2_000)
-    const t2 = await timer.textContent()
-    expect(t1).not.toBe(t2)
+    await expect(page.getByText('CONNECTED', { exact: true })).toBeVisible({ timeout: 10_000 })
+    await expect(page.locator('[data-testid="rsvp-pill"]')).toHaveCount(2)
   })
 })
