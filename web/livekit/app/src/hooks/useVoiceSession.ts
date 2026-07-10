@@ -1,6 +1,7 @@
 /// <reference types="vite/client" />
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Room, RoomEvent, Track } from 'livekit-client'
+import { useAuth } from '@clerk/clerk-react'
 
 export type ConnectionState = 'idle' | 'connecting' | 'connected' | 'error'
 export type Speaker = 'user' | 'agent' | null
@@ -26,11 +27,22 @@ export interface VoiceSession {
 const LIVEKIT_URL = import.meta.env.VITE_LIVEKIT_URL ?? ''
 const TOKEN_ENDPOINT = import.meta.env.VITE_TOKEN_ENDPOINT ?? '/api/token'
 
-async function fetchToken(): Promise<string> {
-  const res = await fetch(TOKEN_ENDPOINT)
-  if (!res.ok) throw new Error(`Token fetch failed: ${res.status}`)
-  const data = (await res.json()) as { token: string }
-  return data.token
+interface TokenResponse {
+  token: string
+  room?: string
+  url?: string
+}
+
+/** Fetch a LiveKit token from the gated token server using the Clerk JWT. */
+async function fetchToken(clerkToken: string | null): Promise<TokenResponse> {
+  const headers: Record<string, string> = {}
+  if (clerkToken) headers.Authorization = `Bearer ${clerkToken}`
+  const res = await fetch(TOKEN_ENDPOINT, { headers })
+  if (!res.ok) {
+    // 401 = not signed in, 402 = billing not set up, 429 = rate limited.
+    throw new Error(`Token fetch failed: ${res.status}`)
+  }
+  return (await res.json()) as TokenResponse
 }
 
 export function useVoiceSession(): VoiceSession {
@@ -40,6 +52,7 @@ export function useVoiceSession(): VoiceSession {
   const [audioLevel, setAudioLevel] = useState(0)
   const [isMicOn, setIsMicOn] = useState(true)
 
+  const { getToken } = useAuth()
   const roomRef = useRef<Room | null>(null)
   const analyserRef = useRef<AnalyserNode | null>(null)
   const levelFrameRef = useRef<number>(0)
@@ -47,7 +60,8 @@ export function useVoiceSession(): VoiceSession {
   const connect = useCallback(async () => {
     setConnectionState('connecting')
     try {
-      const token = await fetchToken()
+      const clerkToken = await getToken()
+      const { token, url } = await fetchToken(clerkToken)
       const room = new Room({ adaptiveStream: true, dynacast: true })
       roomRef.current = room
 
@@ -104,7 +118,7 @@ export function useVoiceSession(): VoiceSession {
         }
       })
 
-      await room.connect(LIVEKIT_URL, token)
+      await room.connect(url ?? LIVEKIT_URL, token)
       const micPub = await room.localParticipant.setMicrophoneEnabled(true)
 
       // Measure local mic level via Web Audio API
@@ -132,7 +146,7 @@ export function useVoiceSession(): VoiceSession {
       console.error('LiveKit connect error:', err)
       setConnectionState('error')
     }
-  }, [])
+  }, [getToken])
 
   const disconnect = useCallback(() => {
     cancelAnimationFrame(levelFrameRef.current)

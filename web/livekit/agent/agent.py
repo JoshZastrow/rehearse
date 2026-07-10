@@ -40,6 +40,7 @@ sys.path.insert(0, str(_REPO_ROOT))
 
 # livekit-free imports (safe to load without livekit-rtc installed).
 from rehearse.session.livekit_session import (  # noqa: E402
+    finalize_and_bill,
     run_livekit_session,
     write_session_manifest,
 )
@@ -84,6 +85,9 @@ async def serve_session(
     session_id: str,
     *,
     participant_wait_s: float = 10.0,
+    billing_store: object | None = None,
+    clerk_user_id: str | None = None,
+    stripe_customer_id: str | None = None,
 ) -> None:
     """Wait for a participant, run the session, then disconnect.
 
@@ -91,6 +95,11 @@ async def serve_session(
     ``remote_participants`` + ``disconnect()``). This is the hermetic seam: it
     contains the agent's orchestration logic (participant wait, no-backend guard,
     session run, clean disconnect) with no livekit-rtc dependency.
+
+    On a session that actually ran, the finally block stamps ``finalized_at`` and
+    meters the session (`finalize_and_bill`). Billing side effects run only when
+    `billing_store` + `clerk_user_id` are supplied; the hermetic path just
+    records the billable window on the manifest.
     """
     deadline_iters = max(1, int(participant_wait_s / 0.1))
     for _ in range(deadline_iters):
@@ -109,6 +118,14 @@ async def serve_session(
     try:
         await run_livekit_session(stream, session_id, backend, store=store, skip_consent=True)
     finally:
+        # Stamp finalized_at + meter the GPU wall-clock before disconnecting.
+        await finalize_and_bill(
+            store,  # type: ignore[arg-type]
+            session_id,
+            billing_store=billing_store,
+            clerk_user_id=clerk_user_id,
+            stripe_customer_id=stripe_customer_id,
+        )
         await _disconnect(room)
         log.info("session %s complete", session_id)
 
@@ -179,7 +196,28 @@ async def run_call() -> None:
         stream.close()
 
     backend = ModalInteractiveBackend(endpoint) if endpoint else None
-    await serve_session(room, stream, backend, store, session_id)
+
+    # Billing context: the token server mints the room as rehearse-<uid>-<uuid>,
+    # so the clerk_user_id rides in on the room name. Look up the Stripe customer
+    # for the meter event. Unset DATABASE_URL → in-memory store (no-op billing).
+    from rehearse.auth.rooms import clerk_id_from_room  # noqa: PLC0415
+    from rehearse.billing.store import build_billing_store  # noqa: PLC0415
+
+    billing_store = build_billing_store(os.environ.get("DATABASE_URL"))
+    clerk_user_id = clerk_id_from_room(room_name)
+    user = billing_store.get_user(clerk_user_id) if clerk_user_id else None
+    stripe_customer_id = user.stripe_customer_id if user else None
+
+    await serve_session(
+        room,
+        stream,
+        backend,
+        store,
+        session_id,
+        billing_store=billing_store,
+        clerk_user_id=clerk_user_id,
+        stripe_customer_id=stripe_customer_id,
+    )
 
 
 async def run_agent() -> None:

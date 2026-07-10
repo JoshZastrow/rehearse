@@ -24,6 +24,7 @@ dependencies = [
     "hindsight-all>=0.6.1",
     "modal>=0.73",
     "websockets>=13.0",
+    "marimo>=0.23.13",
 ]
 
 [project.scripts]
@@ -43,6 +44,13 @@ dev = [
 livekit = [
     "livekit>=1.0",
     "livekit-api>=1.0",
+]
+billing = [
+    # Consumer-facing token server + metered billing. Imports are lazy, so the
+    # core package and hermetic tests do not require this group; production
+    # installs need it: `uv sync --group livekit --group billing`.
+    "stripe>=10.0",
+    "pyjwt[crypto]>=2.9",
 ]
 
 [build-system]
