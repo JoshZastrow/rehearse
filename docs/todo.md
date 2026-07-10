@@ -4,45 +4,49 @@ Last updated: 2026-06-26
 
 ---
 
-## Interactivity benchmark harness (2026-06-26)
+## Full-Duplex-Bench harness (2026-06-26)
 
-Build an eval harness that runs our model against the interactivity benchmarks
-Thinking Machines reported for TML-Interaction-Small. No competing model scores
-meaningfully on these, so they're a clean target for the interactive/proactive
-direction. TimeSpeak and CueSpeak are TML-internal (no public release found —
-we'd reproduce them from the published task definitions); the other three adapt
-existing public datasets.
+Build an eval harness that runs our model against **Full-Duplex-Bench (FDB)** —
+the public, audio-only benchmark for full-duplex spoken dialogue. It scores the
+exact interactive skill the product depends on: *when* to speak, not just *what*
+to say. It's the runnable public proxy for Thinking Machines' internal TimeSpeak
+/ CueSpeak benchmarks (those are not released). TML themselves report on FDB
+V1, V1.5, and V3.
 
-- [ ] **Stand up `evals/interactivity/` harness.** One runner that loads a
-  benchmark spec, streams clips/audio to our model under a proactive protocol
-  (model decides *when* to speak, not just *what*), and emits per-benchmark
-  metrics in our existing `runs/{run_id}/` artifact schema. Reference baseline
-  to beat: TML-Interaction-Small.
+Why this one and nothing else: our stack is audio-first, so the TML video
+benchmarks (ProactiveVideoQA, RepCount-A, Charades) are off the critical path.
+FDB is audio-native, open (code + data), and its v1.5 metrics — stop/response
+**latency**, interruption and backchannel handling — line up directly with the
+current `fix/interactive-true-latency-profiling` work.
 
-- [ ] **TimeSpeak** (timed speech initiation) — metric: macro-accuracy
-  (TML-Small = 64.7%). TML-internal; reconstruct from the task definition.
+Source: [github.com/DanielLin94144/Full-Duplex-Bench](https://github.com/DanielLin94144/Full-Duplex-Bench)
+(repo folders `v1_v1.5/`, `v2/`, `v3/`; v1 = arXiv:2503.04721, v1.5 =
+arXiv:2507.23159; v3 code + data + paper released 2026-05). Vendor FDB's own
+scorers — don't reimplement — so our numbers are comparable to published ones.
 
-- [ ] **CueSpeak** (verbal cue-triggered speech) — metric: macro-accuracy
-  (TML-Small = 81.7%). TML-internal; reconstruct from the task definition.
+- [ ] **Stand up `evals/fdb/` harness.** One runner that loads an FDB version's
+  data, drives our model under FDB's full-duplex protocol (streaming audio in,
+  model decides when to respond / interrupt / backchannel), and writes FDB's
+  metrics into our existing `runs/{run_id}/` artifact schema. Wrap FDB's
+  server-client inference scripts (`v1_v1.5/model_inference/`) rather than
+  porting the loop.
 
-- [ ] **ProactiveVideoQA** (visual cue-triggered speech) — metric: PAUC
-  (TML-Small = 31.5; no-response baseline = 25.0). Public:
-  arXiv:2507.09313, repo github.com/yellow-binary-tree/ProactiveVideoQA
-  (PAUC scorer + data live here; see also MMDuet2, arXiv:2512.06810).
+- [ ] **V1.5 first — overlap handling.** Four scenarios: user interruption,
+  user backchannel, talking to others, background speech. Metrics: categorical
+  dialogue behavior, stop + response latency, prosodic adaptation. This is the
+  highest-signal slice for a coaching call; it also reuses the latency
+  instrumentation already on this branch.
 
-- [ ] **RepCount-A** (visual action counting) — metric: off-by-one accuracy
-  (TML-Small = 33.4%). Public: RepCount dataset from TransRAC (arXiv:2204.01018);
-  RepCount-A split used by FCA-RAC (arXiv:2406.12178).
+- [ ] **V1 — turn-taking baseline.** Static offline turn-taking eval. Cheaper
+  than v1.5; run it first to validate the harness plumbing end to end against a
+  known baseline before the overlap scenarios.
 
-- [ ] **Charades temporal localization** (visual action timing) — metric: mIoU
-  (TML-Small = 30.4). Public: Charades-STA from TALL (arXiv:1705.02101) over
-  the Charades dataset.
+- [ ] **V3 — latest.** Add once v1/v1.5 are green. Confirm what v3 measures from
+  the `v3/` folder + paper before wiring (it's a newer axis, not a re-run of
+  v1.5).
 
-Notes: ProactiveVideoQA/RepCount/Charades are video benchmarks — our model is
-audio-first, so the harness needs a vision path (or we scope to the two speech
-benchmarks first and gate vision behind the multimodal track). PAUC and mIoU
-scorers should be vendored from the source repos, not reimplemented, so our
-numbers are comparable to the reported baselines.
+- [ ] **Report vs TML.** Record our per-version scores next to TML-Interaction-
+  Small's reported FDB numbers so we can see the gap on each axis.
 
 ---
 
