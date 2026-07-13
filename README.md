@@ -174,7 +174,6 @@ rehearse/               # Core Python package
 │   └── memory_mcp_server.py  # MCP server exposing caller memory as tools
 │
 ├── cli/init.py         # Interactive setup wizard (rehearse-init)
-├── train/              # Training dispatch (CLI + Modal job submission)
 │
 └── eval/               # Evaluation harness
     ├── protocols.py    # BenchmarkExample, Scorer, Environment — shared interface contract
