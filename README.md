@@ -31,24 +31,6 @@ Most conversational AI evaluation is turn-based. Give the model an input, check 
 
 This project aims at implementing a time-based full-duplex audio model with a background language model that weaves in retrieved context from memory into the conversation state. This allows for both a qualitatively more natural conversation with simultaneous reasoning, tool-use, and context retrieval. 
 
-## Capability Focus
-
-**Naturalness at scale.** Turn-based scaffolding flattens prosody over long sessions and is brittle to barge-ins and simultaneous speaking. Pauses become mechanical. The capability goal is a conversation that stays sonically natural across the spectrum of conversation dynamics. Progress is measured against human baseline recordings using model-based MOS scorers.
-
-**Outcome signal.** The true target is behavioral change in the real conversation the caller was preparing for. That signal arrives days later, if at all and is not directly observable. The harder question is what "quality" means for a real-time interaction; intuitively we know turn-based evaluation (and dialogue) fails structurally, as there is no bases for when something is said. The interactive dimensions that, in a rehearsed conversation, are most of the skill. Our rubric therefore scores along two axes at once: content (was the substance right) and interaction (affect, delivery, silence, timing).
-
-## Why Prosody
-
-Tone matters. Prosody is the signal that text evaluation cannot access. A caller can say "I'm fine" with a voice that says otherwise. An agent that responds to words alone will miss the incongruence — and the caller will feel it, even if they cannot articulate why.
-
-Rehearse currently uses audio-native judges (Gemini 2.5 flash, which processes speech directly) to evaluate dimensions that have no text proxy:
-
-- **Affect perception** — did the agent register the emotional state in the voice, not just the semantic content?
-- **Silence management** — did the agent hold space when the caller needed it, or fill every gap?
-- **Speech rate** — was the agent's pace calibrated to the conversational moment?
-
-These focus on measuring whether the conversation worked for the caller.
-
 ## Current Architecture
 
 The native architecture is a **full-duplex audio model** — a single speech-to-speech model that hears and speaks on one continuous stream, based on [PersonaPlex](https://github.com/NVIDIA/personaplex) (NVIDIA's Moshi 7B finetune with voice + role conditioning). This is the self-hosted path the whole system is built toward: no STT→LLM→TTS relay, no external voice-activity detector deciding whose turn it is. The model itself chooses when to speak, when to listen, and when to hold silence — which is exactly the behavior the eval harness scores.
