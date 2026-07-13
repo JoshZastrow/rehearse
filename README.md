@@ -29,7 +29,7 @@ Rehearsal is a replayable practice environment for a domain that otherwise offer
 
 Most conversational AI evaluation is turn-based. Give the model an input, check the output. Convert to Speech with auxiliary STT and TTS components. A turn-based cascade (STT → LLM → TTS) doesn't just add latency — it destroys the signal needed for attuned conversations. STT collapses audio to text, which throws away timing, prosody, hesitation, and silence. Many smaller model components adds infrastructure complexity that can be simplified in an encapsulated model that can improve via axes of scaling (data, compute, model size).
 
-This project aims at implementing a time-based full-duplex audio model that weaves in retrieved context from memory into the conversation state using a background model. This allows for both natural conversation management and intelligence-enhancing reasoning, tool-use, and memory recall. 
+This project aims at implementing a time-based full-duplex audio model with a background language model that weaves in retrieved context from memory into the conversation state. This allows for both a qualitatively more natural conversation with simultaneous reasoning, tool-use, and context retrieval. 
 
 ## Capability Focus
 
