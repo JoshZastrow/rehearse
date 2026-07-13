@@ -7,49 +7,39 @@
  ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚══════╝
 ```
 
-<p align="center"><b>A continual-learning method for hard conversations. A human rehearses the conversation they need to have against a model that plays the other side — and both improve.</b></p>
+<p align="center"><b>A dialogue system for important conversations. A human rehearses the conversation they need to have against a model that plays the other side — and both improve.</b></p>
 
 ---
 
 ## What This Is
 
-Rehearse is a continual-learning method built around a simple asymmetry: a hard conversation gives you exactly one real take. There is no reset, no second attempt from the same starting point, and an outcome signal that arrives days later, if at all.
+Rehearse is a prototype Full-Duplex dialogue system built into a voice assistant product, designed for conversational support.
 
-Rehearse turns that one-shot conversation into something you can practice against. A caller brings a hard conversation they have had or need to have and works through it on the phone with a model that plays the other side. One continuous call: intake, practice, feedback.
+Rehearse turns that one-shot conversation into something you can practice against. A caller brings a hard conversation they have had or need to have, and works through it on the phone with a model that plays the other side.
 
-Both parties are learners. The **caller** rehearses the conversation itself — consolidating the handful of moves that actually land. The **provider** model rehearses being a coherent, emotionally attuned counterpart — scoring each session and folding the signal back into its weights. Co-training is literal for the model and experiential for the human. The rehearsal is the shared mechanism that improves both.
+Both parties are learners. The **caller** rehearses the conversation itself by consolidating the handful of statements that actually land. The **provider** model rehearses being a coherent, attuned counterpart. Each session gets scored and sampled for continued training on conversation sets.
 
-## Why This Is a Continual-Learning Problem
+## Learning Through Conversations
 
-Most conversational skill cannot be learned by grinding. You cannot run a thousand parallel rollouts of a hard conversation from the same starting point — there is one real take, the feedback is sparse and delayed, and the environment (the other person, and you) never resets to the same state twice. This is the un-grindable, non-stationary regime where more compute alone does not help: what is scarce is samples, not FLOPs.
+Most conversational skills cannot be learned by grinding. With a human in the loop, you cannot run a thousand parallel rollouts of a hard conversation from the same starting point. There is one real take, conversations evolve. The environment (the other person, and you) never resets to the same state twice, as conversations create history and relational dynamics evolve. This is the un-grindable, non-stationary regime. 
 
-Rehearse manufactures the missing samples. Rehearsal is a replayable practice environment for a domain that otherwise offers none — the caller gets to run the conversation many times before the one that counts, and the model gets many scored trajectories from an interaction that, in the wild, would produce exactly one. Learning that sticks means consolidation, not recall: the caller carries a few sharpened intuitions into the real conversation, and the model distills scored sessions into its weights rather than an ever-growing context window.
+Rehearsal is a replayable practice environment for a domain that otherwise offers none — the caller gets to run the conversation many times before the one that counts, and the model gets many scored trajectories from an interaction that, in the wild, would produce exactly one. Learning that sticks means consolidation, not recall: the caller carries a few sharpened intuitions into the real conversation, and the model distills scored sessions into its weights rather than an ever-growing context window.
 
-## The Research Problem
+## A More Natural Interface
 
-Most conversational AI evaluation is turn-level. Give the model an input, check the output. Did it say the right thing?
+Most conversational AI evaluation is turn-based. Give the model an input, check the output. Convert to Speech with auxiliary STT and TTS components. A turn-based cascade (STT → LLM → TTS) doesn't just add latency — it destroys the signal needed for attuned conversations. STT collapses audio to text, which throws away timing, prosody, hesitation, and silence. Many smaller model components adds infrastructure complexity that can be simplified in an encapsulated model that can improve via axes of scaling (data, compute, model size).
 
-Long-horizon evaluation asks something harder: can a voice agent stay behaviorally coherent across a structured, emotionally loaded conversation it did not fully control?
-
-Rehearse fixes the session structure to make this measurable. Three phases. One continuous call. No reset between them.
-
-| Phase | Duration | What the agent must do |
-|---|---|---|
-| Intake | ~1 min | Elicit a specific, emotionally anchored goal through active listening. Not a topic — a stakes-laden moment. |
-| Practice | ~3 min | Hold a realistic counterparty role: push back, hold silence, reflect incongruence between words and affect |
-| Feedback | ~1 min | Name the moment the caller's voice started to mean it. Not generic encouragement — specific acoustic evidence. |
+This project aims at implementing a time-based full-duplex audio model that weaves in retrieved context from memory into the conversation state using a background model. This allows for both natural conversation management and intelligence-enhancing reasoning, tool-use, and memory recall. 
 
 ## Capability Focus
 
-**Naturalness at scale.** Turn-based scaffolding flattens prosody over long sessions. Pauses become mechanical. Response latency becomes predictable. The capability goal is a conversation that stays sonically natural across the full arc. Progress is measured against human baseline recordings using blind listener ratings and prosodic feature distributions.
+**Naturalness at scale.** Turn-based scaffolding flattens prosody over long sessions and is brittle to barge-ins and simultaneous speaking. Pauses become mechanical. The capability goal is a conversation that stays sonically natural across the spectrum of conversation dynamics. Progress is measured against human baseline recordings using model-based MOS scorers.
 
-**Persona stability across phase transitions.** The agent plays three distinct roles in one call. Role drift is detectable in the transcript and in audio. The capability goal is consistent role behavior across all phase boundaries, validated by the eval harness scoring transition quality.
-
-**Outcome signal.** The ground truth is behavioral change in the real conversation the caller was preparing for. That signal arrives days later, if at all. The harder question is how to benchmark real-time interaction ability in real-world use cases at all. The current eval dimensions — affect perception, silence management, delivery — are a first approximation. We think the open research community is well-positioned to contribute independent, fair benchmarks here. New scorers, richer scenario datasets, and alternative judge implementations are the highest-value contributions to this repo.
+**Outcome signal.** The true target is behavioral change in the real conversation the caller was preparing for. That signal arrives days later, if at all and is not directly observable. The harder question is what "quality" means for a real-time interaction; intuitively we know turn-based evaluation (and dialogue) fails structurally, as there is no bases for when something is said. The interactive dimensions that, in a rehearsed conversation, are most of the skill. Our rubric therefore scores along two axes at once: content (was the substance right) and interaction (affect, delivery, silence, timing).
 
 ## Why Prosody
 
-Tone matters. Prosody is the signal that text evaluation cannot access. A caller can say "I'm ready" with a voice that says otherwise. An agent that responds to words alone will miss the incongruence — and the caller will feel it, even if they cannot articulate why.
+Tone matters. Prosody is the signal that text evaluation cannot access. A caller can say "I'm fine" with a voice that says otherwise. An agent that responds to words alone will miss the incongruence — and the caller will feel it, even if they cannot articulate why.
 
 Rehearse currently uses audio-native judges (Gemini 2.5 flash, which processes speech directly) to evaluate dimensions that have no text proxy:
 
@@ -123,9 +113,9 @@ make eval-watch RUN=<run_id>           # tail scores.jsonl live
 
 Each run produces `scores.jsonl` with per-turn scores, phase timings (with overrun warnings), and audio recordings. The same Pydantic types span the runtime and the eval harness — a frozen production session is replayable through any stage of the pipeline.
 
-## The Self-Improvement Loop
+## The Training Loop
 
-The model half of co-training is a closed loop: live sessions generate scored trajectories, scored trajectories inform model updates, and model updates improve the next session. Two improvement levers operate at different timescales.
+The model half of co-training is a closed loop: live sessions generate scored trajectories, scored trajectories update the training data mix, and model updates improve the next session. Two improvement levers operate at different timescales.
 
 ```
 [Live Session] → transcript.jsonl + prosody.jsonl + telemetry.jsonl
@@ -135,20 +125,19 @@ The model half of co-training is a closed loop: live sessions generate scored tr
 [Feedback Agent] → reads full trajectory + scores + improvement history
       │
       ├─→ Plateau NOT detected → HARNESS UPDATE
-      │     Rewrite system prompts, phase transitions, persona config
+      │     Rewrite system prompt and persona config
       │     Loop back to live session
       │
       └─→ Plateau detected → WEIGHT UPDATE
-            Select RL algorithm based on reward structure
             Dispatch LoRA training job on Modal GPU
             Loop back with adapted model
 ```
 
 **Sequencing rule:** Always start with harness iteration. Scaffold improvements are faster and cheaper — tune the prompts, phase logic, and persona compiler until scores stop moving, then fine-tune weights on the validated signal. Training on a noisy scaffold amplifies the noise.
 
-**The caller's loop.** The model side above has a literal artifact — scored trajectories, LoRA updates on Modal. The caller's side runs on the same session and the same rubric, but the "weight update" happens in the person: the sharpened intuition they carry into the real conversation. Both loops ultimately optimize the same outcome signal — whether the real conversation, days later, went better. That shared, sparse reward is the joint objective of the whole system.
+**The caller's loop.** Every rehearsal session is scored once, on one rubric, and that single scored session improves two learners at once. The model side is mechanical and lives in this repo: the scored conversation trajectory and conversation quality becomes training data, and improvement lands as a LoRA update on Modal. The caller side runs in the person: the reps plus the same rubric feedback become sharpened intuition they carry into the real conversation.
 
-The training stack (in `train/`) implements FSDP + LoRA on Moshi 7B with manual bf16 mixed precision and regime-aware wrapping: LoRA for sequential adaptation, full fine-tuning when the domain shift is large enough that rank-bounded adapters saturate.
+The training stack (in `train/`) implements FSDP + LoRA on Moshi 7B with manual bf16 mixed precision for sequential adaptation.
 
 ## Project Structure
 
