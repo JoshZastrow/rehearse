@@ -27,9 +27,9 @@ Rehearsal is a replayable practice environment for a domain that otherwise offer
 
 ## A More Natural Interface
 
-Most conversational AI evaluation is turn-based. Give the model an input, check the output. Convert to Speech with auxiliary STT and TTS components. A turn-based cascade (STT → LLM → TTS) doesn't just add latency — it destroys the signal needed for attuned conversations. STT collapses audio to text, which throws away timing, prosody, hesitation, and silence. Many smaller model components adds infrastructure complexity that can be simplified in an encapsulated model that can improve via axes of scaling (data, compute, model size).
+Most conversational AI interfaces are turn-based. Give the model a text based input, retrieve context, generate text output. Current voice systems leverage text-based LLMs as the core generation engine and tacks on audio conversions via speech-to-text and text-to-speech components, with voice activity detection to detect turn boundaries and diarization to segment speakers. However, this cascaded system (STT → LLM → TTS) doesn't just add latency — it loses prosody, pacing, and simulantaneous speaking needed for attuned conversations. Many smaller model components adds infrastructure complexity that can be simplified in an encapsulated model. 
 
-This project aims at implementing a time-based full-duplex audio model with a background language model that weaves in retrieved context from memory into the conversation state. This allows for both a qualitatively more natural conversation with simultaneous reasoning, tool-use, and context retrieval. 
+This project aims at decoupling the talker and the thinker, implementing a time-based full-duplex audio model with a background language model that weaves in retrieved context from memory into the conversation state. This allows for both a qualitatively more natural conversation with simultaneous reasoning, tool-use, and context retrieval. 
 
 ## Current Architecture
 
