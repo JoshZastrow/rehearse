@@ -28,13 +28,58 @@ uv sync --group livekit --group billing     # backend: livekit-api, stripe, pyjw
 cd web/livekit/app && npm install           # frontend: @clerk/clerk-react
 ```
 
-## 2. Clerk (Google login)
+## Chosen domain
 
-1. Create a Clerk application; enable **Google** under *User & Authentication →
-   Social Connections* (dashboard only, no code).
-2. Copy the **Publishable key** → frontend env `VITE_CLERK_PUBLISHABLE_KEY`.
-3. Copy the **JWKS URL** and **Issuer** → backend env `CLERK_JWKS_URL`,
-   `CLERK_ISSUER`.
+The product is hosted at **`rehearse.conle.ai`** (a subdomain of the owned
+`conle.ai`, on Cloudflare DNS). Clerk is set up as a **Secondary application**,
+so its Frontend API lives at **`clerk.rehearse.conle.ai`** and auth emails send
+from `@rehearse.conle.ai` — this isolates all Clerk DNS/email from the primary
+`conle.ai` business email. No path-based hosting: Clerk requires a subdomain.
+
+## 2. Clerk (Google login) — DONE
+
+Development instance uses Clerk's shared Google credentials; **production requires
+your own Google OAuth credentials**.
+
+1. Enable **Google** under *Configure → SSO Connections* (dashboard only, no code).
+2. **Google Cloud Console** (production):
+   - Verify `conle.ai` (auto-verified via Cloudflare in Google Search Console).
+   - OAuth consent screen (*Google Auth Platform*): **Branding** → Authorized
+     domain `conle.ai`; **Data Access** → scopes `openid`, `userinfo.email`,
+     `userinfo.profile` (non-sensitive, no Google review); **Audience** → publish.
+   - **Clients** → OAuth client ID → Web application:
+     - Authorized JavaScript origins: `https://rehearse.conle.ai`,
+       `https://clerk.rehearse.conle.ai`
+     - Authorized redirect URI: `https://clerk.rehearse.conle.ai/v1/oauth_callback`
+   - Copy Client ID + Client Secret.
+3. Clerk → *SSO Connections → Google → Use custom credentials* → paste Client ID +
+   Secret. Confirm the redirect URI matches.
+4. Keys (pull with `clerk env pull --instance prod`, or Dashboard → API keys):
+   - `VITE_CLERK_PUBLISHABLE_KEY` = the prod **`pk_live_…`** (non-secret) → Vercel env.
+   - Backend (public URLs, non-secret) → Modal Secrets:
+     - `CLERK_ISSUER=https://clerk.rehearse.conle.ai`
+     - `CLERK_JWKS_URL=https://clerk.rehearse.conle.ai/.well-known/jwks.json`
+   - `CLERK_SECRET_KEY` (`sk_live_…`) is **not** needed by the token gate (JWKS
+     verification only); add it to Modal Secrets only if backend Clerk API calls
+     are added later.
+
+## 2a. DNS (Cloudflare) — records to add under `conle.ai`
+
+Cloudflare dashboard → select `conle.ai` → **DNS → Records → Add record**. All are
+**CNAME**; leave Proxy status **DNS only** (grey cloud) for these:
+
+| Purpose | Type | Name (host) | Target |
+|---|---|---|---|
+| App (Vercel) | CNAME | `rehearse` | value Vercel shows when you add the domain |
+| Clerk Frontend API | CNAME | `clerk.rehearse` | value from Clerk's *Configure → Domains* |
+| Clerk accounts portal | CNAME | `accounts.rehearse` | from Clerk |
+| Clerk email | CNAME | `clkmail.rehearse` | from Clerk |
+| Clerk DKIM 1 | CNAME | `clk._domainkey.rehearse` | from Clerk |
+| Clerk DKIM 2 | CNAME | `clk2._domainkey.rehearse` | from Clerk |
+
+Exact targets are shown in the Vercel "add domain" panel and Clerk's Domains page —
+paste them verbatim. The Google Search Console `google-site-verification` TXT
+record (auto-added via Cloudflare) coexists fine; don't remove it.
 
 ## 3. Postgres (billing store)
 
@@ -74,10 +119,14 @@ Create a project; use its `wss://` URL and API key/secret:
   the token server as a `@modal.asgi_app()` wrapping `token_server.app`, and run
   the agent as a Modal function joining the per-session room. Put all secrets
   (Clerk, Stripe, LiveKit, `DATABASE_URL`) in **Modal Secrets**, not `.env`.
-- **Vercel** — build `web/livekit/app` (Vite static). Env:
+- **Vercel** — project **root directory `web/livekit/app`**, framework Vite,
+  build `npm run build`, output `dist`. Add domain **`rehearse.conle.ai`** (Vercel
+  prints the Cloudflare CNAME to add; see §2a). Env:
   `VITE_LIVEKIT_URL` (LiveKit Cloud wss), `VITE_TOKEN_ENDPOINT` (Modal token
-  server URL), `VITE_CLERK_PUBLISHABLE_KEY`. Set `ALLOWED_ORIGINS` on the token
-  server to the Vercel origin(s).
+  server URL), `VITE_CLERK_PUBLISHABLE_KEY` (prod `pk_live_…`). Set
+  `ALLOWED_ORIGINS=https://rehearse.conle.ai` on the token server.
+  Note: the frontend alone renders the Clerk sign-in gate, but starting a **call**
+  requires the backend (Modal token server + LiveKit Cloud) to be deployed too.
 
 ## Environment variable summary
 
