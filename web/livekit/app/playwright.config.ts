@@ -4,6 +4,9 @@ import { dirname, resolve } from 'node:path'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, '../../..')
+// livekit-server stderr (DTLS transport warnings) is teed here so the
+// graceful-teardown spec can assert the server logged no dtls timeouts.
+const LK_LOG = resolve(__dirname, 'test-results/livekit-server.log')
 
 // Shared LiveKit dev credentials. livekit-server --dev ships with these built in.
 const LK_ENV = {
@@ -44,7 +47,10 @@ export default defineConfig({
   webServer: process.env.CI ? undefined : [
     {
       // LiveKit dev server: in-memory, built-in devkey/secret, ws on :7880.
-      command: 'livekit-server --dev --bind 0.0.0.0',
+      // Mirror `make _livekit-server`: filter the benign "error reading data
+      // channel" transport WARNs, then tee the surviving log to a file so the
+      // graceful-teardown spec asserts on exactly what the user's terminal sees.
+      command: `mkdir -p "$(dirname "${LK_LOG}")" && livekit-server --dev --bind 0.0.0.0 --logging.level warn 2>&1 | grep --line-buffered -v "error reading data channel" > "${LK_LOG}"`,
       url: 'http://localhost:7880',
       reuseExistingServer: !process.env.CI,
       timeout: 30_000,

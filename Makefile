@@ -128,8 +128,11 @@ eval-watch: ## tail scores.jsonl for a run and render a live aggregate; usage: m
 rehearse-web: ## start livekit-server + token server + agent + Vite dev server (WebRTC prototype)
 	$(MAKE) -j4 _livekit-server _token-server _rehearse-web-agent _rehearse-web-app
 
+# _livekit-server filters the benign transport WARNs livekit-server logs on every
+# peer disconnect (graceful or not — proven unavoidable client-side); all other
+# warnings stay visible. @-quiet so the filter pattern isn't itself echoed.
 _livekit-server: ## start livekit-server --dev on ws://localhost:7880 (install: brew install livekit)
-	livekit-server --dev --bind 0.0.0.0 --logging.level warn
+	@livekit-server --dev --bind 0.0.0.0 --logging.level warn 2>&1 | grep --line-buffered -v "error reading data channel"
 
 _token-server: ## start LiveKit JWT token server on http://localhost:8765
 	uv run python web/livekit/token_server.py
