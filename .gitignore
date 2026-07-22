@@ -65,3 +65,6 @@ web/livekit/app/playwright-report/
 !tests/e2e/sessions/
 tests/e2e/sessions/*
 !tests/e2e/sessions/.gitkeep
+
+# Local handoff artifacts (git bundle/patch) — not part of the repo
+/_handoff/

@@ -30,7 +30,9 @@ Architecture: aiohttp web server on port 8998, proxied by @modal.web_server.
 This avoids Modal's ASGI/protobuf serialization layer entirely, matching
 Moshi's own server.py architecture.
 
-Cost: ~$0 when idle (scaledown_window=60min). Spins up in ~60s from HF cache.
+Cost: ~$0 when idle (scaledown_window=5min). Spins up in ~60s from HF cache.
+Metered billing charges active session wall-clock only; the short scaledown
+window keeps post-call idle-GPU burn small (see rehearse/billing/cost.py).
 """
 from __future__ import annotations
 
@@ -622,7 +624,7 @@ class _InteractiveServerBase:
 @app.cls(
     image=interactive_image,
     gpu="A10G",
-    scaledown_window=60 * MINUTES,
+    scaledown_window=5 * MINUTES,
     timeout=30 * MINUTES,
     volumes={"/root/.cache/huggingface": hf_cache_vol, _SESSIONS_MOUNT: sessions_vol},
 )
@@ -640,7 +642,7 @@ class ProviderServer(_InteractiveServerBase):
 @app.cls(
     image=interactive_image,
     gpu="A10G",
-    scaledown_window=60 * MINUTES,
+    scaledown_window=5 * MINUTES,
     timeout=30 * MINUTES,
     volumes={"/root/.cache/huggingface": hf_cache_vol, _SESSIONS_MOUNT: sessions_vol},
 )
