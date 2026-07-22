@@ -40,14 +40,14 @@ from tests._fakes import LocalTtsProviderBackend  # noqa: E402
 log = logging.getLogger("e2e.runner")
 
 
-def _load_serve_session():
-    """Import serve_session() from web/livekit/agent/agent.py by path."""
+def _load_agent_module():
+    """Import web/livekit/agent/agent.py by path (serve_session + run_until_signal)."""
     agent_path = _REPO_ROOT / "web" / "livekit" / "agent" / "agent.py"
     spec = importlib.util.spec_from_file_location("_rehearse_livekit_agent", agent_path)
     assert spec and spec.loader, f"cannot load {agent_path}"
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    return mod.serve_session
+    return mod
 
 
 def _emit(line: str) -> None:
@@ -82,38 +82,45 @@ async def run() -> None:
         .to_jwt()
     )
 
+    agent_mod = _load_agent_module()
     room = rtc.Room()
     audio_source = rtc.AudioSource(sample_rate=16000, num_channels=1)
     track = rtc.LocalAudioTrack.create_audio_track("agent-audio", audio_source)
 
     await room.connect(lk_url, token)
-    await room.local_participant.publish_track(
-        track,
-        rtc.TrackPublishOptions(source=rtc.TrackSource.SOURCE_MICROPHONE),
-    )
+    # Disconnect on any exit — including a shutdown cancel that lands before the
+    # session starts — so the killed peer never DTLS-times-out server-side.
+    try:
+        await room.local_participant.publish_track(
+            track,
+            rtc.TrackPublishOptions(source=rtc.TrackSource.SOURCE_MICROPHONE),
+        )
 
-    stream = LiveKitRoomStream()
-    await stream.setup(room, audio_source)
+        stream = LiveKitRoomStream()
+        await stream.setup(room, audio_source)
 
-    # Safety: end the inbound stream promptly when the browser leaves, so the
-    # session completes even if the audio-track end event is delayed.
-    @room.on("participant_disconnected")
-    def _on_left(participant: object) -> None:  # noqa: ANN401
-        log.info("participant left — closing stream")
-        stream.close()
+        # Safety: end the inbound stream promptly when the browser leaves, so the
+        # session completes even if the audio-track end event is delayed.
+        @room.on("participant_disconnected")
+        def _on_left(participant: object) -> None:  # noqa: ANN401
+            log.info("participant left — closing stream")
+            stream.close()
 
-    _emit("AGENT_READY")
+        _emit("AGENT_READY")
 
-    serve_session = _load_serve_session()
-    backend = LocalTtsProviderBackend()
-    await serve_session(room, stream, backend, store, session_id, participant_wait_s=20.0)
+        backend = LocalTtsProviderBackend()
+        await agent_mod.serve_session(
+            room, stream, backend, store, session_id, participant_wait_s=20.0
+        )
+    finally:
+        await agent_mod._disconnect(room)
 
     _emit("AGENT_DONE")
 
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, stream=sys.stderr)
-    asyncio.run(run())
+    asyncio.run(_load_agent_module().run_until_signal(run()))
 
 
 if __name__ == "__main__":

@@ -28,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import signal
 import sys
 import uuid
 from pathlib import Path
@@ -63,6 +64,28 @@ async def _disconnect(room: object) -> None:
         log.warning(
             "room.disconnect() timed out after %ss — exiting anyway", _DISCONNECT_TIMEOUT_S
         )
+
+
+async def run_until_signal(coro: object) -> None:
+    """Run ``coro`` as a task, cancelling it cleanly on SIGINT/SIGTERM.
+
+    Plain ``asyncio.run(coro)`` turns Ctrl+C into a KeyboardInterrupt that
+    unwinds the stack without letting the room disconnect finish, so livekit-
+    server is left reading a dead peer and logs a DTLS timeout. Cancelling the
+    task instead lets every ``finally: await _disconnect(room)`` run to
+    completion — a graceful leave the server tears down without warning.
+    """
+    task = asyncio.ensure_future(coro)  # type: ignore[arg-type]
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, task.cancel)
+        except NotImplementedError:  # not the main thread / unsupported platform
+            pass
+    try:
+        await task
+    except asyncio.CancelledError:
+        log.info("shutdown signal received — room disconnected cleanly")
 
 
 # Resident-loop pacing: poll cadence while waiting for a caller, and the pause
@@ -168,56 +191,62 @@ async def run_call() -> None:
     log.info("connecting to LiveKit room '%s' at %s", room_name, lk_url)
     await room.connect(lk_url, token)
     log.info("connected — waiting for a caller")
-    await _wait_for_participant(room)
+    # Disconnect on any exit, including a shutdown cancel that lands while the
+    # agent is idle in the room waiting for the next caller (before serve_session
+    # owns the room) — otherwise the killed peer DTLS-times-out server-side.
+    try:
+        await _wait_for_participant(room)
 
-    session_id = str(uuid.uuid4())
-    session_root = Path(os.environ.get("SESSION_ROOT", "sessions"))
-    store = LocalFilesystemStore(session_root, "http://localhost:8000")
-    write_session_manifest(store, session_id)
+        session_id = str(uuid.uuid4())
+        session_root = Path(os.environ.get("SESSION_ROOT", "sessions"))
+        store = LocalFilesystemStore(session_root, "http://localhost:8000")
+        write_session_manifest(store, session_id)
 
-    audio_source = rtc.AudioSource(sample_rate=16000, num_channels=1)
-    track = rtc.LocalAudioTrack.create_audio_track("agent-audio", audio_source)
-    await room.local_participant.publish_track(
-        track,
-        rtc.TrackPublishOptions(source=rtc.TrackSource.SOURCE_MICROPHONE),
-    )
+        audio_source = rtc.AudioSource(sample_rate=16000, num_channels=1)
+        track = rtc.LocalAudioTrack.create_audio_track("agent-audio", audio_source)
+        await room.local_participant.publish_track(
+            track,
+            rtc.TrackPublishOptions(source=rtc.TrackSource.SOURCE_MICROPHONE),
+        )
 
-    stream = LiveKitRoomStream()
-    await stream.setup(room, audio_source)
+        stream = LiveKitRoomStream()
+        await stream.setup(room, audio_source)
 
-    # End the inbound stream promptly when the caller leaves, so the session
-    # completes even if the audio-track end event is delayed. Without this the
-    # session lingers, swallows the next caller's audio, and the resident loop
-    # never gets to serve call #2 (observed: send_after_close_dropped on the
-    # prior session id, then a dtls timeout for the new participant).
-    @room.on("participant_disconnected")
-    def _on_caller_left(participant: object) -> None:  # noqa: ANN401
-        log.info("caller left — closing stream")
-        stream.close()
+        # End the inbound stream promptly when the caller leaves, so the session
+        # completes even if the audio-track end event is delayed. Without this the
+        # session lingers, swallows the next caller's audio, and the resident loop
+        # never gets to serve call #2 (observed: send_after_close_dropped on the
+        # prior session id, then a dtls timeout for the new participant).
+        @room.on("participant_disconnected")
+        def _on_caller_left(participant: object) -> None:  # noqa: ANN401
+            log.info("caller left — closing stream")
+            stream.close()
 
-    backend = ModalInteractiveBackend(endpoint) if endpoint else None
+        backend = ModalInteractiveBackend(endpoint) if endpoint else None
 
-    # Billing context: the token server mints the room as rehearse-<uid>-<uuid>,
-    # so the clerk_user_id rides in on the room name. Look up the Stripe customer
-    # for the meter event. Unset DATABASE_URL → in-memory store (no-op billing).
-    from rehearse.auth.rooms import clerk_id_from_room  # noqa: PLC0415
-    from rehearse.billing.store import build_billing_store  # noqa: PLC0415
+        # Billing context: the token server mints the room as rehearse-<uid>-<uuid>,
+        # so the clerk_user_id rides in on the room name. Look up the Stripe customer
+        # for the meter event. Unset DATABASE_URL → in-memory store (no-op billing).
+        from rehearse.auth.rooms import clerk_id_from_room  # noqa: PLC0415
+        from rehearse.billing.store import build_billing_store  # noqa: PLC0415
 
-    billing_store = build_billing_store(os.environ.get("DATABASE_URL"))
-    clerk_user_id = clerk_id_from_room(room_name)
-    user = billing_store.get_user(clerk_user_id) if clerk_user_id else None
-    stripe_customer_id = user.stripe_customer_id if user else None
+        billing_store = build_billing_store(os.environ.get("DATABASE_URL"))
+        clerk_user_id = clerk_id_from_room(room_name)
+        user = billing_store.get_user(clerk_user_id) if clerk_user_id else None
+        stripe_customer_id = user.stripe_customer_id if user else None
 
-    await serve_session(
-        room,
-        stream,
-        backend,
-        store,
-        session_id,
-        billing_store=billing_store,
-        clerk_user_id=clerk_user_id,
-        stripe_customer_id=stripe_customer_id,
-    )
+        await serve_session(
+            room,
+            stream,
+            backend,
+            store,
+            session_id,
+            billing_store=billing_store,
+            clerk_user_id=clerk_user_id,
+            stripe_customer_id=stripe_customer_id,
+        )
+    finally:
+        await _disconnect(room)
 
 
 async def run_agent() -> None:
@@ -235,7 +264,7 @@ def main() -> None:
     load_dotenv(_REPO_ROOT / ".env", override=False)
     load_dotenv(Path(__file__).parent / ".env", override=False)
     logging.basicConfig(level=logging.INFO)
-    asyncio.run(run_agent())
+    asyncio.run(run_until_signal(run_agent()))
 
 
 if __name__ == "__main__":
