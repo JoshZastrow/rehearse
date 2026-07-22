@@ -305,6 +305,22 @@ export default function LiveSpeechDialogue() {
   const session = useVoiceSession()
   const state = session.connectionState
   const connected = state === 'connected'
+  const warming = state === 'warming'
+  const busy = state === 'connecting' || warming
+
+  // Trigger the model's cold start when the call screen mounts, so the ~60s
+  // spin-up overlaps with the user reading the UI / granting mic permission
+  // rather than starting at "tap to start". Gated + rate-limited server-side so
+  // only a paying user can spin up a GPU. Fires once. Trade-off: this warms the
+  // model on every call-screen visit — move to a stronger intent signal (e.g.
+  // the first tap) if idle page loads become a cost concern.
+  const prewarmedRef = useRef(false)
+  useEffect(() => {
+    if (prewarmedRef.current) return
+    prewarmedRef.current = true
+    void session.prewarm()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const callerActive = connected && session.activeSpeaker === 'user'
   const providerActive = connected && session.activeSpeaker === 'agent'
@@ -332,13 +348,15 @@ export default function LiveSpeechDialogue() {
       ? 'CONNECTED'
       : state === 'connecting'
         ? 'CONNECTING'
-        : state === 'error'
-          ? 'CONNECTION FAILED'
-          : 'TAP TO START'
+        : warming
+          ? 'WARMING UP…'
+          : state === 'error'
+            ? 'CONNECTION FAILED'
+            : 'TAP TO START'
 
   const onMic = () => {
     if (state === 'idle' || state === 'error') void session.connect()
-    else if (connected) session.disconnect()
+    else if (connected || warming) session.disconnect()
   }
 
   return (
@@ -364,13 +382,19 @@ export default function LiveSpeechDialogue() {
               style={{
                 ...statusDot,
                 background: connected ? LIVE_GREEN : WARM_TAUPE,
-                animation: connected ? 'lsd-blink 1.4s ease-in-out infinite' : 'none',
+                animation:
+                  connected || warming ? 'lsd-blink 1.4s ease-in-out infinite' : 'none',
               }}
             />
             <span style={{ ...statusText_, color: connected ? LIVE_GREEN : WARM_MUTED }}>
               {statusText}
             </span>
           </div>
+          {warming && (
+            <div style={{ ...statusText_, color: WARM_MUTED, opacity: 0.75, marginTop: 4 }}>
+              the first call can take up to a minute
+            </div>
+          )}
         </div>
 
         <div style={headerSide}>
@@ -410,9 +434,9 @@ export default function LiveSpeechDialogue() {
       <footer style={bottomWrap}>
         <div style={controlBar}>
           <button
-            style={micBtn(connected, state === 'connecting')}
+            style={micBtn(connected, busy)}
             onClick={onMic}
-            aria-label={connected ? 'End call' : 'Start call'}
+            aria-label={connected || warming ? 'End call' : 'Start call'}
           >
             {connected && <span style={micPulse} />}
             {connected ? (

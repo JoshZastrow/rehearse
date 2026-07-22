@@ -1,5 +1,21 @@
 # TODO
 
+## Session data persistence (training-data flywheel)
+
+- [x] **Persist web-call transcripts to the `rehearse-sessions` Modal Volume.**
+  Done in `infra/web.py`: `serve_room_job` mounts `rehearse-sessions` at
+  `/mnt/sessions`, sets `SESSION_ROOT` to it, and `sessions_vol.commit()`s on call
+  end. session_id already matches the GPU interactive server's (agent passes it in
+  the handshake), so transcript + audio co-locate under `/mnt/sessions/<id>/`.
+- [ ] **Verify on the first live call** that both file sets survive in the same
+  dir — agent writes `transcript.jsonl`/`session.json`; the interactive server
+  writes `caller_stream.pcm`/`provider_stream.pcm`/`tokens.jsonl`/`mask.jsonl`.
+  Two containers commit to the same dir; Modal merges different files, but confirm
+  nothing clobbers (this is the one untested assumption).
+- [ ] **Consent/retention gate before collecting.** Real conversations = user PII.
+  Confirm the Clerk consent language + data-retention policy actually cover
+  "we store your conversation to improve the model" before this runs in prod.
+
 ## In progress
 
 - [ ] **Eval scoring baseline** — run `make eval-voice-rollout` across all 3 scenarios, capture baseline scores to track regressions

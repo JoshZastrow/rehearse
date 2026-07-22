@@ -1,2 +1,9 @@
-livekit-agents[openai,silero,deepgram,cartesia,turn-detector]>=0.12
+# Runtime deps for the agent dispatch service (web/livekit/agent/agent.py).
+# It joins LiveKit rooms directly via rtc.Room and exposes a small FastAPI
+# /dispatch endpoint — NOT the livekit-agents worker framework, which can't
+# coexist with this repo's opentelemetry pins (see agent.py module docstring).
+livekit>=1.0
+livekit-api>=1.0
+fastapi
+uvicorn
 python-dotenv

@@ -154,3 +154,130 @@ def test_each_call_gets_a_fresh_room() -> None:
     r1 = client.get(_ENDPOINT, headers=headers).json()["room"]
     r2 = client.get(_ENDPOINT, headers=headers).json()["room"]
     assert r1 != r2
+
+
+# ---------------------------------------------------------------------------
+# Agent dispatch: the caller's per-session room must reach the agent, or the
+# agent never joins the room and the call is silent. The token server pushes
+# the minted room to the agent's /dispatch endpoint before returning.
+# ---------------------------------------------------------------------------
+
+
+class _RecordingDispatcher:
+    """Captures dispatched rooms; optionally raises to simulate an agent outage."""
+
+    def __init__(self, raises: bool = False) -> None:
+        self.rooms: list[str] = []
+        self._raises = raises
+
+    async def __call__(self, url: str, room: str) -> None:
+        self.rooms.append(room)
+        if self._raises:
+            raise RuntimeError("agent unreachable")
+
+
+def _dispatch_client(dispatcher, **cfg):
+    cfg.setdefault("agent_dispatch_url", "http://agent.local")
+    app = _TS.create_app(
+        _FakeVerifier(uid="user_xyz"),
+        _ready_store("user_xyz"),
+        _config(**cfg),
+        allowed_origins=[_ALLOWED],
+        dispatcher=dispatcher,
+    )
+    return TestClient(app)
+
+
+def test_dispatches_minted_room_to_agent() -> None:
+    pytest.importorskip("livekit.api", reason="livekit-api not installed")
+    dispatcher = _RecordingDispatcher()
+    client = _dispatch_client(dispatcher)
+    body = client.get(_ENDPOINT, headers={"Authorization": "Bearer good"}).json()
+    # The exact room the caller is handed is the room the agent is told to join.
+    assert dispatcher.rooms == [body["room"]]
+
+
+def test_503_when_agent_dispatch_fails() -> None:
+    pytest.importorskip("livekit.api", reason="livekit-api not installed")
+    client = _dispatch_client(_RecordingDispatcher(raises=True))
+    resp = client.get(_ENDPOINT, headers={"Authorization": "Bearer good"})
+    assert resp.status_code == 503
+
+
+def test_no_dispatch_when_url_unset() -> None:
+    pytest.importorskip("livekit.api", reason="livekit-api not installed")
+    dispatcher = _RecordingDispatcher()
+    client = _dispatch_client(dispatcher, agent_dispatch_url="")
+    resp = client.get(_ENDPOINT, headers={"Authorization": "Bearer good"})
+    assert resp.status_code == 200
+    assert dispatcher.rooms == []
+
+
+# ---------------------------------------------------------------------------
+# Pre-warm: the frontend hits /api/livekit/warm on the call screen so the Modal
+# model's ~60s cold start overlaps with the user reading the UI instead of
+# starting at "tap to start". Auth + billing gated so only paying users can spin
+# up a GPU. A GET to the provider's /health both triggers and observes warmup.
+# ---------------------------------------------------------------------------
+
+_WARM = "/api/livekit/warm"
+
+
+def test_provider_health_url_derivation() -> None:
+    f = _TS._provider_health_url
+    assert f("wss://host--x.modal.run/ws") == "https://host--x.modal.run/health"
+    assert f("ws://localhost:8000/ws") == "http://localhost:8000/health"
+    assert f("") is None
+
+
+class _RecordingProber:
+    def __init__(self, warm: bool = True, raises: bool = False) -> None:
+        self.urls: list[str] = []
+        self._warm = warm
+        self._raises = raises
+
+    async def __call__(self, health_url: str, timeout: float) -> bool:
+        self.urls.append(health_url)
+        if self._raises:
+            raise RuntimeError("probe failed")
+        return self._warm
+
+
+def _warm_client(prober, uid: str = "user_abc", store=None, **cfg):
+    cfg.setdefault("interactive_provider_endpoint", "wss://host--x.modal.run/ws")
+    app = _TS.create_app(
+        _FakeVerifier(uid=uid),
+        store if store is not None else _ready_store(uid),
+        _config(**cfg),
+        allowed_origins=[_ALLOWED],
+        prober=prober,
+    )
+    return TestClient(app)
+
+
+def test_warm_probes_provider_health() -> None:
+    prober = _RecordingProber(warm=True)
+    client = _warm_client(prober)
+    resp = client.get(_WARM, headers={"Authorization": "Bearer good"})
+    assert resp.status_code == 200
+    assert resp.json()["warm"] is True
+    assert prober.urls == ["https://host--x.modal.run/health"]
+
+
+def test_warm_gated_on_billing() -> None:
+    store = InMemoryBillingStore()
+    store.upsert_user("user_abc", billing_ready=False)
+    prober = _RecordingProber()
+    client = _warm_client(prober, store=store)
+    resp = client.get(_WARM, headers={"Authorization": "Bearer good"})
+    assert resp.status_code == 402
+    assert prober.urls == []  # no GPU spin-up for non-paying users
+
+
+def test_warm_no_endpoint_configured() -> None:
+    prober = _RecordingProber()
+    client = _warm_client(prober, interactive_provider_endpoint="")
+    resp = client.get(_WARM, headers={"Authorization": "Bearer good"})
+    assert resp.status_code == 200
+    assert resp.json()["warm"] is False
+    assert prober.urls == []
