@@ -4,6 +4,8 @@ __pycache__/
 .venv/
 .env
 .env.local
+# Real per-environment secret files; only the *.example templates are committed.
+envs/*.env
 .pytest_cache/
 .ruff_cache/
 .pyright/

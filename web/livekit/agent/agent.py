@@ -4,12 +4,18 @@ Connects directly to a LiveKit room via rtc.Room (no livekit-agents framework),
 then delegates to run_livekit_session() which handles all audio routing and
 artifact writing.
 
+Dispatch model: the token server mints a per-session room (rehearse-<uid>-<uuid>)
+and POSTs it to this service's /dispatch endpoint. The service joins *that* room —
+never a fixed one — so it always lands in the caller's room. (A registered
+livekit-agents worker would do this automatically, but that framework can't
+coexist with this repo's opentelemetry pins, so we dispatch explicitly.)
+
 Structure:
-  run_agent()     — resident loop: run_call() for every caller, respawning after
-                    finished or crashed calls until the process is killed.
-  run_call()      — one call: resolves env, builds the real room/track/stream/
-                    backend (needs livekit-rtc), waits for a caller, then calls
-                    serve_session().
+  build_dispatch_app() — FastAPI: POST /dispatch {room} schedules serve_room(room);
+                    GET /health. `launch` is injectable for hermetic routing tests.
+  serve_room()    — one call: resolves env, builds the real room/track/stream/
+                    backend (needs livekit-rtc) for the dispatched room name,
+                    waits for a caller, then calls serve_session().
   serve_session() — transport-agnostic over `room`: waits for a participant, runs
                     the session, disconnects. No livekit import → hermetically
                     testable with a FakeRoom + FakeRoomStream (see test_livekit_e2e).
@@ -18,7 +24,7 @@ Environment variables:
   LIVEKIT_URL                    ws://localhost:7880 (or wss:// for cloud)
   LIVEKIT_API_KEY                devkey
   LIVEKIT_API_SECRET             secret
-  LIVEKIT_ROOM_NAME              rehearse-room
+  AGENT_DISPATCH_PORT            dispatch service port (default 8766)
   INTERACTIVE_PROVIDER_ENDPOINT  wss://...modal.run/ws
   SESSION_ROOT                   sessions (optional; default: ./sessions)
 """
@@ -74,6 +80,9 @@ async def run_until_signal(coro: object) -> None:
     server is left reading a dead peer and logs a DTLS timeout. Cancelling the
     task instead lets every ``finally: await _disconnect(room)`` run to
     completion — a graceful leave the server tears down without warning.
+
+    The dispatch service (main) runs under uvicorn, which owns its own signals;
+    this wrapper is for the standalone asyncio entrypoints (e.g. the e2e runner).
     """
     task = asyncio.ensure_future(coro)  # type: ignore[arg-type]
     loop = asyncio.get_running_loop()
@@ -88,10 +97,8 @@ async def run_until_signal(coro: object) -> None:
         log.info("shutdown signal received — room disconnected cleanly")
 
 
-# Resident-loop pacing: poll cadence while waiting for a caller, and the pause
-# between calls (also the retry delay when livekit-server isn't up yet).
+# Poll cadence while waiting for the caller to appear in the dispatched room.
 _PARTICIPANT_POLL_S = 0.5
-_RESPAWN_DELAY_S = 2.0
 
 
 async def _wait_for_participant(room: object) -> None:
@@ -153,8 +160,12 @@ async def serve_session(
         log.info("session %s complete", session_id)
 
 
-async def run_call() -> None:
-    """One full call: connect, wait for a caller, run the session, disconnect."""
+async def serve_room(room_name: str) -> None:
+    """One full call in `room_name`: connect, wait for the caller, run, disconnect.
+
+    `room_name` is the per-session room the token server dispatched us to
+    (rehearse-<uid>-<uuid>); the clerk_user_id for metering rides in on it.
+    """
     from livekit import rtc  # noqa: PLC0415
     from livekit.api import AccessToken, VideoGrants  # noqa: PLC0415
 
@@ -165,7 +176,6 @@ async def run_call() -> None:
     lk_url = os.environ.get("LIVEKIT_URL", "ws://localhost:7880")
     api_key = os.environ.get("LIVEKIT_API_KEY", "devkey")
     api_secret = os.environ.get("LIVEKIT_API_SECRET", "secret")
-    room_name = os.environ.get("LIVEKIT_ROOM_NAME", "rehearse-room")
     endpoint = os.environ.get("INTERACTIVE_PROVIDER_ENDPOINT", "")
 
     if not endpoint:
@@ -249,22 +259,57 @@ async def run_call() -> None:
         await _disconnect(room)
 
 
-async def run_agent() -> None:
-    """Resident loop — serve calls back-to-back until the process is killed."""
-    while True:
+def _launch_serve_room(room_name: str) -> None:
+    """Schedule serve_room as a background task; a crash in one call never takes
+    down the dispatch service or the other in-flight calls."""
+
+    async def _run() -> None:
         try:
-            await run_call()
-            log.info("call finished — respawning for the next caller")
+            await serve_room(room_name)
         except Exception:
-            log.exception("call failed — respawning")
-        await asyncio.sleep(_RESPAWN_DELAY_S)
+            log.exception("serve_room failed for %s", room_name)
+
+    asyncio.create_task(_run())
+
+
+def build_dispatch_app(launch: object | None = None) -> object:
+    """FastAPI app: POST /dispatch {room} → schedule the agent into that room.
+
+    `launch(room_name)` defaults to scheduling serve_room as a background task;
+    it is injectable so routing can be tested without a LiveKit server. /dispatch
+    returns 202 immediately (it does not wait on the model cold start) so the
+    token server's request stays fast.
+    """
+    from fastapi import FastAPI, HTTPException  # noqa: PLC0415
+
+    launcher = launch if launch is not None else _launch_serve_room
+    app = FastAPI()
+
+    @app.post("/dispatch", status_code=202)
+    async def dispatch(payload: dict) -> dict:  # noqa: D401
+        room = payload.get("room")
+        if not room:
+            raise HTTPException(status_code=400, detail="room required")
+        log.info("dispatching agent to room '%s'", room)
+        launcher(room)
+        return {"dispatched": room}
+
+    @app.get("/health")
+    async def health() -> dict:  # noqa: D401
+        return {"ok": True}
+
+    return app
 
 
 def main() -> None:
+    import uvicorn  # noqa: PLC0415
+
     load_dotenv(_REPO_ROOT / ".env", override=False)
     load_dotenv(Path(__file__).parent / ".env", override=False)
     logging.basicConfig(level=logging.INFO)
-    asyncio.run(run_until_signal(run_agent()))
+    port = int(os.environ.get("AGENT_DISPATCH_PORT", "8766"))
+    log.info("agent dispatch service listening on :%d", port)
+    uvicorn.run(build_dispatch_app(), host="0.0.0.0", port=port)
 
 
 if __name__ == "__main__":

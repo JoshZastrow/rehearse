@@ -18,7 +18,7 @@ import structlog
 
 from rehearse.audio.livekit_stream import LiveKitCallerParticipant
 from rehearse.bus import FrameBus
-from rehearse.frames import EndOfCall, TranscriptDelta
+from rehearse.frames import EndOfCall, ProviderReady, TranscriptDelta
 from rehearse.memory.memory import NullCallerMemory
 from rehearse.phases.phases import PhaseBudgets
 from rehearse.session.conversation import run_session
@@ -92,9 +92,13 @@ async def run_livekit_session(
 
 
 async def _datachannel_bridge(stream: object, bus: FrameBus) -> None:
-    """Forward TranscriptDelta / EndOfCall frames to the DataChannel."""
+    """Forward ProviderReady / TranscriptDelta / EndOfCall frames to the DataChannel."""
     async for frame in bus.subscribe():
-        if isinstance(frame, TranscriptDelta):
+        if isinstance(frame, ProviderReady):
+            # The model is connected (cold start over) — let the UI reveal the call.
+            msg = {"v": _DC_SCHEMA_VERSION, "type": "provider_ready"}
+            await stream.publish_data(json.dumps(msg).encode())  # type: ignore[union-attr]
+        elif isinstance(frame, TranscriptDelta):
             speaker = "agent" if frame.speaker == Speaker.GUIDE else "user"
             msg = {
                 "v": _DC_SCHEMA_VERSION,

@@ -115,10 +115,30 @@ Create a project; use its `wss://` URL and API key/secret:
 
 ## 6. Deploy
 
-- **Modal** — deploy the Moshi backend (`make deploy-interactive`), and deploy
-  the token server as a `@modal.asgi_app()` wrapping `token_server.app`, and run
-  the agent as a Modal function joining the per-session room. Put all secrets
-  (Clerk, Stripe, LiveKit, `DATABASE_URL`) in **Modal Secrets**, not `.env`.
+- **Modal** — deploy the GPU model (`make deploy-interactive`), then the web
+  backend (`make deploy-web`, i.e. `infra/web.py`): the token server as a
+  `@modal.asgi_app()` and the agent as a per-call `serve_room_job` function. Both
+  are **CPU, scale-to-zero** — do **not** set `min_containers`.
+  - **Config → Modal secret, not `.env`.** Fill `envs/prod.env` (from
+    `envs/prod.env.example`) and run **`make sync-secrets`** to push it into the
+    `rehearse-web` Modal secret. Both functions read it as env vars. No dashboard.
+  - **Dispatch = `.spawn()` (not HTTP).** The token server mints a per-session
+    room and spawns `serve_room_job(room)` so the agent runs the whole call in its
+    own container, then scales to zero — nothing always-on. (`AGENT_DISPATCH_URL=spawn`
+    in the secret just flips dispatch on; the spawn dispatcher is injected in
+    `infra/web.py`. Locally, `make rehearse-web` uses the HTTP `/dispatch` path
+    instead — set `AGENT_DISPATCH_URL=http://localhost:8766`.)
+    We can't use a registered livekit-agents worker (auto-join) because that
+    framework conflicts with this repo's opentelemetry pins.
+- **Cold start (scale-to-zero, keep it cheap).** The GPU model stays scale-to-zero
+  (`scaledown_window`, ~$0 idle) — do **not** set `min_containers`. The ~60s cold
+  start is absorbed by the UI: the agent emits `provider_ready` over the LiveKit
+  data channel once the model socket opens, and the frontend shows a "warming up"
+  state until then (with a ~100s timeout → retry). Set
+  `INTERACTIVE_PROVIDER_ENDPOINT` on the **token server** too so `/api/livekit/warm`
+  can start that cold start early (the frontend fires it on the call screen). Only
+  the token server + agent need a home; both are cheap CPU processes (no GPU) and
+  may themselves be Modal CPU scale-to-zero if you want literal $0 idle.
 - **Vercel** — project **root directory `web/livekit/app`**, framework Vite,
   build `npm run build`, output `dist`. Add domain **`rehearse.conle.ai`** (Vercel
   prints the Cloudflare CNAME to add; see §2a). Env:
@@ -142,6 +162,10 @@ Create a project; use its `wss://` URL and API key/secret:
 | `MONTHLY_CREDIT_CEILING` | token server | per-user post-pay cap (default 5000 credits) |
 | `TOKEN_TTL_SECONDS` | token server | LiveKit token TTL (default 900) |
 | `RATE_LIMIT_PER_MINUTE` | token server | per-user token requests/min (default 6) |
+| `AGENT_DISPATCH_URL` | token server | agent base URL; POSTs each room to `/dispatch` so the agent joins it (unset → AI never joins) |
+| `AGENT_DISPATCH_PORT` | agent | dispatch service listen port (default 8766) |
+| `INTERACTIVE_PROVIDER_ENDPOINT` | agent + token server | Modal Moshi/PersonaPlex ws endpoint (token server derives its `/health` for `/warm`) |
+| `WARM_TIMEOUT_SECONDS` | token server | `/warm` health-probe timeout (default 90) |
 | `STRIPE_SECRET_KEY` | agent | report meter events (unset → no-op) |
 | `STRIPE_WEBHOOK_SECRET` | token server | verify webhook signatures |
 
