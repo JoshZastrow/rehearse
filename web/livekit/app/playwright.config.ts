@@ -52,9 +52,10 @@ export default defineConfig({
       stderr: 'pipe',
     },
     {
-      // Token minting server (FastAPI) — health check is the token endpoint.
+      // Token minting server (FastAPI). The token endpoint requires a Clerk
+      // JWT (503/401 without one), so readiness is the unauthenticated /healthz.
       command: 'uv run python web/livekit/token_server.py',
-      url: 'http://localhost:8765/api/livekit/token',
+      url: 'http://localhost:8765/healthz',
       cwd: REPO_ROOT,
       env: { ...LK_ENV, TOKEN_SERVER_PORT: '8765' },
       reuseExistingServer: !process.env.CI,

@@ -8,6 +8,9 @@ GET /api/livekit/token
     →  429 if the user is rate-limited
     →  503 if the server is not configured with a Clerk verifier
 
+GET /healthz
+    →  200 {"status": "ok"} — unauthenticated readiness probe (CI / Playwright).
+
 Every request is authenticated (Clerk JWT), gated on billing readiness, and
 issued a *per-session* room (`rehearse-<clerk_user_id>-<uuid>`) with a short-TTL
 token — no shared anonymous room. The agent joins the same room and recovers the
@@ -127,6 +130,13 @@ def create_app(
         allow_headers=["Authorization", "Content-Type"],
     )
     limiter = _SlidingWindowRateLimiter(max_per_minute=config.rate_limit_per_minute)
+
+    @app.get("/healthz")
+    async def healthz() -> dict:  # noqa: D401
+        # Unauthenticated readiness probe. The token endpoint requires a Clerk
+        # JWT and returns 503/401 without one, so it can't double as a "server
+        # up?" check — CI and the local Playwright config poll this instead.
+        return {"status": "ok"}
 
     @app.get("/api/livekit/token")
     async def get_token(  # noqa: D401
