@@ -298,7 +298,6 @@ function SpeakerPanel({
 const YOU_ACCENT = '#3f9b78' // jungle green
 const SYSTEM_ACCENT = '#c2a06a' // sandalwood
 const LIVE_GREEN = '#3f9b78'
-const WARM_TEXT = '#ece0cd'
 const WARM_MUTED = '#8a7d6a'
 const WARM_TAUPE = '#6b6151'
 
@@ -359,7 +358,7 @@ export default function LiveSpeechDialogue() {
         </div>
 
         <div style={headerCenter}>
-          <h1 style={title}>LIVE SPEECH DIALOGUE</h1>
+          <h1 style={title}>REHEARSE</h1>
           <div style={statusLine}>
             <span
               style={{
@@ -411,36 +410,24 @@ export default function LiveSpeechDialogue() {
       <footer style={bottomWrap}>
         <div style={controlBar}>
           <button
-            style={{ ...sideBtn, opacity: connected ? 1 : 0.35, color: session.isMicOn ? WARM_TEXT : '#d98a6a' }}
-            onClick={session.toggleMic}
-            disabled={!connected}
-            aria-label={session.isMicOn ? 'Mute' : 'Unmute'}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
-              <rect x="9" y="3" width="6" height="12" rx="3" />
-              <path d="M5 11a7 7 0 0 0 14 0M12 18v3" strokeLinecap="round" />
-            </svg>
-            <span style={sideBtnLabel}>Mute</span>
-          </button>
-
-          <button
             style={micBtn(connected, state === 'connecting')}
             onClick={onMic}
             aria-label={connected ? 'End call' : 'Start call'}
           >
             {connected && <span style={micPulse} />}
-            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke={connected ? '#0e1a12' : '#7fb497'} strokeWidth="2">
-              <rect x="9" y="2.5" width="6" height="12.5" rx="3" />
-              <path d="M5 11a7 7 0 0 0 14 0M12 18.5v3" strokeLinecap="round" />
-            </svg>
-          </button>
-
-          <button style={{ ...sideBtn, opacity: 0.55 }} aria-label="Settings">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
-              <circle cx="12" cy="12" r="3" />
-              <path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2" />
-            </svg>
-            <span style={sideBtnLabel}>Settings</span>
+            {connected ? (
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="#0e1a12" stroke="#0e1a12" strokeWidth="2">
+                <rect x="7" y="7" width="10" height="10" rx="2" />
+              </svg>
+            ) : (
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#7fb497" strokeWidth="1.9">
+                <path
+                  d="M6.6 10.8a15 15 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.24 11.4 11.4 0 0 0 3.6.58 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1 11.4 11.4 0 0 0 .58 3.6 1 1 0 0 1-.24 1z"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            )}
           </button>
         </div>
       </footer>
@@ -663,23 +650,6 @@ const controlBar: React.CSSProperties = {
   borderRadius: 999,
   border: '1px solid #2a2318',
   background: 'rgba(16, 12, 7, 0.72)',
-}
-
-const sideBtn: React.CSSProperties = {
-  background: 'none',
-  border: 'none',
-  cursor: 'pointer',
-  display: 'flex',
-  alignItems: 'center',
-  gap: 7,
-  color: '#ece0cd',
-  padding: '6px 8px',
-}
-
-const sideBtnLabel: React.CSSProperties = {
-  fontSize: 12,
-  letterSpacing: '0.04em',
-  color: '#8a7d6a',
 }
 
 const micBtn = (connected: boolean, connecting: boolean): React.CSSProperties => ({
