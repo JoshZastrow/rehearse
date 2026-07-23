@@ -9,11 +9,16 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
-
-from anthropic import AsyncAnthropic
+from typing import TYPE_CHECKING
 
 from rehearse.storage import LocalFilesystemStore
 from rehearse.types import ProsodyFrame, Session, TranscriptFrame
+
+if TYPE_CHECKING:
+    # Only for type hints — the live agent imports this module (via the
+    # phases → session chain) but never runs synthesis, so `anthropic` must not
+    # be a hard import-time dependency of the real-time call path.
+    from anthropic import AsyncAnthropic
 
 
 class SessionSynthesizer:
@@ -46,6 +51,8 @@ class SessionSynthesizer:
 
     def _client_lazy(self) -> AsyncAnthropic:
         """Create the Anthropic client the first time synthesis needs it."""
+        from anthropic import AsyncAnthropic  # noqa: PLC0415
+
         if self._client is None:
             self._client = AsyncAnthropic(api_key=self._anthropic_api_key)
         return self._client
