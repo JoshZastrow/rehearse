@@ -32,9 +32,10 @@ const LIVEKIT_URL = import.meta.env.VITE_LIVEKIT_URL ?? ''
 const TOKEN_ENDPOINT = import.meta.env.VITE_TOKEN_ENDPOINT ?? '/api/token'
 // Sibling of the token endpoint: /api/livekit/token → /api/livekit/warm.
 const WARM_ENDPOINT = TOKEN_ENDPOINT.replace(/token$/, 'warm')
-// Guard against a dead endpoint: give the model past its ~90s connect budget
-// before we give up and show an error.
-const WARMUP_TIMEOUT_MS = 100_000
+// Guard against a dead endpoint. Must exceed the agent's model-connect budget
+// (150s) so a slow cold start resolves to "ready" before we give up — with
+// margin for the handshake + provider_ready delivery.
+const WARMUP_TIMEOUT_MS = 180_000
 
 interface TokenResponse {
   token: string
@@ -157,7 +158,9 @@ export function useVoiceSession(): VoiceSession {
         }
       })
 
-      await room.connect(url ?? LIVEKIT_URL, token)
+      // `||` not `??`: the token server may return url:"" (LIVEKIT_URL unset), and
+      // an empty string must fall back to the client's VITE_LIVEKIT_URL, not be used.
+      await room.connect(url || LIVEKIT_URL, token)
       const micPub = await room.localParticipant.setMicrophoneEnabled(true)
 
       // Measure local mic level via Web Audio API

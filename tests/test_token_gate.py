@@ -274,6 +274,25 @@ def test_warm_gated_on_billing() -> None:
     assert prober.urls == []  # no GPU spin-up for non-paying users
 
 
+def test_dev_billing_bypass_allows_unbilled_user() -> None:
+    pytest.importorskip("livekit.api", reason="livekit-api not installed")
+    # Empty store (no billing_ready user) + the dev flag → a token is still issued.
+    # Auth still applies; only the billing gate is bypassed. Default-off behaviour
+    # (empty store → 402) is covered by test_402_when_no_user_record.
+    client = _client(
+        _FakeVerifier(uid="user_dev"), InMemoryBillingStore(), dev_allow_all_billing=True
+    )
+    resp = client.get(_ENDPOINT, headers={"Authorization": "Bearer good"})
+    assert resp.status_code == 200
+    assert resp.json()["token"]
+
+
+def test_dev_billing_bypass_still_requires_auth() -> None:
+    # The bypass is billing-only — an unauthenticated request is still 401.
+    client = _client(_FakeVerifier(), InMemoryBillingStore(), dev_allow_all_billing=True)
+    assert client.get(_ENDPOINT).status_code == 401
+
+
 def test_warm_no_endpoint_configured() -> None:
     prober = _RecordingProber()
     client = _warm_client(prober, interactive_provider_endpoint="")

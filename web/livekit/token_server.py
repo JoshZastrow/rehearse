@@ -37,6 +37,8 @@ Configuration (env):
   INTERACTIVE_PROVIDER_ENDPOINT          model ws endpoint; /warm derives its
                                          /health URL to trigger the cold start
   WARM_TIMEOUT_SECONDS                   /warm health-probe timeout (default 90)
+  BILLING_DEV_ALLOW_ALL                  DEV ONLY: 1 → bypass the billing gate for
+                                         any authenticated user (never in prod)
   TOKEN_SERVER_PORT                      dev server port (default 8765)
 
 The app is built by `create_app(verifier, store, config)` so tests inject a fake
@@ -45,6 +47,7 @@ verifier + `InMemoryBillingStore` and never touch Clerk, a DB, or the network.
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
 import threading
@@ -73,6 +76,8 @@ from rehearse.auth.clerk import (  # noqa: E402
 from rehearse.auth.rooms import clerk_id_from_room, make_room_name  # noqa: E402,F401
 from rehearse.billing.store import BillingStore, build_billing_store  # noqa: E402
 
+log = logging.getLogger("rehearse.token_server")
+
 
 @dataclass
 class TokenServerConfig:
@@ -94,6 +99,10 @@ class TokenServerConfig:
     # is a no-op.
     interactive_provider_endpoint: str = ""
     warm_timeout_seconds: float = 90.0
+    # DEV ONLY: treat any authenticated user as billing_ready, bypassing the
+    # payment gate. For local smoke tests without Stripe/Postgres. Off by default;
+    # must never be set in production.
+    dev_allow_all_billing: bool = False
 
     @classmethod
     def from_env(cls) -> TokenServerConfig:
@@ -108,6 +117,8 @@ class TokenServerConfig:
             agent_dispatch_url=os.environ.get("AGENT_DISPATCH_URL", ""),
             interactive_provider_endpoint=os.environ.get("INTERACTIVE_PROVIDER_ENDPOINT", ""),
             warm_timeout_seconds=float(os.environ.get("WARM_TIMEOUT_SECONDS", "90")),
+            dev_allow_all_billing=os.environ.get("BILLING_DEV_ALLOW_ALL", "").lower()
+            in ("1", "true"),
         )
 
 
@@ -208,6 +219,12 @@ def create_app(
         # up?" check — CI and the local Playwright config poll this instead.
         return {"status": "ok"}
 
+    if config.dev_allow_all_billing:
+        log.warning(
+            "⚠️  BILLING_DEV_ALLOW_ALL is ON — the payment gate is bypassed for "
+            "every authenticated user. DEV ONLY; never enable this in production."
+        )
+
     async def _gate(authorization: str | None) -> str:
         """Auth + rate-limit + billing gate shared by /token and /warm.
 
@@ -227,6 +244,15 @@ def create_app(
             raise HTTPException(status_code=401, detail="invalid token") from exc
         if not limiter.allow(clerk_user_id):
             raise HTTPException(status_code=429, detail="rate limited")
+        if config.dev_allow_all_billing:
+            # DEV bypass: authenticated, but skip the payment gate. Loud on every
+            # request so it can't quietly ship to prod.
+            log.warning(
+                "BILLING BYPASS active (BILLING_DEV_ALLOW_ALL) — %s treated as "
+                "billing_ready. DEV ONLY; must not be set in production.",
+                clerk_user_id,
+            )
+            return clerk_user_id
         user = await asyncio.to_thread(store.get_user, clerk_user_id)
         if user is None or not user.billing_ready:
             raise HTTPException(status_code=402, detail="billing not set up")

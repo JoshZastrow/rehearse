@@ -62,7 +62,7 @@ class ModalInteractiveBackend:
     async def __aexit__(self, *args: object) -> None:
         await self.close()
 
-    _CONNECT_ATTEMPTS = 18   # 18 × 5s = 90s total — covers Modal's ~60s GPU cold start
+    _CONNECT_ATTEMPTS = 30   # 30 × 5s = 150s total — covers a worst-case cold GPU
     _CONNECT_RETRY_DELAY = 5.0  # seconds between retries
 
     async def start(self, session_id: str, bus: FrameBus) -> None:

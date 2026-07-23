@@ -201,9 +201,13 @@ async def serve_room(room_name: str) -> None:
     log.info("connecting to LiveKit room '%s' at %s", room_name, lk_url)
     await room.connect(lk_url, token)
     log.info("connected — waiting for a caller")
-    # Disconnect on any exit, including a shutdown cancel that lands while the
-    # agent is idle in the room waiting for the next caller (before serve_session
-    # owns the room) — otherwise the killed peer DTLS-times-out server-side.
+    # Once connected, the room holds file descriptors. serve_session() owns the
+    # teardown for the happy path, but a failure during the setup below (e.g. a
+    # transient OSError writing the manifest) would leave the room connected and
+    # leak its FDs — which compounds across calls in the local single-process
+    # agent. Tear it down explicitly if setup fails before serve_session takes over.
+    # (A shutdown cancel while idle in _wait_for_participant raises CancelledError,
+    # a BaseException, so this also covers the graceful-teardown-on-SIGINT case.)
     try:
         await _wait_for_participant(room)
 
@@ -224,9 +228,8 @@ async def serve_room(room_name: str) -> None:
 
         # End the inbound stream promptly when the caller leaves, so the session
         # completes even if the audio-track end event is delayed. Without this the
-        # session lingers, swallows the next caller's audio, and the resident loop
-        # never gets to serve call #2 (observed: send_after_close_dropped on the
-        # prior session id, then a dtls timeout for the new participant).
+        # session lingers and swallows the next caller's audio (observed:
+        # send_after_close_dropped on the prior session id, then a dtls timeout).
         @room.on("participant_disconnected")
         def _on_caller_left(participant: object) -> None:  # noqa: ANN401
             log.info("caller left — closing stream")
@@ -235,8 +238,8 @@ async def serve_room(room_name: str) -> None:
         backend = ModalInteractiveBackend(endpoint) if endpoint else None
 
         # Billing context: the token server mints the room as rehearse-<uid>-<uuid>,
-        # so the clerk_user_id rides in on the room name. Look up the Stripe customer
-        # for the meter event. Unset DATABASE_URL → in-memory store (no-op billing).
+        # so the clerk_user_id rides in on the room name. Look up the Stripe
+        # customer for the meter event. Unset DATABASE_URL → in-memory (no-op).
         from rehearse.auth.rooms import clerk_id_from_room  # noqa: PLC0415
         from rehearse.billing.store import build_billing_store  # noqa: PLC0415
 
@@ -255,8 +258,9 @@ async def serve_room(room_name: str) -> None:
             clerk_user_id=clerk_user_id,
             stripe_customer_id=stripe_customer_id,
         )
-    finally:
+    except BaseException:
         await _disconnect(room)
+        raise
 
 
 def _launch_serve_room(room_name: str) -> None:

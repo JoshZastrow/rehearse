@@ -146,10 +146,15 @@ _livekit-server: ## start livekit-server --dev on ws://localhost:7880 (install: 
 	@livekit-server --dev --bind 0.0.0.0 --logging.level warn 2>&1 | grep --line-buffered -v "error reading data channel"
 
 _token-server: ## start LiveKit JWT token server on :8765 (dispatches agent on :8766)
-	AGENT_DISPATCH_URL=http://localhost:8766 uv run python web/livekit/token_server.py
+	AGENT_DISPATCH_URL=http://localhost:8766 ALLOWED_ORIGINS=http://localhost:3000 \
+	  LIVEKIT_URL=ws://localhost:7880 BILLING_DEV_ALLOW_ALL=1 \
+	  uv run python web/livekit/token_server.py
 
 _rehearse-web-agent: ## start the agent dispatch service on :8766 (joins each per-session room)
-	uv run python web/livekit/agent/agent.py
+	# Raise the open-files ceiling: the local single-process agent runs every
+	# call's LiveKit sockets in one process, and macOS defaults are low. (In prod
+	# each call is its own Modal container, so this is a local-only concern.)
+	ulimit -n 8192; uv run python web/livekit/agent/agent.py
 
 _rehearse-web-app:
 	cd web/livekit/app && npm run dev
