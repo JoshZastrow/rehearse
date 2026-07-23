@@ -25,7 +25,7 @@ import websockets.exceptions
 
 from rehearse.backends.base import PersonaSpec
 from rehearse.bus import FrameBus
-from rehearse.frames import AudioChunk, EndOfCall, ProsodyEvent, TranscriptDelta
+from rehearse.frames import AudioChunk, EndOfCall, ProsodyEvent, ProviderReady, TranscriptDelta
 from rehearse.types import ProsodyScores, Speaker
 
 if TYPE_CHECKING:
@@ -62,7 +62,7 @@ class ModalInteractiveBackend:
     async def __aexit__(self, *args: object) -> None:
         await self.close()
 
-    _CONNECT_ATTEMPTS = 18   # 18 × 5s = 90s total — covers Modal's ~60s GPU cold start
+    _CONNECT_ATTEMPTS = 30   # 30 × 5s = 150s total — covers a worst-case cold GPU
     _CONNECT_RETRY_DELAY = 5.0  # seconds between retries
 
     async def start(self, session_id: str, bus: FrameBus) -> None:
@@ -94,6 +94,11 @@ class ModalInteractiveBackend:
             return
         await self._ws.send(json.dumps({"type": "start", "session_id": session_id}))
         self._recv_task = asyncio.create_task(self._recv_loop(), name=f"modal-recv-{session_id}")
+        # The socket only opens once the model server has finished loading, so a
+        # successful connect is the end of the scale-to-zero cold start: tell the
+        # UI the provider is ready to talk (forwarded to the browser as
+        # {"type": "provider_ready"} by the LiveKit datachannel bridge).
+        await bus.publish(ProviderReady(session_id=session_id, ts=time.time()))
         log.info("modal_interactive_backend.started", session_id=session_id, endpoint=self._endpoint)
 
     async def _send(self, payload: bytes | str) -> None:

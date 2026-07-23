@@ -1,4 +1,4 @@
-.PHONY: help init serve serve-memory setup setup-honcho setup-judge deploy-judge smoke-judge deploy-interactive smoke-interactive eval-list eval-voice-replay eval-voice-replay-live eval-voice-replay-dogfood eval-voice-smoke eval-voice-smoke-live eval-voice-rollout eval-voice-rollout-live eval-voice-rollout-audio eval-persona-routing eval-watch nightly-stability test lint rehearse-web _rehearse-web-agent _rehearse-web-app _livekit-server _token-server test-web test-livekit test-livekit-live
+.PHONY: help init serve serve-memory setup setup-honcho setup-judge deploy-judge smoke-judge deploy-interactive smoke-interactive sync-secrets deploy-web eval-list eval-voice-replay eval-voice-replay-live eval-voice-replay-dogfood eval-voice-smoke eval-voice-smoke-live eval-voice-rollout eval-voice-rollout-live eval-voice-rollout-audio eval-persona-routing eval-watch nightly-stability test lint rehearse-web _rehearse-web-agent _rehearse-web-app _livekit-server _token-server test-web test-livekit test-livekit-live
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk -F':.*?## ' '{printf "  %-28s %s\n", $$1, $$2}'
@@ -81,6 +81,17 @@ deploy-annotate: ## deploy session annotator (Whisper alignment) to Modal GPU (A
 	@echo ""
 	@echo "Deployed. No env vars required — called internally after each call."
 
+sync-secrets: ## push envs/prod.env into the `rehearse-web` Modal secret (no dashboard)
+	@test -f envs/prod.env || { echo "envs/prod.env not found — cp envs/prod.env.example envs/prod.env and fill it in"; exit 1; }
+	modal secret create rehearse-web --force $$(grep -vE '^[[:space:]]*#|^[[:space:]]*$$' envs/prod.env | xargs)
+	@echo "→ synced envs/prod.env into Modal secret 'rehearse-web' (values with spaces need manual quoting)"
+
+deploy-web: ## deploy token server + agent (CPU, scale-to-zero) to Modal
+	modal deploy infra/web.py
+	@echo ""
+	@echo "Deployed rehearse-web. Copy the token_server URL printed above and set the"
+	@echo "frontend VITE_TOKEN_ENDPOINT to  <that-url>/api/livekit/token"
+
 eval-persona-routing: ## 3-scenario persona routing eval (requires Modal judge + Honcho)
 	uv run pytest tests/eval/test_persona_voice_routing_eval.py \
 	  -v -m "live_api and live_honcho" --timeout=180
@@ -134,11 +145,16 @@ rehearse-web: ## start livekit-server + token server + agent + Vite dev server (
 _livekit-server: ## start livekit-server --dev on ws://localhost:7880 (install: brew install livekit)
 	@livekit-server --dev --bind 0.0.0.0 --logging.level warn 2>&1 | grep --line-buffered -v "error reading data channel"
 
-_token-server: ## start LiveKit JWT token server on http://localhost:8765
-	uv run python web/livekit/token_server.py
+_token-server: ## start LiveKit JWT token server on :8765 (dispatches agent on :8766)
+	AGENT_DISPATCH_URL=http://localhost:8766 ALLOWED_ORIGINS=http://localhost:3000 \
+	  LIVEKIT_URL=ws://localhost:7880 BILLING_DEV_ALLOW_ALL=1 \
+	  uv run python web/livekit/token_server.py
 
-_rehearse-web-agent:
-	uv run python web/livekit/agent/agent.py
+_rehearse-web-agent: ## start the agent dispatch service on :8766 (joins each per-session room)
+	# Raise the open-files ceiling: the local single-process agent runs every
+	# call's LiveKit sockets in one process, and macOS defaults are low. (In prod
+	# each call is its own Modal container, so this is a local-only concern.)
+	ulimit -n 8192; uv run python web/livekit/agent/agent.py
 
 _rehearse-web-app:
 	cd web/livekit/app && npm run dev

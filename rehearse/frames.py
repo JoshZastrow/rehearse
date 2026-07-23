@@ -82,6 +82,21 @@ class IntakeComplete(Strict):
     error: str | None = None
 
 
+class ProviderReady(Strict):
+    """Signal that the interactive model is connected and ready to converse.
+
+    Published by the interactive backend the moment its websocket to the provider
+    is established — which, with the scale-to-zero Modal endpoint, is the end of
+    the ~60s cold start (the model server only accepts the socket once it has
+    finished loading + warming). The LiveKit datachannel bridge forwards it to the
+    browser as ``{"type": "provider_ready"}`` so the UI can leave its warming-up
+    state and reveal the live call.
+    """
+
+    session_id: str
+    ts: float
+
+
 class SessionStoredEvent(Strict):
     """Signal that a full-duplex session was persisted to the Modal Volume.
 
@@ -104,5 +119,6 @@ Frame: TypeAlias = (
     | EndOfCall
     | ConsentResolved
     | IntakeComplete
+    | ProviderReady
     | SessionStoredEvent
 )

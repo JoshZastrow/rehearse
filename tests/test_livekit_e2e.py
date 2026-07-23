@@ -178,7 +178,7 @@ async def test_livekit_hermetic_call_lifecycle(tmp_path: Path) -> None:
 def _load_agent_module():
     """Import web/livekit/agent/agent.py by path (it is not an installed package).
 
-    Safe because agent.py's livekit imports are lazy (inside run_call) and its
+    Safe because agent.py's livekit imports are lazy (inside serve_room) and its
     side effects (load_dotenv / basicConfig) live in main(), so import is clean.
     """
     import importlib.util
@@ -296,39 +296,37 @@ async def test_livekit_agent_wait_for_participant_blocks_until_join(
     await asyncio.wait_for(task, timeout=2.0)
 
 
-async def test_livekit_agent_run_agent_respawns_between_calls(
+async def test_dispatch_isolates_a_crashed_call(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """run_agent() serves call after call, surviving a crashed call.
+    """A crash in one dispatched call must not take down the dispatch service or
+    the other in-flight calls.
 
-    The resident loop replaces the old one-shot agent (one call per
-    `make rehearse-web`): a finished or crashed call must be followed by
-    another run_call(), without a process restart.
+    The token server POSTs each per-session room to /dispatch, which schedules an
+    independent serve_room task per call. _launch_serve_room swallows a crash so
+    one bad call never blocks a later one.
     """
     agent_mod = _load_agent_module()
-    monkeypatch.setattr(agent_mod, "_RESPAWN_DELAY_S", 0.01)
 
-    calls: list[int] = []
+    served: list[str] = []
 
-    async def fake_run_call() -> None:
-        calls.append(len(calls))
-        if len(calls) == 1:
+    async def fake_serve_room(room_name: str) -> None:
+        served.append(room_name)
+        if room_name == "rehearse-boom-0000":
             raise RuntimeError("boom — first call crashes")
 
-    monkeypatch.setattr(agent_mod, "run_call", fake_run_call)
+    monkeypatch.setattr(agent_mod, "serve_room", fake_serve_room)
 
-    task = asyncio.create_task(agent_mod.run_agent())
-    try:
-        for _ in range(200):
-            if len(calls) >= 3:
-                break
-            await asyncio.sleep(0.01)
-    finally:
-        task.cancel()
-        with suppress(asyncio.CancelledError):
-            await task
+    agent_mod._launch_serve_room("rehearse-boom-0000")
+    agent_mod._launch_serve_room("rehearse-ok-0001")
+    for _ in range(200):
+        if len(served) >= 2:
+            break
+        await asyncio.sleep(0.01)
 
-    assert len(calls) >= 3, f"loop served only {len(calls)} call(s) — no respawn"
+    assert served == ["rehearse-boom-0000", "rehearse-ok-0001"], (
+        f"a crashed call blocked later dispatches — served {served}"
+    )
 
 
 # ---------------------------------------------------------------------------
