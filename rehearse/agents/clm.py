@@ -12,12 +12,17 @@ import json
 import time
 from collections.abc import AsyncIterator, Callable
 from datetime import datetime
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
-import anthropic
 import structlog
-from anthropic import AsyncAnthropic
 from fastapi import FastAPI, Header, HTTPException, Query
+
+if TYPE_CHECKING:
+    # Type-only: the live agent imports this module via rehearse.agents but never
+    # calls the CLM (Hume webhook) path, so `anthropic` must not be a hard
+    # import-time dependency of the real-time call — it uses the interactive
+    # (PersonaPlex) backend instead.
+    from anthropic import AsyncAnthropic
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -100,6 +105,8 @@ async def validate_anthropic_credentials(client: AsyncAnthropic, model: str) -> 
     transient errors (network, 5xx) are logged and tolerated — the runtime
     can still boot, the in-call fallback line absorbs them.
     """
+    import anthropic  # noqa: PLC0415
+
     try:
         await client.messages.count_tokens(
             model=model,
