@@ -70,3 +70,4 @@ tests/e2e/sessions/*
 
 # Local handoff artifacts (git bundle/patch) — not part of the repo
 /_handoff/
+envs/prod.env
